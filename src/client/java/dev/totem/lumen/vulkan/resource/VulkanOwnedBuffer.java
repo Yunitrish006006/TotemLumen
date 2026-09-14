@@ -14,13 +14,7 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.LongBuffer;
 
-/**
- * A VkBuffer allocation owned exclusively by Totem Lumen while borrowing Minecraft's existing
- * Vulkan device and VMA allocator.
- *
- * <p>This class never destroys the device or allocator. Callers must close every owned buffer before
- * Minecraft tears down its Vulkan backend.</p>
- */
+/** A VkBuffer allocation owned by Totem Lumen while borrowing Minecraft's device/VMA allocator. */
 public final class VulkanOwnedBuffer implements AutoCloseable {
     private final long vma;
     private final long vkBuffer;
@@ -49,24 +43,21 @@ public final class VulkanOwnedBuffer implements AutoCloseable {
         this.hostVisible = hostVisible;
     }
 
-    /** Device-preferred buffer used as a compute storage buffer and transfer destination. */
+    /** Device-preferred compute storage buffer, also usable as copy source/destination. */
     public static VulkanOwnedBuffer createStorage(VulkanDevice device, long size) {
         return create(
                 device,
                 size,
-                VK10.VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK10.VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                VK10.VK_BUFFER_USAGE_STORAGE_BUFFER_BIT
+                        | VK10.VK_BUFFER_USAGE_TRANSFER_DST_BIT
+                        | VK10.VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                 Vma.VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE,
                 0,
                 false
         );
     }
 
-    /**
-     * Persistently mapped staging buffer optimized for sequential CPU writes.
-     *
-     * <p>VMA decides the actual memory type. On unified-memory GPUs such as Apple Silicon this can
-     * naturally resolve to shared physical memory while preserving the same Vulkan API path.</p>
-     */
+    /** Persistently mapped sequential-write staging buffer. */
     public static VulkanOwnedBuffer createUpload(VulkanDevice device, long size) {
         return create(
                 device,
@@ -74,6 +65,19 @@ public final class VulkanOwnedBuffer implements AutoCloseable {
                 VK10.VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                 Vma.VMA_MEMORY_USAGE_AUTO,
                 Vma.VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT
+                        | Vma.VMA_ALLOCATION_CREATE_MAPPED_BIT,
+                true
+        );
+    }
+
+    /** Persistently mapped CPU-readback buffer. */
+    public static VulkanOwnedBuffer createReadback(VulkanDevice device, long size) {
+        return create(
+                device,
+                size,
+                VK10.VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                Vma.VMA_MEMORY_USAGE_AUTO,
+                Vma.VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT
                         | Vma.VMA_ALLOCATION_CREATE_MAPPED_BIT,
                 true
         );
@@ -112,12 +116,7 @@ public final class VulkanOwnedBuffer implements AutoCloseable {
             VmaAllocationInfo resultInfo = VmaAllocationInfo.calloc(stack);
 
             int result = Vma.vmaCreateBuffer(
-                    device.vma(),
-                    bufferInfo,
-                    allocationInfo,
-                    bufferPointer,
-                    allocationPointer,
-                    resultInfo
+                    device.vma(), bufferInfo, allocationInfo, bufferPointer, allocationPointer, resultInfo
             );
             if (result != VK10.VK_SUCCESS) {
                 throw new IllegalStateException("vmaCreateBuffer failed with VkResult " + result);
@@ -127,17 +126,11 @@ public final class VulkanOwnedBuffer implements AutoCloseable {
             allocationHandle = allocationPointer.get(0);
             long mappedPointer = hostVisible ? resultInfo.pMappedData() : 0L;
             if (hostVisible && mappedPointer == 0L) {
-                throw new IllegalStateException("VMA created an upload buffer without a mapped pointer");
+                throw new IllegalStateException("VMA created a host-visible buffer without a mapped pointer");
             }
 
             return new VulkanOwnedBuffer(
-                    device.vma(),
-                    bufferHandle,
-                    allocationHandle,
-                    mappedPointer,
-                    size,
-                    usage,
-                    hostVisible
+                    device.vma(), bufferHandle, allocationHandle, mappedPointer, size, usage, hostVisible
             );
         } catch (Throwable failure) {
             if (bufferHandle != 0L) {
@@ -147,7 +140,6 @@ public final class VulkanOwnedBuffer implements AutoCloseable {
         }
     }
 
-    /** Returns a little-endian view over the persistent upload mapping. */
     public ByteBuffer mappedView() {
         ensureOpen();
         if (!hostVisible || mappedPointer == 0L) {
@@ -159,14 +151,16 @@ public final class VulkanOwnedBuffer implements AutoCloseable {
         return MemoryUtil.memByteBuffer(mappedPointer, Math.toIntExact(size)).order(ByteOrder.LITTLE_ENDIAN);
     }
 
-    /** Flushes host writes for non-coherent memory. Safe on coherent memory as well. */
     public void flush(long offset, long length) {
         ensureOpen();
-        if (!hostVisible) {
-            throw new IllegalStateException("Cannot flush a non-host-visible buffer");
-        }
-        checkRange(offset, length);
+        requireHostRange(offset, length);
         Vma.vmaFlushAllocation(vma, allocation, offset, length);
+    }
+
+    public void invalidate(long offset, long length) {
+        ensureOpen();
+        requireHostRange(offset, length);
+        Vma.vmaInvalidateAllocation(vma, allocation, offset, length);
     }
 
     public long vkBuffer() {
@@ -197,6 +191,13 @@ public final class VulkanOwnedBuffer implements AutoCloseable {
         }
         closed = true;
         Vma.vmaDestroyBuffer(vma, vkBuffer, allocation);
+    }
+
+    private void requireHostRange(long offset, long length) {
+        if (!hostVisible) {
+            throw new IllegalStateException("Buffer is not host-visible");
+        }
+        checkRange(offset, length);
     }
 
     private void checkRange(long offset, long length) {

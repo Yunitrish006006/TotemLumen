@@ -7,42 +7,35 @@ Status: **compile-verified**; native Vulkan and Apple Silicon runtime validation
 Status: **implementation complete**; runtime validation pending.
 
 ## P2 - Materials and CPU scene
-Status: **compile/test complete; runtime validation pending**
-
-- Minecraft-independent material registry and 16x16x16 CPU voxel sections.
-- Incremental dirty-section rebuilding capped at 2 sections per extraction frame.
-- No forced chunk loads.
-- All-air rebuild/removal semantics and stale-world cleanup.
-- GPU-facing section/material ABI has unit-tested packers.
+Status: **compile/test complete**; runtime validation pending.
 
 ## P3 - Vulkan GPU scene
-Status: **foundation in progress**
+Status: **interop/memory/command foundation compile-verified; runtime validation pending**
 
 Implemented:
-- One isolated Mixin accessor exposes Minecraft's already-created `GpuDeviceBackend`.
-- `MinecraftVulkanBridge` accepts only `VulkanDevice`; Totem Lumen never creates a second VkDevice.
-- Driver/device/queue/VMA diagnostics without exposing native handles to ordinary renderer code.
-- Runtime core-Vulkan limit probe for storage-buffer size and compute workgroup limits.
-- Hardware-RT extension state is informational/optional; compute RT does not depend on it.
-- Stable GPU ABI: 16 KiB uint32 material-ID payload per populated section and 32-byte material metadata records.
-- Stable fixed-size GPU section-slot allocator with revision filtering and deterministic incremental updates.
-- Native seam ownership rules documented in `docs/VULKAN_INTEROP.md`.
-
-Next:
-- Totem-Lumen-owned storage/staging buffer resource types using Minecraft's existing Vulkan device/VMA.
-- Bounded upload queue from `RayScene` section revisions to GPU slots.
-- Coordinate-to-slot GPU lookup structure for P4 traversal.
-- Timestamp/debug-label instrumentation.
-
-Important: public Blaze3D 26.2 has no compute-dispatch abstraction, so P4 compute dispatch will live behind this same narrow Vulkan seam. No OpenGL path will be added.
+- Borrow Minecraft's existing `VulkanDevice`; never create a second VkDevice/MoltenVK device.
+- Core limits and queue-family capability probing.
+- Stable section/material GPU ABI and slot allocator.
+- Totem-owned VMA storage/upload/readback buffers using Minecraft's allocator.
+- Totem-owned graphics-family command pool.
+- Compute command buffers are inserted into Minecraft's existing Vulkan submission timeline.
+- Minecraft GPU fences recycle command buffers without per-frame queue-idle waits.
+- CI publishes a development jar on every successful main build.
 
 ## P4 - Vulkan compute voxel traversal
-- Vulkan compute pipeline.
-- 3D DDA traversal.
-- Chunk/section empty-space skipping.
-- Debug output: hit distance, normal, material ID, voxel position, traversal step count.
+Status: **compute smoke test in progress**
 
-Exit criteria: center-screen debug rays match Minecraft blocks across chunk boundaries, negative coordinates, and world-height edges.
+First gate:
+- Runtime compile a tiny compute shader using shaderc already bundled by Minecraft 26.2.
+- Dispatch 256 uint writes into a storage buffer.
+- Barrier and copy to a mapped readback buffer.
+- Validate all values after Minecraft's GPU fence completes.
+- Same code path on native Vulkan and Apple Silicon/MoltenVK; no extra player install.
+
+After smoke test passes on both targets:
+- Replace fixed pattern kernel with 3D DDA voxel traversal.
+- Upload section coordinate -> slot lookup.
+- Debug output: hit distance, normal, material ID, voxel position, traversal step count.
 
 ## P5-P8 - Direct lighting
 - Debug visualization.

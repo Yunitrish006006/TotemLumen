@@ -12,14 +12,7 @@ import org.lwjgl.vulkan.VkCommandPoolCreateInfo;
 import java.nio.LongBuffer;
 import java.util.ArrayDeque;
 
-/**
- * Totem-Lumen-owned command pool for compute command buffers that are submitted by Minecraft's
- * existing VulkanCommandEncoder.
- *
- * <p>The pool is created for Minecraft's graphics queue family so no queue-family ownership
- * transfer is needed on the preferred path. Submitted buffers are recycled only after a Minecraft
- * GPU fence callback reports that the current submission has completed.</p>
- */
+/** Totem-Lumen-owned graphics-family command pool whose submissions stay on Minecraft's timeline. */
 public final class VulkanFrameCommandPool implements AutoCloseable {
     private final VulkanDevice device;
     private final long commandPool;
@@ -29,7 +22,6 @@ public final class VulkanFrameCommandPool implements AutoCloseable {
 
     public VulkanFrameCommandPool(VulkanDevice device) {
         this.device = device;
-
         try (MemoryStack stack = MemoryStack.stackPush()) {
             VkCommandPoolCreateInfo createInfo = VkCommandPoolCreateInfo.calloc(stack)
                     .sType$Default()
@@ -66,13 +58,17 @@ public final class VulkanFrameCommandPool implements AutoCloseable {
         }
     }
 
-    /**
-     * Recycles only after Minecraft's current GPU submission reaches a fence. No CPU wait occurs.
-     */
-    public synchronized void recycleAfterFence(VkCommandBuffer commandBuffer) {
+    public void recycleAfterFence(VkCommandBuffer commandBuffer) {
+        recycleAfterFence(commandBuffer, () -> { });
+    }
+
+    public synchronized void recycleAfterFence(VkCommandBuffer commandBuffer, Runnable afterRecycle) {
         ensureOpen();
         inFlight++;
-        RenderSystem.queueFencedTask(() -> recycleCompleted(commandBuffer));
+        RenderSystem.queueFencedTask(() -> {
+            recycleCompleted(commandBuffer);
+            afterRecycle.run();
+        });
     }
 
     private synchronized void recycleCompleted(VkCommandBuffer commandBuffer) {
@@ -80,7 +76,6 @@ public final class VulkanFrameCommandPool implements AutoCloseable {
         if (closed) {
             return;
         }
-
         int result = VK10.vkResetCommandBuffer(commandBuffer, 0);
         if (result != VK10.VK_SUCCESS) {
             throw new IllegalStateException("vkResetCommandBuffer failed with VkResult " + result);
@@ -92,19 +87,13 @@ public final class VulkanFrameCommandPool implements AutoCloseable {
         return inFlight;
     }
 
-    public synchronized int availableCount() {
-        return available.size();
-    }
-
     @Override
     public synchronized void close() {
         if (closed) {
             return;
         }
         if (inFlight != 0) {
-            throw new IllegalStateException(
-                    "Cannot destroy command pool while " + inFlight + " command buffer(s) are in flight"
-            );
+            throw new IllegalStateException("Cannot destroy command pool with in-flight command buffers: " + inFlight);
         }
         closed = true;
         available.clear();
