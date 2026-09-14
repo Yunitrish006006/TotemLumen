@@ -29,31 +29,48 @@ Apple M4 validation:
 - Storage buffer / compute limits pass baseline checks.
 
 ## P4 - Vulkan compute voxel traversal
-Status: **compute smoke test passed on Apple M4; real-world 3D DDA runtime validation in progress**
+Status: **COMPLETE on Apple M4 / MoltenVK baseline path**
 
-Completed gate:
-- Runtime compile a tiny compute shader using shaderc already bundled by Minecraft 26.2.
-- Dispatch 256 uint writes into a storage buffer.
-- Barrier and copy to a mapped readback buffer.
-- Validate all 256 values after Minecraft's GPU fence completes.
-- Apple M4 / MoltenVK result: **PASSED**.
-- Fixed descriptor update bug by explicitly setting `VkWriteDescriptorSet.descriptorCount(1)`.
+Validated:
+- shaderc -> SPIR-V -> Vulkan compute -> storage buffer -> barriers -> readback.
+- 256-value compute smoke test: **PASSED**.
+- Real Minecraft section upload into Vulkan storage buffers.
+- Negative-coordinate-safe section lookup.
+- 3D DDA voxel traversal.
+- Deterministic synthetic ray validation against a CPU-known target.
+- Apple M4 result: voxel `(-480, -48, 45)`, material `2`, normal `(0, 0, 1)`, distance `0.5`, steps `1`: **PASSED**.
+- Camera-center DDA diagnostic path is operational; a MISS is valid when looking at sky or outside the temporary 64-section debug upload.
 
-Current DDA gate:
-- Upload up to 64 real populated Minecraft sections into a compact Vulkan debug scene.
-- GPU performs negative-coordinate-safe section lookup and 3D DDA traversal.
-- Dispatch two rays:
-  - deterministic synthetic ray from an air voxel into an adjacent known-solid voxel;
-  - player camera-center ray for live diagnostics.
-- Read back and log hit/miss, voxel coordinates, material ID, face normal, distance, and traversal steps.
-- The synthetic ray must match the CPU-known target before P4 traversal is considered complete.
+Remaining architecture improvement (not a P4 blocker):
+- Replace temporary linear 64-section lookup with the permanent coordinate -> stable slot lookup before production-scale rendering.
 
-After DDA correctness passes:
-- Replace linear debug section lookup with the permanent coordinate -> stable slot lookup.
-- Add full-screen debug visualization for material ID / normal / distance / step heatmap.
+## P5 - Debug visualization
+Status: **implementation/CI complete; Apple M4 runtime validation in progress**
 
-## P5-P8 - Direct lighting
-- Debug visualization.
+P5A - full-frame DDA debug grid:
+- 160-pixel-wide low-resolution target preserving the current window aspect ratio.
+- One Vulkan compute invocation per debug pixel.
+- Full camera ray generation from extracted camera quaternion/FOV.
+- Debug shader modes implemented: normal, material ID, distance, traversal-step heatmap.
+- Current validation mode: normal.
+- One-time CPU readback is used only as a correctness gate; production hot path will remain GPU-only.
+- CI build: **PASSED**.
+
+P5B - texture/composite gate:
+- Vulkan compute writes an RGBA debug buffer.
+- `vkCmdCopyBufferToImage` copies directly into a Minecraft-owned `GpuTexture` backed by `VulkanGpuTexture`.
+- Texture remains in the Minecraft Vulkan device / submission timeline; no second device, surface, or swapchain.
+- `GpuTextureView` is displayed through Fabric 26.2 `HudElementRegistry` / `GuiGraphicsExtractor.blit`.
+- CI build: **PASSED**.
+- Runtime test currently uses a deterministic gradient to isolate texture/composite correctness from DDA correctness.
+
+Next after P5 runtime passes:
+- Wire the P5A DDA pixel buffer directly into the P5B texture path.
+- Add runtime mode switching for Normal / Material / Distance / Steps.
+- Make the debug frame update continuously with camera/scene changes.
+- Remove per-frame CPU readback.
+
+## P6-P8 - Direct lighting
 - Hard shadows.
 - Light culling/chunk light lists.
 - Emissive materials.
