@@ -1,16 +1,16 @@
 # Totem Lumen Roadmap
 
 ## P0 - Vulkan-only bootstrap
-Status: **compile-verified**; native Vulkan and Apple Silicon runtime validation pending.
+Status: **Apple Silicon runtime verified on Apple M4 / MoltenVK 1.4.2**; native Windows/Linux Vulkan validation still pending.
 
 ## P1 - Scene extraction
-Status: **implementation complete**; runtime validation pending.
+Status: **implementation complete and exercised in-world on Apple M4**; broader stress/runtime validation still pending.
 
 ## P2 - Materials and CPU scene
-Status: **compile/test complete**; runtime validation pending.
+Status: **compile/test complete and exercised in-world on Apple M4**; detailed material/scene correctness validation still pending.
 
 ## P3 - Vulkan GPU scene
-Status: **interop/memory/command foundation compile-verified; runtime validation pending**
+Status: **interop/memory/command foundation runtime-verified on Apple M4 / MoltenVK**
 
 Implemented:
 - Borrow Minecraft's existing `VulkanDevice`; never create a second VkDevice/MoltenVK device.
@@ -22,20 +22,35 @@ Implemented:
 - Minecraft GPU fences recycle command buffers without per-frame queue-idle waits.
 - CI publishes a development jar on every successful main build.
 
-## P4 - Vulkan compute voxel traversal
-Status: **compute smoke test in progress**
+Apple M4 validation:
+- Minecraft 26.2 Vulkan backend accepted.
+- MoltenVK 1.4.2 detected.
+- Graphics queue advertises compute support.
+- Storage buffer / compute limits pass baseline checks.
 
-First gate:
+## P4 - Vulkan compute voxel traversal
+Status: **compute smoke test passed on Apple M4; real-world 3D DDA runtime validation in progress**
+
+Completed gate:
 - Runtime compile a tiny compute shader using shaderc already bundled by Minecraft 26.2.
 - Dispatch 256 uint writes into a storage buffer.
 - Barrier and copy to a mapped readback buffer.
-- Validate all values after Minecraft's GPU fence completes.
-- Same code path on native Vulkan and Apple Silicon/MoltenVK; no extra player install.
+- Validate all 256 values after Minecraft's GPU fence completes.
+- Apple M4 / MoltenVK result: **PASSED**.
+- Fixed descriptor update bug by explicitly setting `VkWriteDescriptorSet.descriptorCount(1)`.
 
-After smoke test passes on both targets:
-- Replace fixed pattern kernel with 3D DDA voxel traversal.
-- Upload section coordinate -> slot lookup.
-- Debug output: hit distance, normal, material ID, voxel position, traversal step count.
+Current DDA gate:
+- Upload up to 64 real populated Minecraft sections into a compact Vulkan debug scene.
+- GPU performs negative-coordinate-safe section lookup and 3D DDA traversal.
+- Dispatch two rays:
+  - deterministic synthetic ray from an air voxel into an adjacent known-solid voxel;
+  - player camera-center ray for live diagnostics.
+- Read back and log hit/miss, voxel coordinates, material ID, face normal, distance, and traversal steps.
+- The synthetic ray must match the CPU-known target before P4 traversal is considered complete.
+
+After DDA correctness passes:
+- Replace linear debug section lookup with the permanent coordinate -> stable slot lookup.
+- Add full-screen debug visualization for material ID / normal / distance / step heatmap.
 
 ## P5-P8 - Direct lighting
 - Debug visualization.
