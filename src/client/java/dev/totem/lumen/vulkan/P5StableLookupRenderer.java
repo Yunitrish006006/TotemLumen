@@ -35,11 +35,12 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * Persistent P5-P8 renderer using stable section slots, hashed lookup and local light lists.
+ * Persistent P5-P9 renderer using stable section slots, hashed lookup and local light lists.
  *
  * <p>P5 supplies the live primary DDA image, P6 adds binary secondary-ray visibility, P7 extracts
- * emissive voxels into compact point-light records, and P8 carries material emissive RGB through
- * both local-light records and directly visible emissive surfaces.</p>
+ * emissive voxels into compact point-light records, P8 carries material emissive RGB through both
+ * local-light records and directly visible emissive surfaces, and P9 adds deterministic multi-ray
+ * directional-light visibility for soft-shadow validation without temporal noise.</p>
  */
 public final class P5StableLookupRenderer {
     private static final int MAX_SECTIONS = 64;
@@ -64,6 +65,8 @@ public final class P5StableLookupRenderer {
     private static final int MAX_STEPS = 512;
     private static final float MAX_DISTANCE = 256.0f;
     private static final int CAMERA_UPLOAD_WORDS = 23;
+    private static final int SOFT_SHADOW_SAMPLES = 4;
+    private static final float SOFT_SHADOW_ANGULAR_RADIUS = 0.055f;
 
     private static final GpuSectionSlotAllocator SLOT_ALLOCATOR = new GpuSectionSlotAllocator(MAX_SECTIONS);
     private static final Set<SectionKey> RESIDENT_KEYS = new HashSet<>();
@@ -89,6 +92,13 @@ public final class P5StableLookupRenderer {
             const uint MATERIAL_EMISSION_BASE = 265344u;
             const uint MATERIAL_EMISSION_WORDS_PER_RECORD = 4u;
             const vec3 DEBUG_LIGHT_DIRECTION = normalize(vec3(0.45, 0.85, 0.30));
+            const float SOFT_SHADOW_ANGULAR_RADIUS = 0.055;
+            const vec2 SOFT_SHADOW_OFFSETS[4] = vec2[4](
+                vec2(0.32, 0.08),
+                vec2(-0.26, 0.31),
+                vec2(0.14, -0.36),
+                vec2(-0.30, -0.19)
+            );
 
             struct HitResult {
                 uint hit;
@@ -281,6 +291,48 @@ public final class P5StableLookupRenderer {
                 return packRgba(materialColor(hit.materialId) * lighting, 255u);
             }
 
+            float softDirectionalVisibility(vec3 hitPoint, vec3 surfaceNormal) {
+                vec3 helper = abs(DEBUG_LIGHT_DIRECTION.y) < 0.95
+                        ? vec3(0.0, 1.0, 0.0)
+                        : vec3(1.0, 0.0, 0.0);
+                vec3 tangent = normalize(cross(helper, DEBUG_LIGHT_DIRECTION));
+                vec3 bitangent = normalize(cross(DEBUG_LIGHT_DIRECTION, tangent));
+                float visibleSamples = 0.0;
+                float validSamples = 0.0;
+
+                for (int sampleIndex = 0; sampleIndex < 4; sampleIndex++) {
+                    vec2 offset = SOFT_SHADOW_OFFSETS[sampleIndex];
+                    vec3 sampleDirection = normalize(
+                        DEBUG_LIGHT_DIRECTION
+                        + tangent * (offset.x * SOFT_SHADOW_ANGULAR_RADIUS)
+                        + bitangent * (offset.y * SOFT_SHADOW_ANGULAR_RADIUS)
+                    );
+                    if (dot(surfaceNormal, sampleDirection) <= 0.0) continue;
+
+                    validSamples += 1.0;
+                    vec3 shadowOrigin = hitPoint + surfaceNormal * 0.025 + sampleDirection * 0.01;
+                    HitResult blocker = traceRay(shadowOrigin, sampleDirection);
+                    if (blocker.hit == 0u) visibleSamples += 1.0;
+                }
+
+                return validSamples > 0.0 ? visibleSamples / validSamples : 0.0;
+            }
+
+            uint softShadowColor(HitResult hit, vec3 primaryOrigin, vec3 primaryDirection) {
+                vec3 surfaceNormal = resolvedSurfaceNormal(hit, primaryDirection);
+                float nDotL = max(dot(surfaceNormal, DEBUG_LIGHT_DIRECTION), 0.0);
+                float visibility = 0.0;
+                if (nDotL > 0.0) {
+                    vec3 hitPoint = primaryOrigin + primaryDirection * hit.distance;
+                    visibility = softDirectionalVisibility(hitPoint, surfaceNormal);
+                }
+
+                vec4 surfaceEmission = materialEmission(hit.materialId);
+                vec3 emitted = surfaceEmission.rgb * surfaceEmission.a * 1.6;
+                float lighting = 0.12 + 0.88 * nDotL * visibility;
+                return packRgba(materialColor(hit.materialId) * lighting + emitted, 255u);
+            }
+
             uint localLightColor(HitResult hit, vec3 primaryOrigin, vec3 primaryDirection, bool emissiveMode) {
                 int slot = sectionSlotForVoxel(hit.voxel);
                 vec4 surfaceEmission = emissiveMode ? materialEmission(hit.materialId) : vec4(0.0);
@@ -361,7 +413,10 @@ public final class P5StableLookupRenderer {
                 if (mode == 5u) {
                     return localLightColor(hit, primaryOrigin, primaryDirection, false);
                 }
-                return localLightColor(hit, primaryOrigin, primaryDirection, true);
+                if (mode == 6u) {
+                    return localLightColor(hit, primaryOrigin, primaryDirection, true);
+                }
+                return softShadowColor(hit, primaryOrigin, primaryDirection);
             }
 
             void main() {
@@ -411,6 +466,7 @@ public final class P5StableLookupRenderer {
         DISTANCE(2, "Distance"),
         STEPS(3, "Steps"),
         HARD_SHADOW(4, "Hard Shadow"),
+        SOFT_SHADOW(7, "Soft Shadow"),
         LOCAL_LIGHTS(5, "Local Lights"),
         EMISSIVE_MATERIALS(6, "Emissive Materials");
 
@@ -428,13 +484,14 @@ public final class P5StableLookupRenderer {
     }
 
     private static Resources resources;
-    private static DebugMode mode = DebugMode.EMISSIVE_MATERIALS;
+    private static DebugMode mode = DebugMode.SOFT_SHADOW;
     private static boolean inFlight;
     private static boolean ready;
     private static boolean resetRequested;
     private static boolean firstFrameLogged;
     private static boolean p7Logged;
     private static boolean p8Logged;
+    private static boolean p9Logged;
     private static boolean sceneUploadRequired = true;
     private static long sceneSignature = Long.MIN_VALUE;
     private static long lastSubmittedFrame = -1;
@@ -515,7 +572,7 @@ public final class P5StableLookupRenderer {
         } catch (Throwable failure) {
             inFlight = false;
             sceneUploadRequired |= fullSceneUpload;
-            TotemLumenClient.LOGGER.error("P8 emissive-material frame submission failed", failure);
+            TotemLumenClient.LOGGER.error("P9 soft-shadow frame submission failed", failure);
         }
     }
 
@@ -609,6 +666,15 @@ public final class P5StableLookupRenderer {
                     mode.label()
             );
         }
+        if (!p9Logged) {
+            p9Logged = true;
+            TotemLumenClient.LOGGER.info(
+                    "P9 soft shadows READY: samples={}, angularRadius={}, mode={}",
+                    SOFT_SHADOW_SAMPLES,
+                    SOFT_SHADOW_ANGULAR_RADIUS,
+                    mode.label()
+            );
+        }
         if (resetRequested) {
             resetRequested = false;
             destroyResourcesIfSafe();
@@ -673,6 +739,7 @@ public final class P5StableLookupRenderer {
         lastEmissiveMaterialCount = 0;
         p7Logged = false;
         p8Logged = false;
+        p9Logged = false;
     }
 
     private static void packHeader(
@@ -957,7 +1024,7 @@ public final class P5StableLookupRenderer {
         try {
             closeable.close();
         } catch (Exception exception) {
-            TotemLumenClient.LOGGER.warn("Failed to close P8 emissive-material resource", exception);
+            TotemLumenClient.LOGGER.warn("Failed to close P9 soft-shadow resource", exception);
         }
     }
 
@@ -1013,17 +1080,17 @@ public final class P5StableLookupRenderer {
             try {
                 upload = VulkanOwnedBuffer.createUpload(device, totalBytes);
                 scene = VulkanOwnedBuffer.createStorage(device, totalBytes);
-                program = VulkanComputeProgram.create(device, "totem_lumen_p8_emissive_materials.comp", SHADER, scene);
+                program = VulkanComputeProgram.create(device, "totem_lumen_p9_soft_shadows.comp", SHADER, scene);
                 commandPool = new VulkanFrameCommandPool(device);
                 texture = RenderSystem.getDevice().createTexture(
-                        "Totem Lumen P8 emissive material target",
+                        "Totem Lumen P9 soft shadow target",
                         GpuTexture.USAGE_COPY_DST | GpuTexture.USAGE_TEXTURE_BINDING,
                         GpuFormat.RGBA8_UNORM,
                         width, height, 1, 1
                 );
                 view = RenderSystem.getDevice().createTextureView(texture);
                 if (!(texture instanceof VulkanGpuTexture vulkanTexture)) {
-                    throw new IllegalStateException("P8 emissive target is not backed by VulkanGpuTexture");
+                    throw new IllegalStateException("P9 soft shadow target is not backed by VulkanGpuTexture");
                 }
                 return new Resources(
                         width, height, pixelBaseWord, pixelBytes, totalBytes,
