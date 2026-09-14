@@ -35,11 +35,11 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * Persistent P5-P7 renderer using stable section slots, hashed lookup and local light lists.
+ * Persistent P5-P8 renderer using stable section slots, hashed lookup and local light lists.
  *
- * <p>P5 supplies the live primary DDA image, P6 adds binary secondary-ray visibility, and P7
- * extracts emissive voxels into compact point-light records. Each stable section slot owns a
- * capped local list so the shader never scans every scene light for every primary hit.</p>
+ * <p>P5 supplies the live primary DDA image, P6 adds binary secondary-ray visibility, P7 extracts
+ * emissive voxels into compact point-light records, and P8 carries material emissive RGB through
+ * both local-light records and directly visible emissive surfaces.</p>
  */
 public final class P5StableLookupRenderer {
     private static final int MAX_SECTIONS = 64;
@@ -53,9 +53,13 @@ public final class P5StableLookupRenderer {
     private static final int SECTION_LIGHT_INDEX_BASE_WORD = SECTION_LIGHT_COUNT_BASE_WORD + MAX_SECTIONS;
     private static final int LIGHT_DATA_BASE_WORD = SECTION_LIGHT_INDEX_BASE_WORD
             + MAX_SECTIONS * GpuSectionLightLists.MAX_LIGHTS_PER_SECTION;
-    private static final int LIGHT_WORDS_PER_RECORD = 4;
-    private static final int PIXEL_BASE_WORD = LIGHT_DATA_BASE_WORD
+    private static final int LIGHT_WORDS_PER_RECORD = 8;
+    private static final int MAX_MATERIALS = 4096;
+    private static final int MATERIAL_EMISSION_WORDS_PER_RECORD = 4;
+    private static final int MATERIAL_EMISSION_BASE_WORD = LIGHT_DATA_BASE_WORD
             + GpuSectionLightLists.MAX_GLOBAL_LIGHTS * LIGHT_WORDS_PER_RECORD;
+    private static final int PIXEL_BASE_WORD = MATERIAL_EMISSION_BASE_WORD
+            + MAX_MATERIALS * MATERIAL_EMISSION_WORDS_PER_RECORD;
     private static final int TARGET_WIDTH = 160;
     private static final int MAX_STEPS = 512;
     private static final float MAX_DISTANCE = 256.0f;
@@ -81,7 +85,9 @@ public final class P5StableLookupRenderer {
             const uint SECTION_LIGHT_INDEX_BASE = 262784u;
             const uint LIGHT_DATA_BASE = 263296u;
             const uint MAX_LIGHTS_PER_SECTION = 8u;
-            const uint LIGHT_WORDS_PER_RECORD = 4u;
+            const uint LIGHT_WORDS_PER_RECORD = 8u;
+            const uint MATERIAL_EMISSION_BASE = 265344u;
+            const uint MATERIAL_EMISSION_WORDS_PER_RECORD = 4u;
             const vec3 DEBUG_LIGHT_DIRECTION = normalize(vec3(0.45, 0.85, 0.30));
 
             struct HitResult {
@@ -240,6 +246,18 @@ public final class P5StableLookupRenderer {
                 ) / 255.0;
             }
 
+            vec4 materialEmission(uint materialId) {
+                uint materialCount = scene.data[23];
+                if (materialId >= materialCount) return vec4(0.0);
+                uint base = MATERIAL_EMISSION_BASE + materialId * MATERIAL_EMISSION_WORDS_PER_RECORD;
+                return vec4(
+                    uintBitsToFloat(scene.data[base]),
+                    uintBitsToFloat(scene.data[base + 1u]),
+                    uintBitsToFloat(scene.data[base + 2u]),
+                    uintBitsToFloat(scene.data[base + 3u])
+                );
+            }
+
             vec3 resolvedSurfaceNormal(HitResult hit, vec3 primaryDirection) {
                 vec3 normal = vec3(hit.normal);
                 if (length(normal) < 0.5) {
@@ -263,10 +281,12 @@ public final class P5StableLookupRenderer {
                 return packRgba(materialColor(hit.materialId) * lighting, 255u);
             }
 
-            uint localLightColor(HitResult hit, vec3 primaryOrigin, vec3 primaryDirection) {
+            uint localLightColor(HitResult hit, vec3 primaryOrigin, vec3 primaryDirection, bool emissiveMode) {
                 int slot = sectionSlotForVoxel(hit.voxel);
+                vec4 surfaceEmission = emissiveMode ? materialEmission(hit.materialId) : vec4(0.0);
+                vec3 emitted = surfaceEmission.rgb * surfaceEmission.a * 1.6;
                 if (slot < 0) {
-                    return packRgba(materialColor(hit.materialId) * 0.05, 255u);
+                    return packRgba(materialColor(hit.materialId) * 0.05 + emitted, 255u);
                 }
 
                 vec3 surfaceNormal = resolvedSurfaceNormal(hit, primaryDirection);
@@ -284,6 +304,14 @@ public final class P5StableLookupRenderer {
                         uintBitsToFloat(scene.data[lightBase + 2u])
                     );
                     float radius = uintBitsToFloat(scene.data[lightBase + 3u]);
+                    vec3 lightColor = emissiveMode ? vec3(
+                        uintBitsToFloat(scene.data[lightBase + 4u]),
+                        uintBitsToFloat(scene.data[lightBase + 5u]),
+                        uintBitsToFloat(scene.data[lightBase + 6u])
+                    ) : vec3(1.0, 0.82, 0.58);
+                    float intensity = emissiveMode
+                            ? uintBitsToFloat(scene.data[lightBase + 7u])
+                            : clamp((radius - 0.5) / 15.0, 0.0, 1.0);
                     vec3 toLight = lightPosition - hitPoint;
                     float distanceToLight = length(toLight);
                     if (distanceToLight <= 0.0001 || distanceToLight >= radius) continue;
@@ -302,11 +330,10 @@ public final class P5StableLookupRenderer {
 
                     float range = clamp(1.0 - distanceToLight / radius, 0.0, 1.0);
                     float attenuation = range * range;
-                    float intensity = clamp((radius - 0.5) / 15.0, 0.0, 1.0);
-                    lighting += vec3(1.0, 0.82, 0.58) * (2.4 * nDotL * attenuation * intensity * visibility);
+                    lighting += lightColor * (2.4 * nDotL * attenuation * intensity * visibility);
                 }
 
-                return packRgba(materialColor(hit.materialId) * lighting, 255u);
+                return packRgba(materialColor(hit.materialId) * lighting + emitted, 255u);
             }
 
             uint debugColor(HitResult hit, vec3 primaryOrigin, vec3 primaryDirection) {
@@ -331,7 +358,10 @@ public final class P5StableLookupRenderer {
                 if (mode == 4u) {
                     return hardShadowColor(hit, primaryOrigin, primaryDirection);
                 }
-                return localLightColor(hit, primaryOrigin, primaryDirection);
+                if (mode == 5u) {
+                    return localLightColor(hit, primaryOrigin, primaryDirection, false);
+                }
+                return localLightColor(hit, primaryOrigin, primaryDirection, true);
             }
 
             void main() {
@@ -381,7 +411,8 @@ public final class P5StableLookupRenderer {
         DISTANCE(2, "Distance"),
         STEPS(3, "Steps"),
         HARD_SHADOW(4, "Hard Shadow"),
-        LOCAL_LIGHTS(5, "Local Lights");
+        LOCAL_LIGHTS(5, "Local Lights"),
+        EMISSIVE_MATERIALS(6, "Emissive Materials");
 
         private final int shaderValue;
         private final String label;
@@ -397,12 +428,13 @@ public final class P5StableLookupRenderer {
     }
 
     private static Resources resources;
-    private static DebugMode mode = DebugMode.LOCAL_LIGHTS;
+    private static DebugMode mode = DebugMode.EMISSIVE_MATERIALS;
     private static boolean inFlight;
     private static boolean ready;
     private static boolean resetRequested;
     private static boolean firstFrameLogged;
     private static boolean p7Logged;
+    private static boolean p8Logged;
     private static boolean sceneUploadRequired = true;
     private static long sceneSignature = Long.MIN_VALUE;
     private static long lastSubmittedFrame = -1;
@@ -410,6 +442,7 @@ public final class P5StableLookupRenderer {
     private static int lastLightCount;
     private static int lastMaxLightsPerSection;
     private static int lastPopulatedLightLists;
+    private static int lastEmissiveMaterialCount;
     private static String dimensionId;
 
     private P5StableLookupRenderer() {
@@ -482,7 +515,7 @@ public final class P5StableLookupRenderer {
         } catch (Throwable failure) {
             inFlight = false;
             sceneUploadRequired |= fullSceneUpload;
-            TotemLumenClient.LOGGER.error("P7 local-light frame submission failed", failure);
+            TotemLumenClient.LOGGER.error("P8 emissive-material frame submission failed", failure);
         }
     }
 
@@ -567,6 +600,15 @@ public final class P5StableLookupRenderer {
                     mode.label()
             );
         }
+        if (!p8Logged && fullSceneUpload) {
+            p8Logged = true;
+            TotemLumenClient.LOGGER.info(
+                    "P8 emissive materials READY: emissiveMaterials={}, coloredLights={}, mode={}",
+                    lastEmissiveMaterialCount,
+                    lastLightCount,
+                    mode.label()
+            );
+        }
         if (resetRequested) {
             resetRequested = false;
             destroyResourcesIfSafe();
@@ -628,7 +670,9 @@ public final class P5StableLookupRenderer {
         lastLightCount = 0;
         lastMaxLightsPerSection = 0;
         lastPopulatedLightLists = 0;
+        lastEmissiveMaterialCount = 0;
         p7Logged = false;
+        p8Logged = false;
     }
 
     private static void packHeader(
@@ -681,13 +725,41 @@ public final class P5StableLookupRenderer {
         }
 
         var materialDefinitions = SceneExtractionBridge.materials().snapshot();
+        if (materialDefinitions.size() > MAX_MATERIALS) {
+            throw new IllegalStateException(
+                    "P8 material table capacity exceeded: " + materialDefinitions.size() + "/" + MAX_MATERIALS
+            );
+        }
+        putWord(buffer, 23, materialDefinitions.size());
+        lastEmissiveMaterialCount = 0;
+        for (int materialId = 0; materialId < materialDefinitions.size(); materialId++) {
+            var material = materialDefinitions.get(materialId);
+            int base = MATERIAL_EMISSION_BASE_WORD + materialId * MATERIAL_EMISSION_WORDS_PER_RECORD;
+            putWord(buffer, base, Float.floatToRawIntBits(material.emissionR()));
+            putWord(buffer, base + 1, Float.floatToRawIntBits(material.emissionG()));
+            putWord(buffer, base + 2, Float.floatToRawIntBits(material.emissionB()));
+            putWord(buffer, base + 3, Float.floatToRawIntBits(material.emissionLevel() / 15.0f));
+            if (material.emissionLevel() > 0) {
+                lastEmissiveMaterialCount++;
+            }
+        }
+
         var lightLists = GpuSectionLightLists.build(
                 sections,
                 MAX_SECTIONS,
                 SLOT_ALLOCATOR::slotFor,
-                materialId -> materialId >= 0 && materialId < materialDefinitions.size()
-                        ? materialDefinitions.get(materialId).emissionLevel()
-                        : 0
+                (GpuSectionLightLists.EmissionResolver) materialId -> {
+                    if (materialId < 0 || materialId >= materialDefinitions.size()) {
+                        return new GpuSectionLightLists.Emission(0, 0.0f, 0.0f, 0.0f);
+                    }
+                    var material = materialDefinitions.get(materialId);
+                    return new GpuSectionLightLists.Emission(
+                            material.emissionLevel(),
+                            material.emissionR(),
+                            material.emissionG(),
+                            material.emissionB()
+                    );
+                }
         );
 
         int[] counts = lightLists.countsBySlot();
@@ -711,6 +783,10 @@ public final class P5StableLookupRenderer {
             putWord(buffer, base + 1, Float.floatToRawIntBits(light.y()));
             putWord(buffer, base + 2, Float.floatToRawIntBits(light.z()));
             putWord(buffer, base + 3, Float.floatToRawIntBits(light.radius()));
+            putWord(buffer, base + 4, Float.floatToRawIntBits(light.r()));
+            putWord(buffer, base + 5, Float.floatToRawIntBits(light.g()));
+            putWord(buffer, base + 6, Float.floatToRawIntBits(light.b()));
+            putWord(buffer, base + 7, Float.floatToRawIntBits(light.intensity()));
         }
 
         lastLightCount = lights.size();
@@ -881,7 +957,7 @@ public final class P5StableLookupRenderer {
         try {
             closeable.close();
         } catch (Exception exception) {
-            TotemLumenClient.LOGGER.warn("Failed to close P7 local-light resource", exception);
+            TotemLumenClient.LOGGER.warn("Failed to close P8 emissive-material resource", exception);
         }
     }
 
@@ -937,17 +1013,17 @@ public final class P5StableLookupRenderer {
             try {
                 upload = VulkanOwnedBuffer.createUpload(device, totalBytes);
                 scene = VulkanOwnedBuffer.createStorage(device, totalBytes);
-                program = VulkanComputeProgram.create(device, "totem_lumen_p7_local_lights.comp", SHADER, scene);
+                program = VulkanComputeProgram.create(device, "totem_lumen_p8_emissive_materials.comp", SHADER, scene);
                 commandPool = new VulkanFrameCommandPool(device);
                 texture = RenderSystem.getDevice().createTexture(
-                        "Totem Lumen P7 local light target",
+                        "Totem Lumen P8 emissive material target",
                         GpuTexture.USAGE_COPY_DST | GpuTexture.USAGE_TEXTURE_BINDING,
                         GpuFormat.RGBA8_UNORM,
                         width, height, 1, 1
                 );
                 view = RenderSystem.getDevice().createTextureView(texture);
                 if (!(texture instanceof VulkanGpuTexture vulkanTexture)) {
-                    throw new IllegalStateException("P7 local-light target is not backed by VulkanGpuTexture");
+                    throw new IllegalStateException("P8 emissive target is not backed by VulkanGpuTexture");
                 }
                 return new Resources(
                         width, height, pixelBaseWord, pixelBytes, totalBytes,
