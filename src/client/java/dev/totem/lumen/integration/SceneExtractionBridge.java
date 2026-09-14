@@ -36,12 +36,14 @@ import java.util.concurrent.atomic.AtomicReference;
  * the queue receives Totem Lumen-owned immutable/copy-owned values.
  */
 public final class SceneExtractionBridge {
-    private static final int MAX_SECTION_SNAPSHOTS_PER_EXTRACTION = 2;
+    private static final int MAX_PRIORITY_SECTION_SNAPSHOTS_PER_EXTRACTION = 8;
+    private static final int MAX_BACKGROUND_SECTION_SNAPSHOTS_PER_EXTRACTION = 2;
 
     private static final SceneUpdateQueue UPDATE_QUEUE = new SceneUpdateQueue();
     private static final RayScene SCENE = new RayScene();
     private static final MaterialRegistry MATERIALS = new MaterialRegistry();
-    private static final Set<SectionKey> PENDING_SECTION_SNAPSHOTS = new LinkedHashSet<>();
+    private static final Set<SectionKey> PRIORITY_SECTION_SNAPSHOTS = new LinkedHashSet<>();
+    private static final Set<SectionKey> BACKGROUND_SECTION_SNAPSHOTS = new LinkedHashSet<>();
     private static final Object SNAPSHOT_LOCK = new Object();
     private static final AtomicLong EXTRACTION_FRAMES = new AtomicLong();
     private static final AtomicLong SECTION_REVISIONS = new AtomicLong();
@@ -91,13 +93,14 @@ public final class SceneExtractionBridge {
         if (clientTicks % 600 == 0 && SCENE.activeDimension() != null) {
             FrameSnapshot frame = LATEST_FRAME.get();
             TotemLumenClient.LOGGER.debug(
-                    "CPU scene: dimension={}, chunks={}, sections={}, dirty={}, materials={}, snapshotBacklog={}, frame={}",
+                    "CPU scene: dimension={}, chunks={}, sections={}, dirty={}, materials={}, snapshotBacklog={}, prioritySnapshots={}, frame={}",
                     SCENE.activeDimension(),
                     SCENE.loadedChunkCount(),
                     SCENE.populatedSectionCount(),
                     SCENE.dirtySectionCount(),
                     MATERIALS.size(),
                     pendingSnapshotCount(),
+                    prioritySnapshotCount(),
                     frame == null ? -1 : frame.frameIndex()
             );
         }
@@ -117,7 +120,7 @@ public final class SceneExtractionBridge {
         LevelChunkSection[] sections = chunk.getSections();
         for (int index = 0; index < sections.length; index++) {
             if (!sections[index].hasOnlyAir()) {
-                scheduleSnapshot(new SectionKey(
+                scheduleBackgroundSnapshot(new SectionKey(
                         dimensionId,
                         pos.x(),
                         chunk.getSectionYFromSectionIndex(index),
@@ -141,7 +144,7 @@ public final class SceneExtractionBridge {
     }
 
     /**
-     * Called from the LevelExtractor mixin. The position is copied immediately and never retained.
+     * Called from the LevelRenderer mixin. The position is copied immediately and never retained.
      */
     public static void onBlockChanged(BlockPos pos, int updateFlags) {
         if (!sceneTrackingEnabled()) {
@@ -167,7 +170,7 @@ public final class SceneExtractionBridge {
                 pos.getX(),
                 pos.getY(),
                 pos.getZ(),
-                SceneExtractionBridge::scheduleSnapshot
+                SceneExtractionBridge::schedulePrioritySnapshot
         );
     }
 
@@ -207,56 +210,74 @@ public final class SceneExtractionBridge {
 
     private static void processSectionSnapshots(LevelExtractionContext context) {
         String activeDimension = dimensionId(context.level());
-        for (int processed = 0; processed < MAX_SECTION_SNAPSHOTS_PER_EXTRACTION; processed++) {
-            SectionKey key = pollScheduledSnapshot();
+
+        for (int processed = 0; processed < MAX_PRIORITY_SECTION_SNAPSHOTS_PER_EXTRACTION; processed++) {
+            SectionKey key = pollPrioritySnapshot();
             if (key == null) {
-                return;
+                break;
             }
-            if (!key.dimensionId().equals(activeDimension)) {
-                continue;
-            }
+            rebuildScheduledSection(context, activeDimension, key);
+        }
 
-            LevelChunk chunk = context.level().getChunkSource().getChunk(
-                    key.x(), key.z(), ChunkStatus.FULL, false
-            );
-            if (chunk == null) {
-                continue;
+        for (int processed = 0; processed < MAX_BACKGROUND_SECTION_SNAPSHOTS_PER_EXTRACTION; processed++) {
+            SectionKey key = pollBackgroundSnapshot();
+            if (key == null) {
+                break;
             }
+            rebuildScheduledSection(context, activeDimension, key);
+        }
+    }
 
-            int sectionIndex = chunk.getSectionIndexFromSectionY(key.y());
-            LevelChunkSection[] sections = chunk.getSections();
-            if (sectionIndex < 0 || sectionIndex >= sections.length) {
-                continue;
-            }
+    private static void rebuildScheduledSection(
+            LevelExtractionContext context,
+            String activeDimension,
+            SectionKey key
+    ) {
+        if (!key.dimensionId().equals(activeDimension)) {
+            return;
+        }
 
-            LevelChunkSection section = sections[sectionIndex];
-            int[] materialIds = new int[SectionVoxelData.VOXEL_COUNT];
-            if (!section.hasOnlyAir()) {
-                for (int localY = 0; localY < SectionVoxelData.SIZE; localY++) {
-                    for (int localZ = 0; localZ < SectionVoxelData.SIZE; localZ++) {
-                        for (int localX = 0; localX < SectionVoxelData.SIZE; localX++) {
-                            var blockState = section.getBlockState(localX, localY, localZ);
-                            int materialId = MATERIALS.idFor(MinecraftMaterialResolver.resolve(blockState));
-                            materialIds[SectionVoxelData.index(localX, localY, localZ)] = materialId;
-                        }
+        LevelChunk chunk = context.level().getChunkSource().getChunk(
+                key.x(), key.z(), ChunkStatus.FULL, false
+        );
+        if (chunk == null) {
+            return;
+        }
+
+        int sectionIndex = chunk.getSectionIndexFromSectionY(key.y());
+        LevelChunkSection[] sections = chunk.getSections();
+        if (sectionIndex < 0 || sectionIndex >= sections.length) {
+            return;
+        }
+
+        LevelChunkSection section = sections[sectionIndex];
+        int[] materialIds = new int[SectionVoxelData.VOXEL_COUNT];
+        if (!section.hasOnlyAir()) {
+            for (int localY = 0; localY < SectionVoxelData.SIZE; localY++) {
+                for (int localZ = 0; localZ < SectionVoxelData.SIZE; localZ++) {
+                    for (int localX = 0; localX < SectionVoxelData.SIZE; localX++) {
+                        var blockState = section.getBlockState(localX, localY, localZ);
+                        int materialId = MATERIALS.idFor(MinecraftMaterialResolver.resolve(blockState));
+                        materialIds[SectionVoxelData.index(localX, localY, localZ)] = materialId;
                     }
                 }
             }
-
-            SectionSnapshot snapshot = new SectionSnapshot(
-                    key,
-                    SECTION_REVISIONS.incrementAndGet(),
-                    new SectionVoxelData(materialIds)
-            );
-            offer(new SceneUpdate.SectionRebuilt(UPDATE_QUEUE.nextSequence(), snapshot));
         }
+
+        SectionSnapshot snapshot = new SectionSnapshot(
+                key,
+                SECTION_REVISIONS.incrementAndGet(),
+                new SectionVoxelData(materialIds)
+        );
+        offer(new SceneUpdate.SectionRebuilt(UPDATE_QUEUE.nextSequence(), snapshot));
     }
 
     private static void onLevelChanged(ClientLevel level) {
         UPDATE_QUEUE.clear();
         LATEST_FRAME.set(null);
         synchronized (SNAPSHOT_LOCK) {
-            PENDING_SECTION_SNAPSHOTS.clear();
+            PRIORITY_SECTION_SNAPSHOTS.clear();
+            BACKGROUND_SECTION_SNAPSHOTS.clear();
         }
 
         if (!sceneTrackingEnabled()) {
@@ -274,27 +295,49 @@ public final class SceneExtractionBridge {
         TotemLumenClient.LOGGER.info("Totem Lumen scene attached to {}", dimensionId);
     }
 
-    private static void scheduleSnapshot(SectionKey key) {
+    private static void scheduleBackgroundSnapshot(SectionKey key) {
         synchronized (SNAPSHOT_LOCK) {
-            PENDING_SECTION_SNAPSHOTS.add(key);
+            if (!PRIORITY_SECTION_SNAPSHOTS.contains(key)) {
+                BACKGROUND_SECTION_SNAPSHOTS.add(key);
+            }
         }
     }
 
-    private static SectionKey pollScheduledSnapshot() {
+    private static void schedulePrioritySnapshot(SectionKey key) {
         synchronized (SNAPSHOT_LOCK) {
-            Iterator<SectionKey> iterator = PENDING_SECTION_SNAPSHOTS.iterator();
-            if (!iterator.hasNext()) {
-                return null;
-            }
-            SectionKey next = iterator.next();
-            iterator.remove();
-            return next;
+            BACKGROUND_SECTION_SNAPSHOTS.remove(key);
+            PRIORITY_SECTION_SNAPSHOTS.add(key);
         }
+    }
+
+    private static SectionKey pollPrioritySnapshot() {
+        synchronized (SNAPSHOT_LOCK) {
+            return pollFirst(PRIORITY_SECTION_SNAPSHOTS);
+        }
+    }
+
+    private static SectionKey pollBackgroundSnapshot() {
+        synchronized (SNAPSHOT_LOCK) {
+            return pollFirst(BACKGROUND_SECTION_SNAPSHOTS);
+        }
+    }
+
+    private static SectionKey pollFirst(Set<SectionKey> snapshots) {
+        Iterator<SectionKey> iterator = snapshots.iterator();
+        if (!iterator.hasNext()) {
+            return null;
+        }
+        SectionKey next = iterator.next();
+        iterator.remove();
+        return next;
     }
 
     private static void removePendingSnapshotsForChunk(String dimensionId, int chunkX, int chunkZ) {
         synchronized (SNAPSHOT_LOCK) {
-            PENDING_SECTION_SNAPSHOTS.removeIf(key ->
+            PRIORITY_SECTION_SNAPSHOTS.removeIf(key ->
+                    key.dimensionId().equals(dimensionId) && key.x() == chunkX && key.z() == chunkZ
+            );
+            BACKGROUND_SECTION_SNAPSHOTS.removeIf(key ->
                     key.dimensionId().equals(dimensionId) && key.x() == chunkX && key.z() == chunkZ
             );
         }
@@ -302,7 +345,13 @@ public final class SceneExtractionBridge {
 
     private static int pendingSnapshotCount() {
         synchronized (SNAPSHOT_LOCK) {
-            return PENDING_SECTION_SNAPSHOTS.size();
+            return PRIORITY_SECTION_SNAPSHOTS.size() + BACKGROUND_SECTION_SNAPSHOTS.size();
+        }
+    }
+
+    private static int prioritySnapshotCount() {
+        synchronized (SNAPSHOT_LOCK) {
+            return PRIORITY_SECTION_SNAPSHOTS.size();
         }
     }
 
