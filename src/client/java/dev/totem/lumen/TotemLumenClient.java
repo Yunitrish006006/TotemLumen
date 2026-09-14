@@ -6,6 +6,7 @@ import dev.totem.lumen.vulkan.P4ComputeSmokeTest;
 import dev.totem.lumen.vulkan.P4DdaSmokeTest;
 import dev.totem.lumen.vulkan.P5DebugCompositeTest;
 import dev.totem.lumen.vulkan.P5DebugRayGridTest;
+import dev.totem.lumen.vulkan.P5WorldDebugComposite;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
@@ -34,11 +35,12 @@ public final class TotemLumenClient implements ClientModInitializer {
             P4DdaSmokeTest.runOnceOnRenderThread();
             P5DebugRayGridTest.runOnceOnRenderThread();
             P5DebugCompositeTest.runOnceOnRenderThread();
+            P5WorldDebugComposite.runOnceOnRenderThread();
         });
 
         HudElementRegistry.addLast(
                 Identifier.fromNamespaceAndPath(MOD_ID, "p5_debug_overlay"),
-                (graphics, deltaTracker) -> P5DebugCompositeTest.drawHud(graphics)
+                (graphics, deltaTracker) -> P5WorldDebugComposite.drawHud(graphics)
         );
     }
 }
