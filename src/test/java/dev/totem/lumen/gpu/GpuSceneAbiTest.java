@@ -26,11 +26,14 @@ class GpuSceneAbiTest {
     }
 
     @Test
-    void materialPackingUsesStableThirtyTwoByteStride() {
+    void materialPackingCarriesEmissiveRgbInFortyEightByteStride() {
         MaterialDefinition material = new MaterialDefinition(
                 "test:emissive_glass",
                 MaterialFlags.TRANSLUCENT | MaterialFlags.EMISSIVE,
                 12,
+                0.2f,
+                0.6f,
+                1.0f,
                 0.25f,
                 0.5f,
                 0.4f,
@@ -41,6 +44,7 @@ class GpuSceneAbiTest {
         ByteBuffer view = ByteBuffer.wrap(packed).order(ByteOrder.LITTLE_ENDIAN);
         int base = GpuSceneAbi.MATERIAL_STRIDE_BYTES;
 
+        assertEquals(48, GpuSceneAbi.MATERIAL_STRIDE_BYTES);
         assertEquals(GpuSceneAbi.MATERIAL_STRIDE_BYTES * 2, packed.length);
         assertEquals(material.flags(), view.getInt(base + GpuSceneAbi.MATERIAL_FLAGS_OFFSET));
         assertEquals(12, view.getInt(base + GpuSceneAbi.MATERIAL_EMISSION_OFFSET));
@@ -48,5 +52,8 @@ class GpuSceneAbiTest {
         assertEquals(0.5f, view.getFloat(base + GpuSceneAbi.MATERIAL_METALLIC_OFFSET));
         assertEquals(0.4f, view.getFloat(base + GpuSceneAbi.MATERIAL_OPACITY_OFFSET));
         assertEquals(1.5f, view.getFloat(base + GpuSceneAbi.MATERIAL_IOR_OFFSET));
+        assertEquals(0.2f, view.getFloat(base + GpuSceneAbi.MATERIAL_EMISSION_R_OFFSET));
+        assertEquals(0.6f, view.getFloat(base + GpuSceneAbi.MATERIAL_EMISSION_G_OFFSET));
+        assertEquals(1.0f, view.getFloat(base + GpuSceneAbi.MATERIAL_EMISSION_B_OFFSET));
     }
 }
