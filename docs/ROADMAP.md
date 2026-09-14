@@ -147,9 +147,9 @@ Runtime gate:
 - Confirm no Vulkan/MoltenVK errors or significant new stalls.
 
 ## P9 - Soft shadow sampling
-Status: **IMPLEMENTED / CI PASS; Apple M4 runtime visual validation pending**
+Status: **COMPLETE on Apple M4 / MoltenVK**
 
-Implemented for `0.1.0-alpha.15`:
+Validated in `0.1.0-alpha.15`:
 - Adds a dedicated `Soft Shadow` F8 visualization mode while preserving `Hard Shadow` for A/B comparison.
 - Uses four deterministic directional-light visibility rays per primary hit.
 - A fixed low-discrepancy-style disk pattern is projected around the P6 directional-light vector with angular radius `0.055`.
@@ -157,18 +157,32 @@ Implemented for `0.1.0-alpha.15`:
 - Surface-normal and light-direction offsets reuse the established P6 self-shadow bias.
 - Visibility is averaged across valid samples to produce fractional penumbra values instead of binary visibility.
 - Directly visible P8 emissive surfaces remain emissive in the soft-shadow validation mode.
-- `Soft Shadow` is the default validation mode for this gate.
+- Apple M4 runtime confirmed the soft-shadow path is visually functional and stable: **PASSED**.
+
+## P10 - Temporal reprojection / history validation
+Status: **IMPLEMENTED / CI PASS; Apple M4 runtime visual validation pending**
+
+Implemented for `0.1.0-alpha.16`:
+- Adds a dedicated `Temporal History` F8 mode and makes it the P10 validation default.
+- Allocates two GPU-resident per-pixel history buffers inside the existing storage-buffer scene allocation; no temporal data is read back to CPU.
+- History buffers ping-pong each completed frame so current compute writes never race the history buffer being sampled.
+- Each history record stores accumulated RGBA plus hit voxel, raw face normal and material identity.
+- Current world-space hit points are projected through the previous completed camera basis/FOV into previous-frame pixel coordinates.
+- History is accepted only when the reprojected record still references the same voxel/material/normal; disocclusions and changed geometry fall back to the current sample immediately.
+- Any selected-section/revision scene upload disables history reuse for that frame, so live block edits do not blend against stale geometry.
+- Temporal mode rotates through one of the four P9 area-sun samples per frame and blends accepted history at weight `0.80`, allowing stationary pixels to converge over multiple frames while using one shadow ray per frame.
+- The existing four-sample deterministic `Soft Shadow` mode remains available for A/B comparison.
+- The inter-frame Vulkan buffer barrier now makes previous compute history writes visible to the next compute dispatch in addition to synchronizing the current upload transfer.
 - Java/CI development-JAR build: **PASSED**.
 
 Runtime gate:
-- Compare `Hard Shadow` and `Soft Shadow` with F8 around a clear shadow edge.
-- Confirm the soft mode produces a visible penumbra rather than only binary black/white visibility.
-- Confirm camera motion is stable with no temporal shimmer from the fixed sample pattern.
-- Confirm no severe frame stalls on Apple M4 at the current 160-pixel-wide debug resolution.
-- Confirm log contains `P9 soft shadows READY: samples=4` and no shaderc/Vulkan/MoltenVK errors.
+- Hold the camera still and confirm `Temporal History` converges within several frames toward the appearance of `Soft Shadow`.
+- Move/rotate the camera across clear edges and confirm there is no persistent ghost image or smeared geometry.
+- Place and break blocks while remaining in the world and confirm old history is rejected immediately around changed geometry.
+- Switch between `Temporal History` and `Soft Shadow` with F8 and confirm history restarts safely after mode changes.
+- Confirm log contains `P10 temporal history READY` and no shaderc/Vulkan/MoltenVK errors.
 
-## P10-P12 - Stable GI baseline
-- Temporal reprojection/history validation.
+## P11-P12 - Stable GI baseline
 - Spatial denoising.
 - 1-bounce diffuse GI.
 
