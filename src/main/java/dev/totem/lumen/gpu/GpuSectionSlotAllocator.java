@@ -10,11 +10,11 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Stable fixed-size section-slot allocator for the first GPU scene implementation.
+ * Stable fixed-size section-slot allocator for the GPU scene.
  *
  * <p>Each populated section owns one 16 KiB voxel slot. Updating a section keeps its slot stable;
- * removing/all-airing it returns the slot to the free list. P4 can therefore build a coordinate to
- * slot lookup table without moving unrelated voxel payloads.</p>
+ * removing/all-airing it returns the slot to the free list. This lets the GPU lookup table map
+ * section coordinates directly to fixed voxel payload slots without moving unrelated sections.</p>
  */
 public final class GpuSectionSlotAllocator {
     private final int capacity;
@@ -26,9 +26,7 @@ public final class GpuSectionSlotAllocator {
             throw new IllegalArgumentException("capacity must be positive");
         }
         this.capacity = capacity;
-        for (int slot = 0; slot < capacity; slot++) {
-            freeSlots.addLast(slot);
-        }
+        refillFreeSlots();
     }
 
     public Change apply(SectionSnapshot snapshot) {
@@ -36,12 +34,7 @@ public final class GpuSectionSlotAllocator {
         SlotState current = slots.get(key);
 
         if (snapshot.voxels().isAllAir()) {
-            if (current == null) {
-                return new Change(ChangeKind.IGNORED, key, -1, snapshot.revision());
-            }
-            slots.remove(key);
-            freeSlots.addLast(current.slot());
-            return new Change(ChangeKind.REMOVED, key, current.slot(), snapshot.revision());
+            return remove(key, snapshot.revision());
         }
 
         if (current != null) {
@@ -60,17 +53,41 @@ public final class GpuSectionSlotAllocator {
         return new Change(ChangeKind.ALLOCATED, key, slot, snapshot.revision());
     }
 
+    public Change remove(SectionKey key) {
+        SlotState current = slots.get(key);
+        return remove(key, current == null ? -1L : current.revision());
+    }
+
+    private Change remove(SectionKey key, long revision) {
+        SlotState current = slots.remove(key);
+        if (current == null) {
+            return new Change(ChangeKind.IGNORED, key, -1, revision);
+        }
+        freeSlots.addLast(current.slot());
+        return new Change(ChangeKind.REMOVED, key, current.slot(), revision);
+    }
+
     public List<Change> removeChunk(String dimensionId, int chunkX, int chunkZ) {
         List<SectionKey> matches = slots.keySet().stream()
                 .filter(key -> key.dimensionId().equals(dimensionId) && key.x() == chunkX && key.z() == chunkZ)
                 .toList();
         List<Change> changes = new ArrayList<>(matches.size());
         for (SectionKey key : matches) {
-            SlotState removed = slots.remove(key);
-            freeSlots.addLast(removed.slot());
-            changes.add(new Change(ChangeKind.REMOVED, key, removed.slot(), removed.revision()));
+            changes.add(remove(key));
         }
         return List.copyOf(changes);
+    }
+
+    public void clear() {
+        slots.clear();
+        freeSlots.clear();
+        refillFreeSlots();
+    }
+
+    private void refillFreeSlots() {
+        for (int slot = 0; slot < capacity; slot++) {
+            freeSlots.addLast(slot);
+        }
     }
 
     public int slotFor(SectionKey key) {
