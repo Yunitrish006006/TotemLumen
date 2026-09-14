@@ -33,6 +33,7 @@ public final class P4ComputeSmokeTest {
             """;
 
     private static boolean attempted;
+    private static volatile boolean passed;
 
     private P4ComputeSmokeTest() {
     }
@@ -165,6 +166,7 @@ public final class P4ComputeSmokeTest {
                     );
                 }
             }
+            passed = true;
             TotemLumenClient.LOGGER.info(
                     "P4 Vulkan compute smoke test PASSED: shader/dispatch/barrier/readback validated for {} values",
                     VALUE_COUNT
@@ -177,6 +179,10 @@ public final class P4ComputeSmokeTest {
             closeQuietly(readback);
             closeQuietly(commandPool);
         }
+    }
+
+    public static boolean passed() {
+        return passed;
     }
 
     private static void closeQuietly(AutoCloseable closeable) {
