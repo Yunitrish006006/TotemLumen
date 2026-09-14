@@ -35,14 +35,15 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * Persistent P5-P10 renderer using stable section slots, hashed lookup, local light lists and
- * GPU-resident temporal history.
+ * Persistent P5-P11 renderer using stable section slots, hashed lookup, local light lists,
+ * GPU-resident temporal history and edge-aware spatial denoising.
  *
  * <p>P5 supplies the live primary DDA image, P6 adds binary secondary-ray visibility, P7 extracts
  * emissive voxels into compact point-light records, P8 carries material emissive RGB through both
  * local-light records and directly visible emissive surfaces, P9 adds deterministic multi-ray
- * directional-light visibility, and P10 adds validated world-space reprojection into ping-pong
- * history buffers without CPU readback.</p>
+ * directional-light visibility, P10 adds validated world-space reprojection into ping-pong history
+ * buffers without CPU readback, and P11 filters validated previous-frame history through a compact
+ * 3x3 material/normal/voxel-aware neighborhood.</p>
  */
 public final class P5StableLookupRenderer {
     private static final int MAX_SECTIONS = 64;
@@ -71,6 +72,7 @@ public final class P5StableLookupRenderer {
     private static final int SOFT_SHADOW_SAMPLES = 4;
     private static final float SOFT_SHADOW_ANGULAR_RADIUS = 0.055f;
     private static final float TEMPORAL_HISTORY_WEIGHT = 0.80f;
+    private static final int SPATIAL_DENOISE_RADIUS = 1;
 
     private static final GpuSectionSlotAllocator SLOT_ALLOCATOR = new GpuSectionSlotAllocator(MAX_SECTIONS);
     private static final Set<SectionKey> RESIDENT_KEYS = new HashSet<>();
@@ -430,6 +432,62 @@ public final class P5StableLookupRenderer {
                 return all(equal(previousVoxel, hit.voxel)) && all(equal(previousNormal, hit.normal));
             }
 
+            vec3 spatialHistoryRgb(
+                    uvec2 centerPixel,
+                    uint width,
+                    uint height,
+                    HitResult hit,
+                    vec3 centerRgb
+            ) {
+                vec3 weightedRgb = vec3(0.0);
+                float totalWeight = 0.0;
+                ivec2 center = ivec2(centerPixel);
+
+                for (int offsetY = -1; offsetY <= 1; offsetY++) {
+                    for (int offsetX = -1; offsetX <= 1; offsetX++) {
+                        ivec2 samplePixel = center + ivec2(offsetX, offsetY);
+                        if (samplePixel.x < 0 || samplePixel.y < 0
+                                || samplePixel.x >= int(width) || samplePixel.y >= int(height)) {
+                            continue;
+                        }
+
+                        uint sampleLinear = uint(samplePixel.y) * width + uint(samplePixel.x);
+                        uint sampleBase = scene.data[24] + sampleLinear * HISTORY_RECORD_WORDS;
+                        if (scene.data[sampleBase + 7u] != hit.materialId + 1u) continue;
+
+                        ivec3 sampleNormal = ivec3(
+                            int(scene.data[sampleBase + 4u]),
+                            int(scene.data[sampleBase + 5u]),
+                            int(scene.data[sampleBase + 6u])
+                        );
+                        if (!all(equal(sampleNormal, hit.normal))) continue;
+
+                        ivec3 sampleVoxel = ivec3(
+                            int(scene.data[sampleBase + 1u]),
+                            int(scene.data[sampleBase + 2u]),
+                            int(scene.data[sampleBase + 3u])
+                        );
+                        ivec3 voxelDelta = abs(sampleVoxel - hit.voxel);
+                        if (voxelDelta.x > 1 || voxelDelta.y > 1 || voxelDelta.z > 1) continue;
+
+                        float spatialWeight;
+                        if (offsetX == 0 && offsetY == 0) {
+                            spatialWeight = 1.0;
+                        } else if (offsetX == 0 || offsetY == 0) {
+                            spatialWeight = 0.65;
+                        } else {
+                            spatialWeight = 0.45;
+                        }
+                        float voxelWeight = 1.0 / (1.0 + 0.35 * float(voxelDelta.x + voxelDelta.y + voxelDelta.z));
+                        float weight = spatialWeight * voxelWeight;
+                        weightedRgb += unpackRgb(scene.data[sampleBase]) * weight;
+                        totalWeight += weight;
+                    }
+                }
+
+                return totalWeight > 0.0001 ? weightedRgb / totalWeight : centerRgb;
+            }
+
             uint temporalHistoryColor(
                     HitResult hit,
                     vec3 primaryOrigin,
@@ -451,6 +509,9 @@ public final class P5StableLookupRenderer {
 
                 vec3 currentRgb = unpackRgb(currentColor);
                 vec3 historyRgb = unpackRgb(scene.data[historyBase]);
+                if (scene.data[22] == 9u) {
+                    historyRgb = spatialHistoryRgb(previousPixel, width, height, hit, historyRgb);
+                }
                 return packRgba(mix(currentRgb, historyRgb, TEMPORAL_HISTORY_WEIGHT), 255u);
             }
 
@@ -595,7 +656,7 @@ public final class P5StableLookupRenderer {
                 HitResult primaryHit = traceRay(origin, direction);
                 uint mode = scene.data[22];
                 uint color;
-                if (mode == 8u) {
+                if (mode == 8u || mode == 9u) {
                     if (primaryHit.hit == 0u) {
                         color = packRgba(vec3(0.03, 0.05, 0.08), 255u);
                     } else {
@@ -619,6 +680,7 @@ public final class P5StableLookupRenderer {
         HARD_SHADOW(4, "Hard Shadow"),
         SOFT_SHADOW(7, "Soft Shadow"),
         TEMPORAL_HISTORY(8, "Temporal History"),
+        SPATIAL_DENOISE(9, "Spatial Denoise"),
         LOCAL_LIGHTS(5, "Local Lights"),
         EMISSIVE_MATERIALS(6, "Emissive Materials");
 
@@ -636,7 +698,7 @@ public final class P5StableLookupRenderer {
     }
 
     private static Resources resources;
-    private static DebugMode mode = DebugMode.TEMPORAL_HISTORY;
+    private static DebugMode mode = DebugMode.SPATIAL_DENOISE;
     private static boolean inFlight;
     private static boolean ready;
     private static boolean resetRequested;
@@ -645,6 +707,7 @@ public final class P5StableLookupRenderer {
     private static boolean p8Logged;
     private static boolean p9Logged;
     private static boolean p10Logged;
+    private static boolean p11Logged;
     private static boolean sceneUploadRequired = true;
     private static boolean historyValid;
     private static long sceneSignature = Long.MIN_VALUE;
@@ -660,6 +723,10 @@ public final class P5StableLookupRenderer {
     private static String dimensionId;
 
     private P5StableLookupRenderer() {
+    }
+
+    private static boolean usesTemporalHistory(DebugMode debugMode) {
+        return debugMode == DebugMode.TEMPORAL_HISTORY || debugMode == DebugMode.SPATIAL_DENOISE;
     }
 
     public static void runOnRenderThread() {
@@ -707,9 +774,9 @@ public final class P5StableLookupRenderer {
         Resources r = resources;
         boolean fullSceneUpload = sceneUploadRequired;
         DebugMode submittedMode = mode;
-        boolean canReuseHistory = submittedMode == DebugMode.TEMPORAL_HISTORY
+        boolean canReuseHistory = usesTemporalHistory(submittedMode)
                 && historyValid
-                && lastCompletedMode == DebugMode.TEMPORAL_HISTORY
+                && usesTemporalHistory(lastCompletedMode)
                 && lastCompletedFrame != null
                 && !fullSceneUpload
                 && frame.dimensionId().equals(lastCompletedFrame.dimensionId());
@@ -752,7 +819,7 @@ public final class P5StableLookupRenderer {
         } catch (Throwable failure) {
             inFlight = false;
             sceneUploadRequired |= fullSceneUpload;
-            TotemLumenClient.LOGGER.error("P10 temporal-history frame submission failed", failure);
+            TotemLumenClient.LOGGER.error("P11 spatial-denoise frame submission failed", failure);
         }
     }
 
@@ -772,7 +839,7 @@ public final class P5StableLookupRenderer {
     public static DebugMode cycleMode() {
         DebugMode[] values = DebugMode.values();
         mode = values[(mode.ordinal() + 1) % values.length];
-        if (mode != DebugMode.TEMPORAL_HISTORY) {
+        if (!usesTemporalHistory(mode)) {
             historyValid = false;
         }
         return mode;
@@ -822,7 +889,7 @@ public final class P5StableLookupRenderer {
         ready = true;
         lastCompletedFrame = submittedFrame;
         lastCompletedMode = submittedMode;
-        if (submittedMode == DebugMode.TEMPORAL_HISTORY) {
+        if (usesTemporalHistory(submittedMode)) {
             historyReadIndex = historyWriteIndex;
             historyValid = true;
         } else {
@@ -879,6 +946,14 @@ public final class P5StableLookupRenderer {
                     HISTORY_RECORD_WORDS,
                     TEMPORAL_HISTORY_WEIGHT,
                     SOFT_SHADOW_SAMPLES,
+                    submittedMode.label()
+            );
+        }
+        if (!p11Logged) {
+            p11Logged = true;
+            TotemLumenClient.LOGGER.info(
+                    "P11 spatial denoise READY: radius={}, kernel=3x3, edgeTests=material+normal+voxel, mode={}",
+                    SPATIAL_DENOISE_RADIUS,
                     submittedMode.label()
             );
         }
@@ -952,6 +1027,7 @@ public final class P5StableLookupRenderer {
         p8Logged = false;
         p9Logged = false;
         p10Logged = false;
+        p11Logged = false;
     }
 
     private static void packHeader(
@@ -1260,7 +1336,7 @@ public final class P5StableLookupRenderer {
         try {
             closeable.close();
         } catch (Exception exception) {
-            TotemLumenClient.LOGGER.warn("Failed to close P10 temporal-history resource", exception);
+            TotemLumenClient.LOGGER.warn("Failed to close P11 spatial-denoise resource", exception);
         }
     }
 
@@ -1335,17 +1411,17 @@ public final class P5StableLookupRenderer {
             try {
                 upload = VulkanOwnedBuffer.createUpload(device, totalBytes);
                 scene = VulkanOwnedBuffer.createStorage(device, totalBytes);
-                program = VulkanComputeProgram.create(device, "totem_lumen_p10_temporal_history.comp", SHADER, scene);
+                program = VulkanComputeProgram.create(device, "totem_lumen_p11_spatial_denoise.comp", SHADER, scene);
                 commandPool = new VulkanFrameCommandPool(device);
                 texture = RenderSystem.getDevice().createTexture(
-                        "Totem Lumen P10 temporal history target",
+                        "Totem Lumen P11 spatial denoise target",
                         GpuTexture.USAGE_COPY_DST | GpuTexture.USAGE_TEXTURE_BINDING,
                         GpuFormat.RGBA8_UNORM,
                         width, height, 1, 1
                 );
                 view = RenderSystem.getDevice().createTextureView(texture);
                 if (!(texture instanceof VulkanGpuTexture vulkanTexture)) {
-                    throw new IllegalStateException("P10 temporal history target is not backed by VulkanGpuTexture");
+                    throw new IllegalStateException("P11 spatial denoise target is not backed by VulkanGpuTexture");
                 }
                 return new Resources(
                         width,
