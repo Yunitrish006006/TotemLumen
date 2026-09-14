@@ -38,14 +38,14 @@ Validated:
 - Negative-coordinate-safe section lookup.
 - 3D DDA voxel traversal.
 - Deterministic synthetic ray validation against a CPU-known target.
-- Apple M4 result: voxel `(-480, -48, 45)`, material `2`, normal `(0, 0, 1)`, distance `0.5`, steps `1`: **PASSED**.
+- Latest Apple M4 validation: voxel `(-464, 22, 47)`, material `24`, normal `(0, 1, 0)`, distance `0.5`, steps `1`: **PASSED**.
 - Camera-center DDA diagnostic path is operational; a MISS is valid when looking at sky or outside the temporary 64-section debug upload.
 
 Remaining architecture improvement (not a P4 blocker):
 - Replace temporary linear 64-section lookup with the permanent coordinate -> stable slot lookup before production-scale rendering.
 
 ## P5 - Debug visualization
-Status: **implementation/CI complete; Apple M4 runtime validation in progress**
+Status: **P5A/P5B runtime-verified on Apple M4; real-world DDA composite gate implemented and awaiting visual validation**
 
 P5A - full-frame DDA debug grid:
 - 160-pixel-wide low-resolution target preserving the current window aspect ratio.
@@ -54,21 +54,27 @@ P5A - full-frame DDA debug grid:
 - Debug shader modes implemented: normal, material ID, distance, traversal-step heatmap.
 - Current validation mode: normal.
 - One-time CPU readback is used only as a correctness gate; production hot path will remain GPU-only.
-- CI build: **PASSED**.
+- Apple M4 runtime result: `160x90`, `14102` hits, `298` misses, center RGBA `0xffff8080`: **PASSED**.
 
 P5B - texture/composite gate:
 - Vulkan compute writes an RGBA debug buffer.
 - `vkCmdCopyBufferToImage` copies directly into a Minecraft-owned `GpuTexture` backed by `VulkanGpuTexture`.
 - Texture remains in the Minecraft Vulkan device / submission timeline; no second device, surface, or swapchain.
 - `GpuTextureView` is displayed through Fabric 26.2 `HudElementRegistry` / `GuiGraphicsExtractor.blit`.
-- CI build: **PASSED**.
-- Runtime test currently uses a deterministic gradient to isolate texture/composite correctness from DDA correctness.
+- Apple M4 runtime result: `P5 debug composite READY`: **PASSED**.
 
-Next after P5 runtime passes:
-- Wire the P5A DDA pixel buffer directly into the P5B texture path.
-- Add runtime mode switching for Normal / Material / Distance / Steps.
+P5C - real-world DDA image composite:
+- Implemented a one-shot real Minecraft voxel normal-debug render.
+- Uses the same extracted camera/section model as P5A.
+- GPU DDA output stays on GPU and is copied directly into the Minecraft-owned debug texture.
+- HUD automatically falls back to the deterministic gradient until the real DDA texture is ready, then replaces it.
+- This gate is intentionally one-shot; after visual correctness is confirmed it will become a persistent per-frame renderer.
+
+Next after P5C visual validation:
 - Make the debug frame update continuously with camera/scene changes.
-- Remove per-frame CPU readback.
+- Add runtime mode switching for Normal / Material / Distance / Steps.
+- Remove the temporary deterministic gradient fallback from normal operation.
+- Replace the temporary 64-section linear lookup with the permanent GPU scene/slot lookup.
 
 ## P6-P8 - Direct lighting
 - Hard shadows.
