@@ -3,11 +3,13 @@ package dev.totem.lumen.integration;
 import dev.totem.lumen.TotemLumenClient;
 import dev.totem.lumen.render.RendererBootstrap;
 import dev.totem.lumen.render.RendererState;
+import dev.totem.lumen.scene.FrameSnapshot;
 import dev.totem.lumen.scene.RayScene;
 import dev.totem.lumen.scene.SceneUpdate;
 import dev.totem.lumen.scene.SceneUpdateQueue;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientChunkEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLevelEvents;
+import net.fabricmc.fabric.api.client.rendering.v1.level.LevelExtractionContext;
 import net.fabricmc.fabric.api.client.rendering.v1.level.LevelExtractionEvents;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -16,6 +18,7 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.level.Level;
 
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * P1 boundary between Minecraft/Fabric lifecycle callbacks and Totem Lumen-owned scene state.
@@ -24,6 +27,7 @@ public final class SceneExtractionBridge {
     private static final SceneUpdateQueue UPDATE_QUEUE = new SceneUpdateQueue();
     private static final RayScene SCENE = new RayScene();
     private static final AtomicLong EXTRACTION_FRAMES = new AtomicLong();
+    private static final AtomicReference<FrameSnapshot> LATEST_FRAME = new AtomicReference<>();
 
     private static boolean initialized;
     private static long clientTicks;
@@ -60,11 +64,7 @@ public final class SceneExtractionBridge {
             ));
         });
 
-        LevelExtractionEvents.END_EXTRACTION.register(context -> {
-            if (sceneTrackingEnabled()) {
-                EXTRACTION_FRAMES.incrementAndGet();
-            }
-        });
+        LevelExtractionEvents.END_EXTRACTION.register(SceneExtractionBridge::captureFrame);
 
         TotemLumenClient.LOGGER.info("P1 scene extraction bridge registered");
     }
@@ -90,15 +90,22 @@ public final class SceneExtractionBridge {
         }
 
         if (clientTicks % 600 == 0 && SCENE.activeDimension() != null) {
-            TotemLumenClient.LOGGER.debug(
-                    "P1 scene: dimension={}, chunks={}, dirtySections={}, blockChanges={}, extractionFrames={}, queuePending={}",
-                    SCENE.activeDimension(),
-                    SCENE.loadedChunkCount(),
-                    SCENE.dirtySectionCount(),
-                    SCENE.blockChangeCount(),
-                    EXTRACTION_FRAMES.get(),
-                    UPDATE_QUEUE.pendingCount()
-            );
+            FrameSnapshot frame = LATEST_FRAME.get();
+            if (frame != null) {
+                TotemLumenClient.LOGGER.debug(
+                        "P1 scene: dimension={}, chunks={}, dirtySections={}, blockChanges={}, frame={}, camera=({}, {}, {}), fov={}, queuePending={}",
+                        SCENE.activeDimension(),
+                        SCENE.loadedChunkCount(),
+                        SCENE.dirtySectionCount(),
+                        SCENE.blockChangeCount(),
+                        frame.frameIndex(),
+                        frame.cameraX(),
+                        frame.cameraY(),
+                        frame.cameraZ(),
+                        frame.fovDegrees(),
+                        UPDATE_QUEUE.pendingCount()
+                );
+            }
         }
     }
 
@@ -125,8 +132,38 @@ public final class SceneExtractionBridge {
         ));
     }
 
+    private static void captureFrame(LevelExtractionContext context) {
+        if (!sceneTrackingEnabled()) {
+            return;
+        }
+
+        var camera = context.camera();
+        if (!camera.isInitialized()) {
+            return;
+        }
+
+        var position = camera.position();
+        var rotation = camera.rotation();
+        long frameIndex = EXTRACTION_FRAMES.incrementAndGet();
+
+        LATEST_FRAME.set(new FrameSnapshot(
+                frameIndex,
+                dimensionId(context.level()),
+                position.x,
+                position.y,
+                position.z,
+                rotation.x(),
+                rotation.y(),
+                rotation.z(),
+                rotation.w(),
+                camera.getFov(),
+                camera.isDetached()
+        ));
+    }
+
     private static void onLevelChanged(ClientLevel level) {
         UPDATE_QUEUE.clear();
+        LATEST_FRAME.set(null);
 
         if (!sceneTrackingEnabled()) {
             return;
@@ -168,5 +205,9 @@ public final class SceneExtractionBridge {
 
     public static long extractionFrameCount() {
         return EXTRACTION_FRAMES.get();
+    }
+
+    public static FrameSnapshot latestFrame() {
+        return LATEST_FRAME.get();
     }
 }

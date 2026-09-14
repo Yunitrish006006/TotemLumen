@@ -19,26 +19,28 @@ Remaining runtime validation:
 
 ## P1 - Scene extraction
 
-Status: **in progress**
+Status: **implementation complete; runtime validation pending**
 
-Implemented foundation:
+Implemented:
 
 - Client level attach/change tracking.
 - Client chunk load/unload tracking.
-- 26.2 `END_EXTRACTION` frame observation.
 - 26.2 `LevelExtractor.blockChanged` hook for renderer-relevant block changes.
 - Bounded thread-safe `SceneUpdateQueue`.
 - Immutable Minecraft-free scene update records.
 - Minimal CPU `RayScene` chunk index.
 - Dirty section deduplication mirroring the 3x3x3 block halo / section-boundary coverage used by the 26.2 extractor.
+- Extraction-time immutable camera/frame snapshot: position, quaternion rotation, FOV, dimension, detached-camera flag.
 - Unit tests for dimension reset, ordering, negative coordinates, boundary halos, and unload cleanup.
 
-Still required to close P1:
+Runtime checks still required to close P1:
 
-- Camera/extraction frame snapshot owned by Totem Lumen.
-- Runtime debug/HUD verification in a real client.
+- Enter a real world with Vulkan enabled and verify chunk counts settle correctly.
+- Place/break blocks, trigger piston/explosion updates, and verify dirty-section counters move.
+- Teleport and switch dimensions; verify stale scene/frame data is cleared.
+- Validate the same extraction path on one native Vulkan machine and one Apple Silicon/MoltenVK machine.
 
-Exit criteria: debug diagnostics accurately report tracked chunks/sections, camera state, and changes after block placement/destruction.
+Exit criteria: runtime diagnostics accurately report tracked chunks/sections and camera state across normal play, block updates, teleportation, and dimension changes.
 
 ## P2 - Materials and CPU scene
 
