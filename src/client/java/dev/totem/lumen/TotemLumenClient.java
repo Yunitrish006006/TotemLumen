@@ -4,6 +4,7 @@ import dev.totem.lumen.integration.SceneExtractionBridge;
 import dev.totem.lumen.render.RendererBootstrap;
 import dev.totem.lumen.vulkan.P4ComputeSmokeTest;
 import dev.totem.lumen.vulkan.P4DdaSmokeTest;
+import dev.totem.lumen.vulkan.P5DebugRayGridTest;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderEvents;
@@ -28,6 +29,7 @@ public final class TotemLumenClient implements ClientModInitializer {
         LevelRenderEvents.START_MAIN.register(context -> {
             P4ComputeSmokeTest.runOnceOnRenderThread();
             P4DdaSmokeTest.runOnceOnRenderThread();
+            P5DebugRayGridTest.runOnceOnRenderThread();
         });
     }
 }
