@@ -6,12 +6,12 @@ Status: **Apple Silicon runtime verified on Apple M4 / MoltenVK 1.4.2**; native 
 ## P1 - Scene extraction
 Status: **implementation complete and exercised in-world on Apple M4**; broader stress/runtime validation still pending.
 
-Live invalidation follow-up (`0.1.0-alpha.13`):
-- Minecraft 26.2 client block changes are now captured from the canonical `LevelRenderer.blockChanged(...)` path.
+Live invalidation follow-up (`0.1.0-alpha.14`):
+- Minecraft 26.2 client block changes are captured from `ClientLevel.sendBlockUpdated(...)`, before the update is forwarded into the vanilla renderer.
 - Dirty block updates schedule a high-priority section halo rebuild instead of waiting behind the initial chunk snapshot backlog.
 - Up to 8 priority dirty sections are rebuilt per extraction while background chunk population remains throttled to 2 sections per extraction.
-- Goal: placed/broken/changed blocks and emissive-light changes become visible without leaving and re-entering the world.
-- CI build/artifact for the implementation: **PASSED**; Apple M4 live-update validation pending.
+- Placed/broken/changed blocks and emissive-light changes now become visible without leaving and re-entering the world.
+- Apple M4 runtime validation: **PASSED**.
 
 ## P2 - Materials and CPU scene
 Status: **compile/test complete and exercised in-world on Apple M4**; detailed material/scene correctness validation still pending.
@@ -126,7 +126,7 @@ Validated in `0.1.0-alpha.11`:
 - Apple M4 runtime confirmed visible local emissive lighting with nonzero resident emitters (`lights=33` observed): **PASSED**.
 
 ## P8 - Emissive materials
-Status: **IMPLEMENTED; Apple M4 runtime visual validation pending**
+Status: **IMPLEMENTED; Apple M4 detailed tint validation still pending**
 
 Implemented in `0.1.0-alpha.12`:
 - `MaterialDefinition` now carries emissive RGB in addition to `emissionLevel`.
@@ -136,7 +136,7 @@ Implemented in `0.1.0-alpha.12`:
 - Emissive surfaces add their own material emission independent of surface-facing direct light.
 - Common baseline tints include warm fire/torch/lantern, cyan soul-fire family, orange-red lava, cool sea-lantern/conduit, and differentiated glowstone/froglight/shroomlight/end-rod classes.
 - P7 section-local culling and P6 secondary-ray visibility remain unchanged.
-- `Emissive Materials` is the default validation mode; F8 can switch back to `Local Lights` for A/B comparison.
+- Scene invalidation in `0.1.0-alpha.14` now updates placed/broken emissive blocks without a world reload.
 - Java/tests/CI development-JAR build: **PASSED**.
 
 Runtime gate:
@@ -146,8 +146,28 @@ Runtime gate:
 - Confirm F8 switching between `Emissive Materials` and `Local Lights` remains stable.
 - Confirm no Vulkan/MoltenVK errors or significant new stalls.
 
-## P9-P12 - Stable GI baseline
-- Soft shadow sampling.
+## P9 - Soft shadow sampling
+Status: **IMPLEMENTED / CI PASS; Apple M4 runtime visual validation pending**
+
+Implemented for `0.1.0-alpha.15`:
+- Adds a dedicated `Soft Shadow` F8 visualization mode while preserving `Hard Shadow` for A/B comparison.
+- Uses four deterministic directional-light visibility rays per primary hit.
+- A fixed low-discrepancy-style disk pattern is projected around the P6 directional-light vector with angular radius `0.055`.
+- Sampling is deterministic per frame, so P9 does not introduce temporal shimmer before temporal reprojection exists.
+- Surface-normal and light-direction offsets reuse the established P6 self-shadow bias.
+- Visibility is averaged across valid samples to produce fractional penumbra values instead of binary visibility.
+- Directly visible P8 emissive surfaces remain emissive in the soft-shadow validation mode.
+- `Soft Shadow` is the default validation mode for this gate.
+- Java/CI development-JAR build: **PASSED**.
+
+Runtime gate:
+- Compare `Hard Shadow` and `Soft Shadow` with F8 around a clear shadow edge.
+- Confirm the soft mode produces a visible penumbra rather than only binary black/white visibility.
+- Confirm camera motion is stable with no temporal shimmer from the fixed sample pattern.
+- Confirm no severe frame stalls on Apple M4 at the current 160-pixel-wide debug resolution.
+- Confirm log contains `P9 soft shadows READY: samples=4` and no shaderc/Vulkan/MoltenVK errors.
+
+## P10-P12 - Stable GI baseline
 - Temporal reprojection/history validation.
 - Spatial denoising.
 - 1-bounce diffuse GI.
