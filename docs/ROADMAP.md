@@ -92,28 +92,44 @@ Validated:
 - HUD texture UV orientation was corrected and visually revalidated in `0.1.0-alpha.9`.
 
 ## P6 - Hard shadows
+Status: **COMPLETE on Apple M4 / MoltenVK**
+
+Validated in `0.1.0-alpha.10`:
+- Reuses the stable P5 primary-ray DDA and hashed section lookup.
+- Adds `Hard Shadow` runtime visualization mode.
+- After a primary voxel hit, the shader offsets the hit point away from the surface and launches a second DDA ray toward a fixed directional test light.
+- Blocking voxels produce binary visibility `0`; unobstructed paths produce visibility `1`.
+- Lambert `N·L` plus a small ambient floor makes shadowed vs lit surfaces visually distinguishable.
+- Hard-edged shadow output was visually confirmed on Apple M4 with stable camera movement and acceptable self-shadow behavior: **PASSED**.
+- F8 debug mode switching remained functional.
+
+## P7 - Local light culling / section light lists
 Status: **IMPLEMENTED; Apple M4 runtime visual validation pending**
 
-Implemented in `0.1.0-alpha.10`:
-- Reuses the stable P5 primary-ray DDA and hashed section lookup.
-- Adds a fifth runtime visualization mode: `Hard Shadow`.
-- `Hard Shadow` is the default mode for the P6 validation build; F8 can still cycle through all previous debug modes.
-- After a primary voxel hit, the shader offsets the hit point away from the surface and launches a second DDA ray toward a fixed directional test light.
-- Any blocking voxel produces binary visibility `0`; an unobstructed path produces visibility `1`.
-- Lambert `N·L` plus a small ambient floor makes shadowed vs lit surfaces visually distinguishable.
-- No soft-shadow sampling, temporal filtering, light culling, emissive lighting, or GI is included yet.
-- GLSL/Java CI build: **PASSED**.
+Implemented in `0.1.0-alpha.11`:
+- Reuses material `emissionLevel` already extracted from Minecraft `BlockState` data; no extra Minecraft lighting-object references are retained.
+- `GpuSectionLightLists` scans selected section snapshots for emissive voxels and produces compact point-light candidates.
+- Global debug-light capacity is capped at 256 candidates.
+- Every stable GPU section slot receives at most 8 nearby light indices, selected by distance to the section AABB.
+- Negative section coordinates and stable slot zero are supported.
+- CPU tests cover emissive extraction, negative world coordinates, neighboring-section assignment and the 8-light local-list cap.
+- GPU scene ABI adds fixed section-light counts, local index lists and point-light records after the stable voxel slots.
+- Primary hits resolve their stable section slot and inspect only that slot's local list rather than scanning all scene lights.
+- Local point lights use emission-derived range/intensity, distance attenuation and P6 secondary DDA visibility.
+- `Local Lights` is the default validation mode; F8 can still switch through Normal / Material / Distance / Steps / Hard Shadow / Local Lights.
+- Java/tests/CI development-JAR build: **PASSED**.
 
 Runtime gate:
-- Confirm the default image shows directional lighting rather than the old normal debug colors.
-- Confirm blocks cast visible hard-edged shadows onto other voxel surfaces.
-- Confirm moving the camera keeps shadows stable with no self-shadow acne severe enough to dominate the image.
-- Confirm F8 still cycles Hard Shadow / Normal / Material / Distance / Steps correctly.
-- Confirm log contains `P6 hard shadow debug READY` and no Vulkan/MoltenVK errors.
+- Test near at least one vanilla emissive block such as a torch, lantern, glowstone or lava.
+- Confirm local surfaces brighten near the emitter and fall off with distance.
+- Confirm a solid voxel between a surface and the emitter creates a hard local shadow.
+- Confirm moving between sections does not cause obvious light-list popping beyond the current 64-section debug residency boundary.
+- Confirm log contains `P7 local light lists READY` with a nonzero `lights=` value when an emitter is resident.
+- Confirm no Vulkan/MoltenVK errors or major frame stalls.
 
-## P7-P8 - Direct lighting
-- P7: light culling/chunk light lists.
-- P8: emissive materials.
+## P8 - Emissive materials
+- Add emissive surface output/color semantics rather than the current warm-white debug point-light approximation.
+- Integrate material emission into the direct-light/material pipeline without global light scans.
 
 ## P9-P12 - Stable GI baseline
 - Soft shadow sampling.
