@@ -14,13 +14,6 @@ Minecraft 26.2's public `GpuDeviceBackend` exposes buffers, textures, render-pip
 
 Totem Lumen's baseline renderer requires Vulkan compute for voxel traversal, so the missing compute/storage capability is the only reason native Vulkan interop is permitted.
 
-References:
-
-- Minecraft 26.2 `GpuDeviceBackend`: `com.mojang.blaze3d.systems.GpuDeviceBackend`
-- Minecraft 26.2 `CommandEncoderBackend`: `com.mojang.blaze3d.systems.CommandEncoderBackend`
-- Minecraft 26.2 `VulkanDevice`: `com.mojang.blaze3d.vulkan.VulkanDevice`
-- Fabric rendering guidance: https://docs.fabricmc.net/develop/rendering/basic-concepts
-
 ## Ownership rules
 
 Minecraft owns:
@@ -32,7 +25,39 @@ Minecraft owns:
 - swapchain/surface/presentation
 - backend shutdown order
 
-Totem Lumen owns only resources it explicitly creates for its ray-tracing workload. It must destroy those resources before Minecraft destroys the device. It must never call `close()` on `VulkanDevice`, destroy Minecraft's allocator, wait-idle globally as a normal frame operation, or replace the swapchain.
+Totem Lumen borrows the device and VMA allocator, but owns each allocation it creates with that allocator. `VulkanOwnedBuffer` is the baseline buffer wrapper: its buffer/allocation pair belongs to Totem Lumen and must be destroyed before Minecraft destroys the allocator.
+
+Totem Lumen must never:
+- call `VulkanDevice.close()`
+- destroy Minecraft's VMA allocator
+- destroy a Minecraft queue/surface/swapchain
+- use `vkQueueWaitIdle` as a per-frame synchronization strategy
+- create a second Vulkan/MoltenVK device for the renderer
+
+`VulkanResourceScope` owns only Totem-Lumen-created resources and destroys them in reverse creation order.
+
+## Baseline memory plan
+
+### Device scene buffer
+
+Usage:
+- `VK_BUFFER_USAGE_STORAGE_BUFFER_BIT`
+- `VK_BUFFER_USAGE_TRANSFER_DST_BIT`
+- VMA `AUTO_PREFER_DEVICE`
+
+This contains voxel/material/lookup data used by compute shaders.
+
+### Upload buffer
+
+Usage:
+- `VK_BUFFER_USAGE_TRANSFER_SRC_BIT`
+- VMA `AUTO`
+- `HOST_ACCESS_SEQUENTIAL_WRITE`
+- persistently mapped
+
+On discrete GPUs this normally behaves as staging memory. On unified-memory hardware such as Apple Silicon, VMA can choose an appropriate shared memory type while Totem Lumen retains exactly the same Vulkan code path.
+
+The first implementation deliberately uses exclusive queue-family ownership and plans copies/dispatches on the compute queue. This avoids graphics/compute queue-family ownership transfers until profiling demonstrates a reason to split work across queues.
 
 ## Apple Silicon
 
