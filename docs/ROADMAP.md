@@ -6,6 +6,13 @@ Status: **Apple Silicon runtime verified on Apple M4 / MoltenVK 1.4.2**; native 
 ## P1 - Scene extraction
 Status: **implementation complete and exercised in-world on Apple M4**; broader stress/runtime validation still pending.
 
+Live invalidation follow-up (`0.1.0-alpha.13`):
+- Minecraft 26.2 client block changes are now captured from the canonical `LevelRenderer.blockChanged(...)` path.
+- Dirty block updates schedule a high-priority section halo rebuild instead of waiting behind the initial chunk snapshot backlog.
+- Up to 8 priority dirty sections are rebuilt per extraction while background chunk population remains throttled to 2 sections per extraction.
+- Goal: placed/broken/changed blocks and emissive-light changes become visible without leaving and re-entering the world.
+- CI build/artifact for the implementation: **PASSED**; Apple M4 live-update validation pending.
+
 ## P2 - Materials and CPU scene
 Status: **compile/test complete and exercised in-world on Apple M4**; detailed material/scene correctness validation still pending.
 
@@ -116,31 +123,28 @@ Validated in `0.1.0-alpha.11`:
 - GPU scene ABI adds fixed section-light counts, local index lists and point-light records after the stable voxel slots.
 - Primary hits resolve their stable section slot and inspect only that slot's local list rather than scanning all scene lights.
 - Local point lights use emission-derived range/intensity, distance attenuation and P6 secondary DDA visibility.
-- Apple M4 runtime confirmed visible local lighting near emissive blocks with `lights=33`, `populatedLists=8/30`, `maxLightsPerSection=8/8` and no Vulkan/MoltenVK errors: **PASSED**.
-- Initial world-entry lighting can lag section residency while Minecraft is still streaming chunks; the local light lists rebuild as scene revisions arrive.
+- Apple M4 runtime confirmed visible local emissive lighting with nonzero resident emitters (`lights=33` observed): **PASSED**.
 
 ## P8 - Emissive materials
 Status: **IMPLEMENTED; Apple M4 runtime visual validation pending**
 
 Implemented in `0.1.0-alpha.12`:
-- `MaterialDefinition` now carries explicit emissive RGB in addition to `emissionLevel`.
-- GPU material ABI expands from 32 to 48 bytes while preserving all previous field offsets and appending emissive RGB.
-- GPU material packing/tests validate the new 48-byte record and RGB offsets.
-- Minecraft material extraction assigns baseline vanilla emissive tints on the CPU side, keeping block identifiers out of the Vulkan shader.
-- Baseline tint groups include soul fire, redstone torches, lava/magma, froglights, sea lantern/conduit, end rods, glowstone, shroomlight, and warm fire/torch/lantern sources.
-- P7 local-light records expand to 8 words: position, radius, RGB and normalized intensity.
-- CPU light-list tests verify emissive tint/intensity survives extraction and culling.
-- GPU scene adds a fixed material-emission table so directly visible emissive surfaces can glow independently of Lambert lighting.
-- `Emissive Materials` is the default validation mode; `Local Lights` remains available through F8 for A/B comparison.
-- Colored local lights retain P7 distance attenuation and secondary-DDA hard occlusion.
-- Java/client/tests/full CI development-JAR build: **PASSED**.
+- `MaterialDefinition` now carries emissive RGB in addition to `emissionLevel`.
+- GPU material ABI expanded from 32 bytes to 48 bytes with explicit emissive RGB offsets.
+- Vanilla baseline emissive tints are assigned by the Minecraft material resolver rather than hard-coded in the shader.
+- Local point-light records now carry RGB and intensity.
+- Emissive surfaces add their own material emission independent of surface-facing direct light.
+- Common baseline tints include warm fire/torch/lantern, cyan soul-fire family, orange-red lava, cool sea-lantern/conduit, and differentiated glowstone/froglight/shroomlight/end-rod classes.
+- P7 section-local culling and P6 secondary-ray visibility remain unchanged.
+- `Emissive Materials` is the default validation mode; F8 can switch back to `Local Lights` for A/B comparison.
+- Java/tests/CI development-JAR build: **PASSED**.
 
 Runtime gate:
-- Compare ordinary torch/lava lighting against soul-fire lighting; warm sources should be orange/yellow while soul sources should be cyan/blue.
-- Confirm emissive blocks themselves remain visibly bright even when their surface normal is not facing the directional light.
-- Confirm colored point-light tint reaches nearby surfaces and remains blocked by solid voxels.
-- Confirm F8 can switch between `Local Lights` and `Emissive Materials` without geometry or lifecycle regressions.
-- Confirm log contains `P8 emissive materials READY` with nonzero emissive/material light counts and no Vulkan/MoltenVK errors.
+- Compare ordinary torch/lantern against soul torch/lantern and lava/sea lantern.
+- Confirm emitted light carries visibly different tint.
+- Confirm the emissive block surface remains bright even when its surface normal is not directly lit.
+- Confirm F8 switching between `Emissive Materials` and `Local Lights` remains stable.
+- Confirm no Vulkan/MoltenVK errors or significant new stalls.
 
 ## P9-P12 - Stable GI baseline
 - Soft shadow sampling.
