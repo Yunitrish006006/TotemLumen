@@ -14,9 +14,10 @@ import java.util.function.ToIntFunction;
 /**
  * Builds a compact set of emissive voxel lights plus fixed per-section local light lists.
  *
- * <p>The input is Minecraft-independent: section snapshots, stable GPU slot lookup and a material
- * emission resolver. Each resident GPU section slot receives at most {@link #MAX_LIGHTS_PER_SECTION}
- * nearby light indices, so shaders never scan every light in the scene.</p>
+ * <p>The input is Minecraft-independent: section snapshots, stable GPU slot lookup and material
+ * emission metadata. Each resident GPU section slot receives at most
+ * {@link #MAX_LIGHTS_PER_SECTION} nearby light indices, so shaders never scan every light in the
+ * scene.</p>
  */
 public final class GpuSectionLightLists {
     public static final int MAX_GLOBAL_LIGHTS = 256;
@@ -25,17 +26,35 @@ public final class GpuSectionLightLists {
     private GpuSectionLightLists() {
     }
 
+    /** Compatibility overload used by older tests/callers; emissive RGB defaults to white. */
     public static Result build(
             List<SectionSnapshot> sections,
             int slotCapacity,
             ToIntFunction<SectionKey> slotResolver,
             IntUnaryOperator emissionForMaterialId
     ) {
+        return build(
+                sections,
+                slotCapacity,
+                slotResolver,
+                materialId -> {
+                    int level = emissionForMaterialId.applyAsInt(materialId);
+                    return new Emission(level, 1.0f, 1.0f, 1.0f);
+                }
+        );
+    }
+
+    public static Result build(
+            List<SectionSnapshot> sections,
+            int slotCapacity,
+            ToIntFunction<SectionKey> slotResolver,
+            EmissionResolver emissionResolver
+    ) {
         if (slotCapacity < 1) {
             throw new IllegalArgumentException("slotCapacity must be positive");
         }
 
-        List<PointLight> lights = collectLights(sections, emissionForMaterialId);
+        List<PointLight> lights = collectLights(sections, emissionResolver);
         int[][] indicesBySlot = new int[slotCapacity][MAX_LIGHTS_PER_SECTION];
         int[] countsBySlot = new int[slotCapacity];
         for (int[] indices : indicesBySlot) {
@@ -84,7 +103,7 @@ public final class GpuSectionLightLists {
 
     private static List<PointLight> collectLights(
             List<SectionSnapshot> sections,
-            IntUnaryOperator emissionForMaterialId
+            EmissionResolver emissionResolver
     ) {
         List<PointLight> lights = new ArrayList<>();
         outer:
@@ -97,21 +116,24 @@ public final class GpuSectionLightLists {
                         if (materialId == 0) {
                             continue;
                         }
-                        int emission = emissionForMaterialId.applyAsInt(materialId);
-                        if (emission <= 0) {
+                        Emission emission = emissionResolver.resolve(materialId);
+                        if (emission == null || emission.level() <= 0) {
                             continue;
                         }
 
                         int blockX = section.key().x() * SectionVoxelData.SIZE + localX;
                         int blockY = section.key().y() * SectionVoxelData.SIZE + localY;
                         int blockZ = section.key().z() * SectionVoxelData.SIZE + localZ;
-                        float radius = Math.max(2.0f, emission + 0.5f);
+                        float radius = Math.max(2.0f, emission.level() + 0.5f);
                         lights.add(new PointLight(
                                 blockX + 0.5f,
                                 blockY + 0.5f,
                                 blockZ + 0.5f,
                                 radius,
-                                emission / 15.0f,
+                                emission.level() / 15.0f,
+                                emission.r(),
+                                emission.g(),
+                                emission.b(),
                                 blockX,
                                 blockY,
                                 blockZ
@@ -146,6 +168,19 @@ public final class GpuSectionLightLists {
         return 0.0;
     }
 
+    @FunctionalInterface
+    public interface EmissionResolver {
+        Emission resolve(int materialId);
+    }
+
+    public record Emission(int level, float r, float g, float b) {
+        public Emission {
+            if (level < 0 || level > 15) {
+                throw new IllegalArgumentException("emission level must be in [0, 15]");
+            }
+        }
+    }
+
     private record LightDistance(int lightIndex, double distanceSquared) {
     }
 
@@ -155,6 +190,9 @@ public final class GpuSectionLightLists {
             float z,
             float radius,
             float intensity,
+            float r,
+            float g,
+            float b,
             int blockX,
             int blockY,
             int blockZ
