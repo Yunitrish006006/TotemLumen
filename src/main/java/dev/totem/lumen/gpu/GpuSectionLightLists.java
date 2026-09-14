@@ -37,7 +37,7 @@ public final class GpuSectionLightLists {
                 sections,
                 slotCapacity,
                 slotResolver,
-                materialId -> {
+                (EmissionResolver) materialId -> {
                     int level = emissionForMaterialId.applyAsInt(materialId);
                     return new Emission(level, 1.0f, 1.0f, 1.0f);
                 }
