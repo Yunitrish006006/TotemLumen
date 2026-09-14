@@ -1,0 +1,10 @@
+{
+  "required": true,
+  "package": "dev.totem.lumen.mixin",
+  "client": [
+    "LevelExtractorMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

@@ -9,7 +9,9 @@ import dev.totem.lumen.scene.SceneUpdateQueue;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientChunkEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLevelEvents;
 import net.fabricmc.fabric.api.client.rendering.v1.level.LevelExtractionEvents;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.level.Level;
 
@@ -38,7 +40,7 @@ public final class SceneExtractionBridge {
 
         ClientLevelEvents.AFTER_CLIENT_LEVEL_CHANGE.register((minecraft, level) -> onLevelChanged(level));
         ClientChunkEvents.CHUNK_LOAD.register((level, chunk) -> {
-            if (!acceptUpdates()) {
+            if (!sceneTrackingEnabled()) {
                 return;
             }
             String dimensionId = dimensionId(level);
@@ -48,7 +50,7 @@ public final class SceneExtractionBridge {
             ));
         });
         ClientChunkEvents.CHUNK_UNLOAD.register((level, chunk) -> {
-            if (!acceptUpdates()) {
+            if (!sceneTrackingEnabled()) {
                 return;
             }
             String dimensionId = dimensionId(level);
@@ -59,7 +61,7 @@ public final class SceneExtractionBridge {
         });
 
         LevelExtractionEvents.END_EXTRACTION.register(context -> {
-            if (acceptUpdates()) {
+            if (sceneTrackingEnabled()) {
                 EXTRACTION_FRAMES.incrementAndGet();
             }
         });
@@ -68,7 +70,7 @@ public final class SceneExtractionBridge {
     }
 
     public static void tick() {
-        if (!acceptUpdates()) {
+        if (!sceneTrackingEnabled()) {
             return;
         }
 
@@ -78,29 +80,55 @@ public final class SceneExtractionBridge {
         long dropped = UPDATE_QUEUE.droppedCount();
         if (dropped != lastReportedDroppedUpdates) {
             TotemLumenClient.LOGGER.warn(
-                    "Scene update queue dropped {} update(s); pending={}, loadedChunks={}",
+                    "Scene update queue dropped {} update(s); pending={}, loadedChunks={}, dirtySections={}",
                     dropped - lastReportedDroppedUpdates,
                     UPDATE_QUEUE.pendingCount(),
-                    SCENE.loadedChunkCount()
+                    SCENE.loadedChunkCount(),
+                    SCENE.dirtySectionCount()
             );
             lastReportedDroppedUpdates = dropped;
         }
 
         if (clientTicks % 600 == 0 && SCENE.activeDimension() != null) {
             TotemLumenClient.LOGGER.debug(
-                    "P1 scene: dimension={}, chunks={}, extractionFrames={}, queuePending={}",
+                    "P1 scene: dimension={}, chunks={}, dirtySections={}, blockChanges={}, extractionFrames={}, queuePending={}",
                     SCENE.activeDimension(),
                     SCENE.loadedChunkCount(),
+                    SCENE.dirtySectionCount(),
+                    SCENE.blockChangeCount(),
                     EXTRACTION_FRAMES.get(),
                     UPDATE_QUEUE.pendingCount()
             );
         }
     }
 
+    /**
+     * Called only from the LevelExtractor mixin. Copy the position immediately and never retain it.
+     */
+    public static void onBlockChanged(BlockPos pos, int updateFlags) {
+        if (!sceneTrackingEnabled()) {
+            return;
+        }
+
+        ClientLevel level = Minecraft.getInstance().level;
+        if (level == null) {
+            return;
+        }
+
+        offer(new SceneUpdate.BlockChanged(
+                UPDATE_QUEUE.nextSequence(),
+                dimensionId(level),
+                pos.getX(),
+                pos.getY(),
+                pos.getZ(),
+                updateFlags
+        ));
+    }
+
     private static void onLevelChanged(ClientLevel level) {
         UPDATE_QUEUE.clear();
 
-        if (!acceptUpdates()) {
+        if (!sceneTrackingEnabled()) {
             return;
         }
 
@@ -126,8 +154,12 @@ public final class SceneExtractionBridge {
         }
     }
 
-    private static boolean acceptUpdates() {
-        return RendererBootstrap.state() == RendererState.READY_FOR_SCENE_EXTRACTION;
+    /**
+     * Scene extraction itself is backend-neutral and may safely run while the graphics device is
+     * still being probed. Once a non-Vulkan backend is confirmed, all scene tracking stops.
+     */
+    private static boolean sceneTrackingEnabled() {
+        return RendererBootstrap.state() != RendererState.DISABLED_NON_VULKAN;
     }
 
     public static RayScene scene() {

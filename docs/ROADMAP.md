@@ -26,18 +26,19 @@ Implemented foundation:
 - Client level attach/change tracking.
 - Client chunk load/unload tracking.
 - 26.2 `END_EXTRACTION` frame observation.
+- 26.2 `LevelExtractor.blockChanged` hook for renderer-relevant block changes.
 - Bounded thread-safe `SceneUpdateQueue`.
 - Immutable Minecraft-free scene update records.
 - Minimal CPU `RayScene` chunk index.
-- Unit tests for dimension reset, stale dimension updates, and ordering.
+- Dirty section deduplication mirroring the 3x3x3 block halo / section-boundary coverage used by the 26.2 extractor.
+- Unit tests for dimension reset, ordering, negative coordinates, boundary halos, and unload cleanup.
 
 Still required to close P1:
 
-- Block update/section dirty tracking for changes inside already-loaded chunks.
 - Camera/extraction frame snapshot owned by Totem Lumen.
 - Runtime debug/HUD verification in a real client.
 
-Exit criteria: a debug counter accurately reports tracked chunks/sections and changes after block placement/destruction.
+Exit criteria: debug diagnostics accurately report tracked chunks/sections, camera state, and changes after block placement/destruction.
 
 ## P2 - Materials and CPU scene
 
