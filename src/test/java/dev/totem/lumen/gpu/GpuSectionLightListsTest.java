@@ -90,6 +90,29 @@ final class GpuSectionLightListsTest {
         }
     }
 
+    @Test
+    void coloredEmissionIsPreservedInPointLightRecord() {
+        SectionSnapshot source = sectionWithLights(
+                new SectionKey("minecraft:overworld", 0, 0, 0),
+                new int[][]{{4, 5, 6, 9}}
+        );
+
+        var result = GpuSectionLightLists.build(
+                List.of(source),
+                1,
+                key -> 0,
+                (GpuSectionLightLists.EmissionResolver) materialId -> materialId == 9
+                        ? new GpuSectionLightLists.Emission(12, 0.2f, 0.7f, 1.0f)
+                        : new GpuSectionLightLists.Emission(0, 0.0f, 0.0f, 0.0f)
+        );
+
+        var light = result.lights().getFirst();
+        assertEquals(0.2f, light.r());
+        assertEquals(0.7f, light.g());
+        assertEquals(1.0f, light.b());
+        assertEquals(12.0f / 15.0f, light.intensity());
+    }
+
     private static SectionSnapshot sectionWithLights(SectionKey key, int[][] lightVoxels) {
         int[] ids = new int[SectionVoxelData.VOXEL_COUNT];
         for (int[] light : lightVoxels) {
