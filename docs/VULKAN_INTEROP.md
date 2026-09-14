@@ -10,9 +10,19 @@ This rule applies equally to native Vulkan on Windows/Linux and Minecraft's Molt
 
 ## Why a narrow native seam is required
 
-Minecraft 26.2's public `GpuDeviceBackend` exposes buffers, textures, render-pipeline compilation and timestamp queries. Its public `CommandEncoderBackend` exposes copies, clears, render passes, fences and timestamps. It does not expose a compute-pipeline type or compute dispatch operation.
+Minecraft 26.2's public generic Blaze3D interfaces do not expose a compute-pipeline or compute-dispatch API. The Vulkan backend does expose its `VulkanCommandEncoder`, including transient Vulkan command-buffer allocation and insertion into Minecraft's existing graphics submission. Totem Lumen uses that Vulkan-specific seam rather than introducing an independent frame submission whenever the graphics queue advertises `VK_QUEUE_COMPUTE_BIT`.
 
-Totem Lumen's baseline renderer requires Vulkan compute for voxel traversal, so the missing compute/storage capability is the only reason native Vulkan interop is permitted.
+## Preferred command-submission strategy
+
+1. Query the real Vulkan queue-family properties.
+2. If Minecraft's graphics queue supports compute, allocate a transient primary command buffer from `VulkanCommandEncoder`.
+3. Record Totem Lumen copy/compute/barrier commands into that command buffer.
+4. End it and call `VulkanCommandEncoder.execute(...)` so ordering remains inside Minecraft's own graphics submission.
+5. Never `vkQueueWaitIdle` per frame.
+
+A separate compute-queue executor is a fallback for devices whose graphics queue cannot dispatch compute. It will require explicit synchronization and is deliberately not the default path.
+
+This is particularly useful on MoltenVK/Apple Silicon because Totem Lumen stays within the same device, queue submission lifecycle, and Metal translation path that Minecraft already owns.
 
 ## Ownership rules
 
@@ -22,6 +32,7 @@ Minecraft owns:
 - `VkDevice`
 - Minecraft's VMA allocator
 - graphics/compute/transfer queues
+- command encoder submission timeline
 - swapchain/surface/presentation
 - backend shutdown order
 
@@ -38,26 +49,9 @@ Totem Lumen must never:
 
 ## Baseline memory plan
 
-### Device scene buffer
+Device scene buffers use `VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT` and VMA `AUTO_PREFER_DEVICE`. Upload buffers use `VK_BUFFER_USAGE_TRANSFER_SRC_BIT`, VMA `AUTO`, persistent mapping and sequential-write host access.
 
-Usage:
-- `VK_BUFFER_USAGE_STORAGE_BUFFER_BIT`
-- `VK_BUFFER_USAGE_TRANSFER_DST_BIT`
-- VMA `AUTO_PREFER_DEVICE`
-
-This contains voxel/material/lookup data used by compute shaders.
-
-### Upload buffer
-
-Usage:
-- `VK_BUFFER_USAGE_TRANSFER_SRC_BIT`
-- VMA `AUTO`
-- `HOST_ACCESS_SEQUENTIAL_WRITE`
-- persistently mapped
-
-On discrete GPUs this normally behaves as staging memory. On unified-memory hardware such as Apple Silicon, VMA can choose an appropriate shared memory type while Totem Lumen retains exactly the same Vulkan code path.
-
-The first implementation deliberately uses exclusive queue-family ownership and plans copies/dispatches on the compute queue. This avoids graphics/compute queue-family ownership transfers until profiling demonstrates a reason to split work across queues.
+On discrete GPUs this normally behaves as device memory plus staging memory. On unified-memory hardware such as Apple Silicon, VMA can choose an appropriate shared memory type while Totem Lumen retains exactly the same Vulkan API path.
 
 ## Apple Silicon
 

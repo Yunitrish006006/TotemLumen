@@ -72,9 +72,11 @@ public final class RendererBootstrap {
 
         vulkanCapabilities = VulkanCapabilityProbe.probe(vulkanDevice, vulkanBackendInfo);
         TotemLumenClient.LOGGER.info(
-                "Vulkan interop: graphicsQueueFamily={}, computeQueueFamily={}, separateComputeFamily={}, MoltenVKLikely={}",
+                "Vulkan interop: graphicsQueueFamily={} (compute={}), computeQueueFamily={} (compute={}), separateComputeFamily={}, MoltenVKLikely={}",
                 vulkanBackendInfo.graphicsQueueFamily(),
+                vulkanCapabilities.graphicsQueueSupportsCompute(),
                 vulkanBackendInfo.computeQueueFamily(),
+                vulkanCapabilities.computeQueueSupportsCompute(),
                 vulkanBackendInfo.separateComputeQueueFamily(),
                 vulkanBackendInfo.likelyMoltenVk()
         );
@@ -90,6 +92,14 @@ public final class RendererBootstrap {
         if (!vulkanCapabilities.baselineComputeUsable()) {
             TotemLumenClient.LOGGER.error(
                     "The active Vulkan device does not meet Totem Lumen's minimum compute/storage limits; GPU RT will remain unavailable."
+            );
+        } else if (vulkanCapabilities.canUseMinecraftFrameSubmissionForCompute()) {
+            TotemLumenClient.LOGGER.info(
+                    "Compute integration mode: Minecraft graphics submission (preferred portable path)"
+            );
+        } else {
+            TotemLumenClient.LOGGER.warn(
+                    "Graphics queue lacks compute support; a dedicated compute-queue synchronization path will be required on this device"
             );
         }
 
