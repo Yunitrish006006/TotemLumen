@@ -33,23 +33,29 @@ Implemented:
 - Extraction-time immutable camera/frame snapshot: position, quaternion rotation, FOV, dimension, detached-camera flag.
 - Unit tests for dimension reset, ordering, negative coordinates, boundary halos, and unload cleanup.
 
-Runtime checks still required to close P1:
-
-- Enter a real world with Vulkan enabled and verify chunk counts settle correctly.
-- Place/break blocks, trigger piston/explosion updates, and verify dirty-section counters move.
-- Teleport and switch dimensions; verify stale scene/frame data is cleared.
-- Validate the same extraction path on one native Vulkan machine and one Apple Silicon/MoltenVK machine.
-
-Exit criteria: runtime diagnostics accurately report tracked chunks/sections and camera state across normal play, block updates, teleportation, and dimension changes.
+Runtime validation remains required on native Vulkan and Apple Silicon/MoltenVK.
 
 ## P2 - Materials and CPU scene
 
-- `BlockState -> MaterialId` registry.
-- Minimum material classes: air, opaque, emissive, cutout, translucent.
-- Compact `ChunkSectionScene` storage.
-- Dirty geometry vs dirty lighting flags.
+Status: **foundation in progress**
 
-Exit criteria: stone, glass, torch, glowstone, water, and air map deterministically to distinct material classes.
+Implemented foundation:
+
+- Minecraft-independent material flags and material definition.
+- Stable integer `MaterialRegistry` with air permanently reserved as ID 0.
+- 16x16x16 `SectionVoxelData` using compact section-local indexing.
+- Immutable `SectionSnapshot` ownership boundary.
+- Initial `BlockState -> MaterialDefinition` integration adapter using 26.2 block properties.
+- Baseline flags support combinations such as CUTOUT+EMISSIVE and TRANSLUCENT+FLUID+EMISSIVE.
+
+Still required:
+
+- Snapshot dirty/loaded sections from `ClientLevel` during extraction with a strict per-frame budget.
+- Register block-state materials while building section snapshots.
+- Publish snapshots into `RayScene` and clear consumed dirty-section markers.
+- Runtime verification for stone, glass, torch, glowstone, water, lava and common cutout blocks.
+
+Exit criteria: stone, glass, torch, glowstone, water, and air map deterministically to distinct material behavior and loaded sections exist entirely in Totem Lumen-owned CPU memory.
 
 ## P3 - Vulkan GPU scene
 
