@@ -44,7 +44,7 @@ public final class SceneExtractionBridge {
             String dimensionId = dimensionId(level);
             var pos = chunk.getPos();
             offer(new SceneUpdate.ChunkLoaded(
-                    UPDATE_QUEUE.nextSequence(), dimensionId, pos.x, pos.z
+                    UPDATE_QUEUE.nextSequence(), dimensionId, pos.x(), pos.z()
             ));
         });
         ClientChunkEvents.CHUNK_UNLOAD.register((level, chunk) -> {
@@ -54,7 +54,7 @@ public final class SceneExtractionBridge {
             String dimensionId = dimensionId(level);
             var pos = chunk.getPos();
             offer(new SceneUpdate.ChunkUnloaded(
-                    UPDATE_QUEUE.nextSequence(), dimensionId, pos.x, pos.z
+                    UPDATE_QUEUE.nextSequence(), dimensionId, pos.x(), pos.z()
             ));
         });
 
