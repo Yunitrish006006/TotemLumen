@@ -41,11 +41,8 @@ Validated:
 - Latest Apple M4 validation: voxel `(-463, 64, 32)`, material `29`, normal `(0, 1, 0)`, distance `0.5`, steps `1`: **PASSED**.
 - Latest camera-center diagnostic also produced a real hit at voxel `(-462, 63, 40)`, material `29`, distance `0.52381134`, steps `1`.
 
-Remaining architecture improvement (not a P4 blocker):
-- Replace temporary linear 64-section lookup with the permanent coordinate -> stable slot lookup before production-scale rendering.
-
 ## P5 - Debug visualization
-Status: **P5A/P5B/P5C runtime-verified on Apple M4; persistent live renderer implemented and awaiting runtime validation**
+Status: **COMPLETE on Apple M4 / MoltenVK**
 
 P5A - full-frame DDA debug grid:
 - 160-pixel-wide low-resolution target preserving the current window aspect ratio.
@@ -73,23 +70,23 @@ P5D - persistent live debug renderer:
 - At most one debug frame may be in flight; no mapped upload buffer overwrite while the GPU is using it.
 - Camera/header data updates per submitted frame.
 - Voxel data is only repacked/uploaded when the nearest-section selection or section revision signature changes.
-- Dimension/world detach resets the live resources rather than retaining stale scene state.
 - Runtime visualization modes: Normal / Material / Distance / Steps.
 - F8 cycles visualization mode and can be rebound through Minecraft Controls.
-- Compile/CI baseline: **PASSED** after migration to Fabric 26.2 `keymapping` API.
-- Apple M4 live runtime validation: **PENDING**.
+- Camera movement, all four modes, world exit/rejoin, and resource lifecycle were runtime-verified on Apple M4: **PASSED**.
 
-P5 exit criteria:
-- Camera movement updates the debug image continuously without resource churn or Vulkan errors.
-- Block edits/section changes become visible after the section revision changes.
-- F8 correctly cycles Normal / Material / Distance / Steps.
-- Leaving/rejoining a world or changing dimension does not retain stale GPU scene resources.
-- Then replace the temporary 64-section linear lookup with the permanent GPU scene/slot lookup before scaling resolution or entering P6.
+## GPU scene lookup gate - in progress before P6
+- Replace the temporary shader-side linear scan over up to 64 sections.
+- Reuse the existing `GpuSectionSlotAllocator` so section payloads keep stable voxel slots across updates.
+- New `GpuSectionLookupTable` uses a 128-bucket open-addressed hash table with 4 words per bucket: `sectionX`, `sectionY`, `sectionZ`, `slot+1`.
+- Slot zero remains representable while zero in the fourth word marks an empty bucket.
+- CPU hash and future GLSL hash are intentionally bit-identical, including negative coordinates and 32-bit overflow.
+- Unit coverage includes negative coordinates, slot zero, forced collisions/linear probing, and packed GPU ABI layout.
+- Next gate: wire this table into the live Vulkan DDA shader and validate identical P5 output before starting lighting.
 
 ## P6-P8 - Direct lighting
-- Hard shadows.
-- Light culling/chunk light lists.
-- Emissive materials.
+- P6: hard shadows after the stable GPU section lookup is runtime-verified.
+- P7: light culling/chunk light lists.
+- P8: emissive materials.
 
 ## P9-P12 - Stable GI baseline
 - Soft shadow sampling.
