@@ -2,7 +2,6 @@ package dev.totem.lumen.vulkan;
 
 import com.mojang.blaze3d.vulkan.VulkanDevice;
 import dev.totem.lumen.vulkan.resource.VulkanOwnedBuffer;
-import org.lwjgl.PointerBuffer;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.util.shaderc.Shaderc;
 import org.lwjgl.vulkan.VK10;
@@ -100,7 +99,7 @@ public final class VulkanComputeProgram implements AutoCloseable {
                     .sType$Default()
                     .descriptorPool(descriptorPool)
                     .pSetLayouts(stack.longs(descriptorSetLayout));
-            PointerBuffer setPtr = stack.mallocPointer(1);
+            LongBuffer setPtr = stack.mallocLong(1);
             check(VK10.vkAllocateDescriptorSets(device.vkDevice(), allocateInfo, setPtr), "vkAllocateDescriptorSets");
             long descriptorSet = setPtr.get(0);
 
