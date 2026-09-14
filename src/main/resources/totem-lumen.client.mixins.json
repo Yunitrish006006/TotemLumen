@@ -3,7 +3,7 @@
   "package": "dev.totem.lumen.mixin",
   "client": [
     "GpuDeviceAccessor",
-    "LevelExtractorMixin"
+    "LevelRendererMixin"
   ],
   "injectors": {
     "defaultRequire": 1
