@@ -10,25 +10,31 @@ import org.lwjgl.vulkan.VkCommandBufferBeginInfo;
 /**
  * One Totem Lumen compute command buffer integrated into Minecraft's existing graphics submission.
  *
- * <p>This is the preferred baseline seam on devices whose graphics queue supports compute. It keeps
- * ordering inside Minecraft's own VulkanCommandEncoder instead of creating a second submission
- * timeline or blocking with vkQueueWaitIdle. The command buffer is allocated from Minecraft's
- * transient pool and Minecraft also owns its deferred destruction.</p>
- *
- * <p>Instances must be created/finished from the same render-thread context used by Minecraft's
- * VulkanCommandEncoder.</p>
+ * <p>Totem Lumen owns the command pool/buffer, but Minecraft's VulkanCommandEncoder owns queue
+ * submission ordering. Completion is handed back through Minecraft's fence queue, so the CPU never
+ * performs a per-frame queue-idle wait.</p>
  */
 public final class VulkanFrameComputeBatch {
     private final VulkanCommandEncoder encoder;
+    private final VulkanFrameCommandPool commandPool;
     private final VkCommandBuffer commandBuffer;
     private boolean finished;
 
-    private VulkanFrameComputeBatch(VulkanCommandEncoder encoder, VkCommandBuffer commandBuffer) {
+    private VulkanFrameComputeBatch(
+            VulkanCommandEncoder encoder,
+            VulkanFrameCommandPool commandPool,
+            VkCommandBuffer commandBuffer
+    ) {
         this.encoder = encoder;
+        this.commandPool = commandPool;
         this.commandBuffer = commandBuffer;
     }
 
-    public static VulkanFrameComputeBatch begin(VulkanDevice device, VulkanCapabilities capabilities) {
+    public static VulkanFrameComputeBatch begin(
+            VulkanDevice device,
+            VulkanCapabilities capabilities,
+            VulkanFrameCommandPool commandPool
+    ) {
         if (!capabilities.canUseMinecraftFrameSubmissionForCompute()) {
             throw new IllegalStateException(
                     "Minecraft graphics queue does not advertise VK_QUEUE_COMPUTE_BIT"
@@ -36,7 +42,7 @@ public final class VulkanFrameComputeBatch {
         }
 
         VulkanCommandEncoder encoder = device.createCommandEncoder();
-        VkCommandBuffer commandBuffer = encoder.allocateTransientCommandBuffer(true);
+        VkCommandBuffer commandBuffer = commandPool.acquire();
 
         try (MemoryStack stack = MemoryStack.stackPush()) {
             VkCommandBufferBeginInfo beginInfo = VkCommandBufferBeginInfo.calloc(stack)
@@ -48,10 +54,9 @@ public final class VulkanFrameComputeBatch {
             }
         }
 
-        return new VulkanFrameComputeBatch(encoder, commandBuffer);
+        return new VulkanFrameComputeBatch(encoder, commandPool, commandBuffer);
     }
 
-    /** Native Vulkan commands may be recorded against this command buffer until finishAndEnqueue. */
     public VkCommandBuffer commandBuffer() {
         if (finished) {
             throw new IllegalStateException("Compute batch is already finished");
@@ -59,10 +64,6 @@ public final class VulkanFrameComputeBatch {
         return commandBuffer;
     }
 
-    /**
-     * Ends recording and appends this command buffer to Minecraft's current graphics submission.
-     * This does not block the CPU or wait for the queue to become idle.
-     */
     public void finishAndEnqueue() {
         if (finished) {
             throw new IllegalStateException("Compute batch is already finished");
@@ -73,6 +74,7 @@ public final class VulkanFrameComputeBatch {
             throw new IllegalStateException("vkEndCommandBuffer failed with VkResult " + result);
         }
         encoder.execute(commandBuffer);
+        commandPool.recycleAfterFence(commandBuffer);
         finished = true;
     }
 

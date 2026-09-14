@@ -10,19 +10,20 @@ This rule applies equally to native Vulkan on Windows/Linux and Minecraft's Molt
 
 ## Why a narrow native seam is required
 
-Minecraft 26.2's public generic Blaze3D interfaces do not expose a compute-pipeline or compute-dispatch API. The Vulkan backend does expose its `VulkanCommandEncoder`, including transient Vulkan command-buffer allocation and insertion into Minecraft's existing graphics submission. Totem Lumen uses that Vulkan-specific seam rather than introducing an independent frame submission whenever the graphics queue advertises `VK_QUEUE_COMPUTE_BIT`.
+Minecraft 26.2's public generic Blaze3D interfaces do not expose a compute-pipeline or compute-dispatch API. Totem Lumen therefore records native Vulkan compute commands, but keeps queue submission inside Minecraft whenever possible.
 
 ## Preferred command-submission strategy
 
 1. Query the real Vulkan queue-family properties.
-2. If Minecraft's graphics queue supports compute, allocate a transient primary command buffer from `VulkanCommandEncoder`.
-3. Record Totem Lumen copy/compute/barrier commands into that command buffer.
-4. End it and call `VulkanCommandEncoder.execute(...)` so ordering remains inside Minecraft's own graphics submission.
-5. Never `vkQueueWaitIdle` per frame.
+2. If Minecraft's graphics queue supports compute, create one Totem-Lumen-owned command pool for that same graphics queue family.
+3. Record copy/compute/barrier commands into Totem Lumen command buffers.
+4. End the command buffer and insert it into Minecraft's current Vulkan submission with `VulkanCommandEncoder.execute(...)`.
+5. Register a Minecraft GPU fence callback and recycle the command buffer only after completion.
+6. Never `vkQueueWaitIdle` per frame.
 
-A separate compute-queue executor is a fallback for devices whose graphics queue cannot dispatch compute. It will require explicit synchronization and is deliberately not the default path.
+A separate compute-queue executor is a fallback only for devices whose graphics queue cannot dispatch compute. It will require explicit synchronization and is deliberately not the default path.
 
-This is particularly useful on MoltenVK/Apple Silicon because Totem Lumen stays within the same device, queue submission lifecycle, and Metal translation path that Minecraft already owns.
+This avoids depending on Minecraft-private transient-command-buffer allocation methods, while retaining Minecraft's submission timeline and MoltenVK/Metal frame lifecycle.
 
 ## Ownership rules
 
@@ -32,11 +33,14 @@ Minecraft owns:
 - `VkDevice`
 - Minecraft's VMA allocator
 - graphics/compute/transfer queues
-- command encoder submission timeline
+- VulkanCommandEncoder submission timeline
 - swapchain/surface/presentation
 - backend shutdown order
 
-Totem Lumen borrows the device and VMA allocator, but owns each allocation it creates with that allocator. `VulkanOwnedBuffer` is the baseline buffer wrapper: its buffer/allocation pair belongs to Totem Lumen and must be destroyed before Minecraft destroys the allocator.
+Totem Lumen owns:
+- each VMA buffer allocation it creates
+- its graphics-family compute command pool
+- its descriptor/pipeline resources added in P4
 
 Totem Lumen must never:
 - call `VulkanDevice.close()`
