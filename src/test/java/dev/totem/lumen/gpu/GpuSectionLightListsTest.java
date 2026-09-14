@@ -6,6 +6,7 @@ import dev.totem.lumen.scene.SectionVoxelData;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.function.IntUnaryOperator;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -26,7 +27,7 @@ final class GpuSectionLightListsTest {
                 List.of(source, neighbor),
                 2,
                 key -> key.x(),
-                materialId -> materialId == 1 ? 14 : 0
+                (IntUnaryOperator) materialId -> materialId == 1 ? 14 : 0
         );
 
         assertEquals(1, result.lights().size());
@@ -52,7 +53,7 @@ final class GpuSectionLightListsTest {
                 List.of(source),
                 1,
                 key -> 0,
-                materialId -> materialId == 5 ? 15 : 0
+                (IntUnaryOperator) materialId -> materialId == 5 ? 15 : 0
         );
 
         var light = result.lights().getFirst();
@@ -79,7 +80,7 @@ final class GpuSectionLightListsTest {
                 List.of(source),
                 1,
                 key -> 0,
-                materialId -> materialId == 1 ? 15 : 0
+                (IntUnaryOperator) materialId -> materialId == 1 ? 15 : 0
         );
 
         assertEquals(12, result.lights().size());
