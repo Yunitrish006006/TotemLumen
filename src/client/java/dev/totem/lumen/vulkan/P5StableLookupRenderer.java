@@ -8,6 +8,7 @@ import com.mojang.blaze3d.textures.GpuTextureView;
 import com.mojang.blaze3d.vulkan.VulkanDevice;
 import com.mojang.blaze3d.vulkan.VulkanGpuTexture;
 import dev.totem.lumen.TotemLumenClient;
+import dev.totem.lumen.gpu.GpuSectionLightLists;
 import dev.totem.lumen.gpu.GpuSectionLookupTable;
 import dev.totem.lumen.gpu.GpuSectionSlotAllocator;
 import dev.totem.lumen.integration.SceneExtractionBridge;
@@ -34,13 +35,11 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * Persistent P5/P6 renderer using stable section slots plus an open-addressed GPU hash lookup.
+ * Persistent P5-P7 renderer using stable section slots, hashed lookup and local light lists.
  *
- * <p>The shader no longer linearly scans every resident section for each DDA voxel. CPU scene
- * changes update a 128-bucket section-coordinate lookup and fixed 16 KiB voxel slots. Camera-only
- * frames still upload only the small header. P6 reuses the same primary-ray path and launches a
- * second DDA ray from the primary hit point toward a fixed directional debug light to validate
- * hard-shadow visibility without introducing soft-shadow sampling, culling, or GI yet.</p>
+ * <p>P5 supplies the live primary DDA image, P6 adds binary secondary-ray visibility, and P7
+ * extracts emissive voxels into compact point-light records. Each stable section slot owns a
+ * capped local list so the shader never scans every scene light for every primary hit.</p>
  */
 public final class P5StableLookupRenderer {
     private static final int MAX_SECTIONS = 64;
@@ -50,6 +49,13 @@ public final class P5StableLookupRenderer {
     private static final int LOOKUP_BASE_WORD = HEADER_WORDS;
     private static final int LOOKUP_WORDS = LOOKUP_CAPACITY * GpuSectionLookupTable.WORDS_PER_BUCKET;
     private static final int VOXEL_BASE_WORD = LOOKUP_BASE_WORD + LOOKUP_WORDS;
+    private static final int SECTION_LIGHT_COUNT_BASE_WORD = VOXEL_BASE_WORD + MAX_SECTIONS * SectionVoxelData.VOXEL_COUNT;
+    private static final int SECTION_LIGHT_INDEX_BASE_WORD = SECTION_LIGHT_COUNT_BASE_WORD + MAX_SECTIONS;
+    private static final int LIGHT_DATA_BASE_WORD = SECTION_LIGHT_INDEX_BASE_WORD
+            + MAX_SECTIONS * GpuSectionLightLists.MAX_LIGHTS_PER_SECTION;
+    private static final int LIGHT_WORDS_PER_RECORD = 4;
+    private static final int PIXEL_BASE_WORD = LIGHT_DATA_BASE_WORD
+            + GpuSectionLightLists.MAX_GLOBAL_LIGHTS * LIGHT_WORDS_PER_RECORD;
     private static final int TARGET_WIDTH = 160;
     private static final int MAX_STEPS = 512;
     private static final float MAX_DISTANCE = 256.0f;
@@ -71,6 +77,11 @@ public final class P5StableLookupRenderer {
             const uint LOOKUP_WORDS_PER_BUCKET = 4u;
             const uint VOXEL_BASE = 576u;
             const uint VOXELS_PER_SECTION = 4096u;
+            const uint SECTION_LIGHT_COUNT_BASE = 262720u;
+            const uint SECTION_LIGHT_INDEX_BASE = 262784u;
+            const uint LIGHT_DATA_BASE = 263296u;
+            const uint MAX_LIGHTS_PER_SECTION = 8u;
+            const uint LIGHT_WORDS_PER_RECORD = 4u;
             const vec3 DEBUG_LIGHT_DIRECTION = normalize(vec3(0.45, 0.85, 0.30));
 
             struct HitResult {
@@ -113,6 +124,14 @@ public final class P5StableLookupRenderer {
                 return -1;
             }
 
+            int sectionSlotForVoxel(ivec3 voxel) {
+                return findSectionSlot(ivec3(
+                    floorDiv16(voxel.x),
+                    floorDiv16(voxel.y),
+                    floorDiv16(voxel.z)
+                ));
+            }
+
             uint materialAt(ivec3 voxel) {
                 ivec3 sectionCoord = ivec3(
                     floorDiv16(voxel.x),
@@ -128,7 +147,7 @@ public final class P5StableLookupRenderer {
                 return scene.data[voxelBase + index];
             }
 
-            HitResult traceRay(vec3 origin, vec3 direction) {
+            HitResult traceRayLimited(vec3 origin, vec3 direction, float maxDistance) {
                 HitResult result;
                 result.hit = 0u;
                 result.materialId = 0u;
@@ -138,7 +157,7 @@ public final class P5StableLookupRenderer {
                 result.steps = 0u;
 
                 float directionLength = length(direction);
-                if (directionLength < 0.000001) return result;
+                if (directionLength < 0.000001 || maxDistance <= 0.0) return result;
 
                 vec3 dir = direction / directionLength;
                 ivec3 voxel = ivec3(floor(origin));
@@ -162,7 +181,6 @@ public final class P5StableLookupRenderer {
                 ivec3 normal = ivec3(0);
                 float distance = 0.0;
                 uint maxSteps = scene.data[6];
-                float maxDistance = uintBitsToFloat(scene.data[7]);
 
                 for (uint iteration = 0u; iteration < maxSteps; iteration++) {
                     uint materialId = materialAt(voxel);
@@ -204,6 +222,10 @@ public final class P5StableLookupRenderer {
                 return result;
             }
 
+            HitResult traceRay(vec3 origin, vec3 direction) {
+                return traceRayLimited(origin, direction, uintBitsToFloat(scene.data[7]));
+            }
+
             uint packRgba(vec3 rgb, uint alpha) {
                 uvec3 c = uvec3(clamp(rgb, vec3(0.0), vec3(1.0)) * 255.0 + 0.5);
                 return c.r | (c.g << 8u) | (c.b << 16u) | ((alpha & 255u) << 24u);
@@ -216,6 +238,75 @@ public final class P5StableLookupRenderer {
                     float((h >> 8u) & 255u),
                     float((h >> 16u) & 255u)
                 ) / 255.0;
+            }
+
+            vec3 resolvedSurfaceNormal(HitResult hit, vec3 primaryDirection) {
+                vec3 normal = vec3(hit.normal);
+                if (length(normal) < 0.5) {
+                    return normalize(-primaryDirection);
+                }
+                return normalize(normal);
+            }
+
+            uint hardShadowColor(HitResult hit, vec3 primaryOrigin, vec3 primaryDirection) {
+                vec3 surfaceNormal = resolvedSurfaceNormal(hit, primaryDirection);
+                float nDotL = max(dot(surfaceNormal, DEBUG_LIGHT_DIRECTION), 0.0);
+                float visibility = 0.0;
+                if (nDotL > 0.0) {
+                    vec3 hitPoint = primaryOrigin + primaryDirection * hit.distance;
+                    vec3 shadowOrigin = hitPoint + surfaceNormal * 0.02 + DEBUG_LIGHT_DIRECTION * 0.01;
+                    HitResult blocker = traceRay(shadowOrigin, DEBUG_LIGHT_DIRECTION);
+                    visibility = blocker.hit == 0u ? 1.0 : 0.0;
+                }
+
+                float lighting = 0.12 + 0.88 * nDotL * visibility;
+                return packRgba(materialColor(hit.materialId) * lighting, 255u);
+            }
+
+            uint localLightColor(HitResult hit, vec3 primaryOrigin, vec3 primaryDirection) {
+                int slot = sectionSlotForVoxel(hit.voxel);
+                if (slot < 0) {
+                    return packRgba(materialColor(hit.materialId) * 0.05, 255u);
+                }
+
+                vec3 surfaceNormal = resolvedSurfaceNormal(hit, primaryDirection);
+                vec3 hitPoint = primaryOrigin + primaryDirection * hit.distance;
+                vec3 lighting = vec3(0.045);
+                uint lightCount = min(scene.data[SECTION_LIGHT_COUNT_BASE + uint(slot)], MAX_LIGHTS_PER_SECTION);
+
+                for (uint localIndex = 0u; localIndex < lightCount; localIndex++) {
+                    uint listWord = SECTION_LIGHT_INDEX_BASE + uint(slot) * MAX_LIGHTS_PER_SECTION + localIndex;
+                    uint lightIndex = scene.data[listWord];
+                    uint lightBase = LIGHT_DATA_BASE + lightIndex * LIGHT_WORDS_PER_RECORD;
+                    vec3 lightPosition = vec3(
+                        uintBitsToFloat(scene.data[lightBase]),
+                        uintBitsToFloat(scene.data[lightBase + 1u]),
+                        uintBitsToFloat(scene.data[lightBase + 2u])
+                    );
+                    float radius = uintBitsToFloat(scene.data[lightBase + 3u]);
+                    vec3 toLight = lightPosition - hitPoint;
+                    float distanceToLight = length(toLight);
+                    if (distanceToLight <= 0.0001 || distanceToLight >= radius) continue;
+
+                    vec3 lightDirection = toLight / distanceToLight;
+                    float nDotL = max(dot(surfaceNormal, lightDirection), 0.0);
+                    if (nDotL <= 0.0) continue;
+
+                    float visibility = 1.0;
+                    float shadowMaxDistance = max(distanceToLight - 0.55, 0.0);
+                    if (shadowMaxDistance > 0.02) {
+                        vec3 shadowOrigin = hitPoint + surfaceNormal * 0.025 + lightDirection * 0.01;
+                        HitResult blocker = traceRayLimited(shadowOrigin, lightDirection, shadowMaxDistance);
+                        visibility = blocker.hit == 0u ? 1.0 : 0.0;
+                    }
+
+                    float range = clamp(1.0 - distanceToLight / radius, 0.0, 1.0);
+                    float attenuation = range * range;
+                    float intensity = clamp((radius - 0.5) / 15.0, 0.0, 1.0);
+                    lighting += vec3(1.0, 0.82, 0.58) * (2.4 * nDotL * attenuation * intensity * visibility);
+                }
+
+                return packRgba(materialColor(hit.materialId) * lighting, 255u);
             }
 
             uint debugColor(HitResult hit, vec3 primaryOrigin, vec3 primaryDirection) {
@@ -237,19 +328,10 @@ public final class P5StableLookupRenderer {
                     float t = clamp(float(hit.steps) / max(float(scene.data[6]), 1.0), 0.0, 1.0);
                     return packRgba(vec3(t, t * t, 1.0 - t), 255u);
                 }
-
-                vec3 surfaceNormal = normalize(vec3(hit.normal));
-                float nDotL = max(dot(surfaceNormal, DEBUG_LIGHT_DIRECTION), 0.0);
-                float visibility = 0.0;
-                if (nDotL > 0.0) {
-                    vec3 hitPoint = primaryOrigin + primaryDirection * hit.distance;
-                    vec3 shadowOrigin = hitPoint + surfaceNormal * 0.02 + DEBUG_LIGHT_DIRECTION * 0.01;
-                    HitResult blocker = traceRay(shadowOrigin, DEBUG_LIGHT_DIRECTION);
-                    visibility = blocker.hit == 0u ? 1.0 : 0.0;
+                if (mode == 4u) {
+                    return hardShadowColor(hit, primaryOrigin, primaryDirection);
                 }
-
-                float lighting = 0.12 + 0.88 * nDotL * visibility;
-                return packRgba(materialColor(hit.materialId) * lighting, 255u);
+                return localLightColor(hit, primaryOrigin, primaryDirection);
             }
 
             void main() {
@@ -298,7 +380,8 @@ public final class P5StableLookupRenderer {
         MATERIAL(1, "Material"),
         DISTANCE(2, "Distance"),
         STEPS(3, "Steps"),
-        HARD_SHADOW(4, "Hard Shadow");
+        HARD_SHADOW(4, "Hard Shadow"),
+        LOCAL_LIGHTS(5, "Local Lights");
 
         private final int shaderValue;
         private final String label;
@@ -314,15 +397,19 @@ public final class P5StableLookupRenderer {
     }
 
     private static Resources resources;
-    private static DebugMode mode = DebugMode.HARD_SHADOW;
+    private static DebugMode mode = DebugMode.LOCAL_LIGHTS;
     private static boolean inFlight;
     private static boolean ready;
     private static boolean resetRequested;
     private static boolean firstFrameLogged;
+    private static boolean p7Logged;
     private static boolean sceneUploadRequired = true;
     private static long sceneSignature = Long.MIN_VALUE;
     private static long lastSubmittedFrame = -1;
     private static int lastLookupMaxProbe;
+    private static int lastLightCount;
+    private static int lastMaxLightsPerSection;
+    private static int lastPopulatedLightLists;
     private static String dimensionId;
 
     private P5StableLookupRenderer() {
@@ -376,7 +463,7 @@ public final class P5StableLookupRenderer {
 
         int uploadBytes;
         if (sceneUploadRequired) {
-            packLookupAndSections(upload, sections);
+            packLookupSectionsAndLights(upload, sections);
             uploadBytes = r.pixelBaseWord * Integer.BYTES;
         } else {
             uploadBytes = CAMERA_UPLOAD_WORDS * Integer.BYTES;
@@ -395,7 +482,7 @@ public final class P5StableLookupRenderer {
         } catch (Throwable failure) {
             inFlight = false;
             sceneUploadRequired |= fullSceneUpload;
-            TotemLumenClient.LOGGER.error("P6 hard-shadow frame submission failed", failure);
+            TotemLumenClient.LOGGER.error("P7 local-light frame submission failed", failure);
         }
     }
 
@@ -468,6 +555,18 @@ public final class P5StableLookupRenderer {
                     "P6 hard shadow debug READY: secondary DDA visibility ray active toward fixed directional test light"
             );
         }
+        if (!p7Logged && fullSceneUpload) {
+            p7Logged = true;
+            TotemLumenClient.LOGGER.info(
+                    "P7 local light lists READY: lights={}, populatedLists={}/{}, maxLightsPerSection={}/{}, mode={}",
+                    lastLightCount,
+                    lastPopulatedLightLists,
+                    SLOT_ALLOCATOR.usedSlots(),
+                    lastMaxLightsPerSection,
+                    GpuSectionLightLists.MAX_LIGHTS_PER_SECTION,
+                    mode.label()
+            );
+        }
         if (resetRequested) {
             resetRequested = false;
             destroyResourcesIfSafe();
@@ -526,6 +625,10 @@ public final class P5StableLookupRenderer {
         SLOT_ALLOCATOR.clear();
         RESIDENT_KEYS.clear();
         lastLookupMaxProbe = 0;
+        lastLightCount = 0;
+        lastMaxLightsPerSection = 0;
+        lastPopulatedLightLists = 0;
+        p7Logged = false;
     }
 
     private static void packHeader(
@@ -556,7 +659,7 @@ public final class P5StableLookupRenderer {
         putWord(buffer, 22, debugMode.shaderValue);
     }
 
-    private static void packLookupAndSections(ByteBuffer buffer, List<SectionSnapshot> sections) {
+    private static void packLookupSectionsAndLights(ByteBuffer buffer, List<SectionSnapshot> sections) {
         GpuSectionLookupTable lookup = new GpuSectionLookupTable(LOOKUP_CAPACITY);
         for (SectionSnapshot snapshot : sections) {
             int slot = SLOT_ALLOCATOR.slotFor(snapshot.key());
@@ -572,6 +675,47 @@ public final class P5StableLookupRenderer {
         }
         lookup.writeTo(buffer, LOOKUP_BASE_WORD);
         lastLookupMaxProbe = lookup.maxProbe();
+
+        for (int word = SECTION_LIGHT_COUNT_BASE_WORD; word < PIXEL_BASE_WORD; word++) {
+            putWord(buffer, word, 0);
+        }
+
+        var materialDefinitions = SceneExtractionBridge.materials().snapshot();
+        var lightLists = GpuSectionLightLists.build(
+                sections,
+                MAX_SECTIONS,
+                SLOT_ALLOCATOR::slotFor,
+                materialId -> materialId >= 0 && materialId < materialDefinitions.size()
+                        ? materialDefinitions.get(materialId).emissionLevel()
+                        : 0
+        );
+
+        int[] counts = lightLists.countsBySlot();
+        int[][] indices = lightLists.indicesBySlot();
+        for (int slot = 0; slot < MAX_SECTIONS; slot++) {
+            putWord(buffer, SECTION_LIGHT_COUNT_BASE_WORD + slot, counts[slot]);
+            for (int localIndex = 0; localIndex < counts[slot]; localIndex++) {
+                putWord(
+                        buffer,
+                        SECTION_LIGHT_INDEX_BASE_WORD + slot * GpuSectionLightLists.MAX_LIGHTS_PER_SECTION + localIndex,
+                        indices[slot][localIndex]
+                );
+            }
+        }
+
+        List<GpuSectionLightLists.PointLight> lights = lightLists.lights();
+        for (int lightIndex = 0; lightIndex < lights.size(); lightIndex++) {
+            GpuSectionLightLists.PointLight light = lights.get(lightIndex);
+            int base = LIGHT_DATA_BASE_WORD + lightIndex * LIGHT_WORDS_PER_RECORD;
+            putWord(buffer, base, Float.floatToRawIntBits(light.x()));
+            putWord(buffer, base + 1, Float.floatToRawIntBits(light.y()));
+            putWord(buffer, base + 2, Float.floatToRawIntBits(light.z()));
+            putWord(buffer, base + 3, Float.floatToRawIntBits(light.radius()));
+        }
+
+        lastLightCount = lights.size();
+        lastMaxLightsPerSection = lightLists.maxLightsInSection();
+        lastPopulatedLightLists = lightLists.populatedLists();
     }
 
     private static float[][] cameraBasis(FrameSnapshot frame) {
@@ -737,7 +881,7 @@ public final class P5StableLookupRenderer {
         try {
             closeable.close();
         } catch (Exception exception) {
-            TotemLumenClient.LOGGER.warn("Failed to close P6 hard-shadow resource", exception);
+            TotemLumenClient.LOGGER.warn("Failed to close P7 local-light resource", exception);
         }
     }
 
@@ -775,7 +919,7 @@ public final class P5StableLookupRenderer {
         }
 
         static int pixelBaseWord() {
-            return VOXEL_BASE_WORD + MAX_SECTIONS * SectionVoxelData.VOXEL_COUNT;
+            return PIXEL_BASE_WORD;
         }
 
         static Resources create(VulkanDevice device, int width, int height) {
@@ -793,17 +937,17 @@ public final class P5StableLookupRenderer {
             try {
                 upload = VulkanOwnedBuffer.createUpload(device, totalBytes);
                 scene = VulkanOwnedBuffer.createStorage(device, totalBytes);
-                program = VulkanComputeProgram.create(device, "totem_lumen_p6_hard_shadow.comp", SHADER, scene);
+                program = VulkanComputeProgram.create(device, "totem_lumen_p7_local_lights.comp", SHADER, scene);
                 commandPool = new VulkanFrameCommandPool(device);
                 texture = RenderSystem.getDevice().createTexture(
-                        "Totem Lumen P6 hard shadow target",
+                        "Totem Lumen P7 local light target",
                         GpuTexture.USAGE_COPY_DST | GpuTexture.USAGE_TEXTURE_BINDING,
                         GpuFormat.RGBA8_UNORM,
                         width, height, 1, 1
                 );
                 view = RenderSystem.getDevice().createTextureView(texture);
                 if (!(texture instanceof VulkanGpuTexture vulkanTexture)) {
-                    throw new IllegalStateException("P6 hard-shadow target is not backed by VulkanGpuTexture");
+                    throw new IllegalStateException("P7 local-light target is not backed by VulkanGpuTexture");
                 }
                 return new Resources(
                         width, height, pixelBaseWord, pixelBytes, totalBytes,
