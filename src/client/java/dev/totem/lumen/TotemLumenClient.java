@@ -12,7 +12,7 @@ import dev.totem.lumen.vulkan.P5WorldDebugComposite;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
-import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
+import net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
 import net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderEvents;
 import net.minecraft.client.KeyMapping;
@@ -28,7 +28,7 @@ public final class TotemLumenClient implements ClientModInitializer {
     private static final KeyMapping.Category DEBUG_CATEGORY = KeyMapping.Category.register(
             Identifier.fromNamespaceAndPath(MOD_ID, "debug")
     );
-    private static final KeyMapping CYCLE_DEBUG_MODE = KeyBindingHelper.registerKeyBinding(
+    private static final KeyMapping CYCLE_DEBUG_MODE = KeyMappingHelper.registerKeyMapping(
             new KeyMapping(
                     "key.totem-lumen.cycle_debug_mode",
                     InputConstants.Type.KEYSYM,
@@ -51,10 +51,7 @@ public final class TotemLumenClient implements ClientModInitializer {
             while (CYCLE_DEBUG_MODE.consumeClick()) {
                 P5LiveDebugRenderer.DebugMode mode = P5LiveDebugRenderer.cycleMode();
                 if (client.player != null) {
-                    client.player.displayClientMessage(
-                            Component.literal("Totem Lumen debug: " + mode.label()),
-                            true
-                    );
+                    client.player.sendSystemMessage(Component.literal("Totem Lumen debug: " + mode.label()));
                 }
                 LOGGER.info("P5 live debug mode changed to {}", mode.label());
             }
