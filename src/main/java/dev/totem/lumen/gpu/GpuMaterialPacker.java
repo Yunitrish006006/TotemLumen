@@ -24,6 +24,10 @@ public final class GpuMaterialPacker {
             buffer.putFloat(material.metallic());
             buffer.putFloat(material.opacity());
             buffer.putFloat(material.indexOfRefraction());
+            buffer.putFloat(material.emissionR());
+            buffer.putFloat(material.emissionG());
+            buffer.putFloat(material.emissionB());
+            buffer.putInt(0);
             buffer.putInt(0);
             buffer.putInt(0);
 
