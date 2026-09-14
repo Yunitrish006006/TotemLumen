@@ -74,17 +74,30 @@ P5D - persistent live debug renderer:
 - F8 cycles visualization mode and can be rebound through Minecraft Controls.
 - Camera movement, all four modes, world exit/rejoin, and resource lifecycle were runtime-verified on Apple M4: **PASSED**.
 
-## GPU scene lookup gate - in progress before P6
-- Replace the temporary shader-side linear scan over up to 64 sections.
-- Reuse the existing `GpuSectionSlotAllocator` so section payloads keep stable voxel slots across updates.
-- New `GpuSectionLookupTable` uses a 128-bucket open-addressed hash table with 4 words per bucket: `sectionX`, `sectionY`, `sectionZ`, `slot+1`.
+## GPU scene lookup gate - runtime validation
+Implementation/CI status: **PASSED; Apple M4 runtime validation pending**
+
+Implemented:
+- Removed the live DDA shader's linear scan over up to 64 sections.
+- Reused `GpuSectionSlotAllocator` so resident section voxel payloads keep stable 16 KiB slots across updates.
+- Added explicit per-section eviction/allocator reset support for moving selection windows and world lifecycle.
+- `GpuSectionLookupTable` uses a 128-bucket open-addressed hash table with 4 words per bucket: `sectionX`, `sectionY`, `sectionZ`, `slot+1`.
 - Slot zero remains representable while zero in the fourth word marks an empty bucket.
-- CPU hash and future GLSL hash are intentionally bit-identical, including negative coordinates and 32-bit overflow.
-- Unit coverage includes negative coordinates, slot zero, forced collisions/linear probing, and packed GPU ABI layout.
-- Next gate: wire this table into the live Vulkan DDA shader and validate identical P5 output before starting lighting.
+- GLSL and Java use the same 32-bit hash constants/overflow semantics, including negative coordinates.
+- DDA `materialAt()` now resolves `sectionCoord -> stable slot -> fixed voxel payload` through the hash table.
+- Camera-only frames still upload only the small header; voxel/lookup data is uploaded only when the selected section/revision signature changes.
+- Runtime diagnostics report resident slot count and `lookupMaxProbe`.
+- CPU tests cover negative coordinates, slot zero, collisions/linear probing, and packed GPU ABI layout.
+- Full CI build and development JAR generation: **PASSED**.
+
+Runtime gate for `0.1.0-alpha.7`:
+- Confirm the real world debug image remains identical/continuous while moving the camera.
+- Confirm F8 Normal / Material / Distance / Steps still work.
+- Confirm world exit/rejoin still resets GPU state cleanly.
+- Confirm log contains `P5 stable GPU lookup READY` with sane `slots` and `lookupMaxProbe` values and no Vulkan errors.
 
 ## P6-P8 - Direct lighting
-- P6: hard shadows after the stable GPU section lookup is runtime-verified.
+- P6: hard shadows immediately after the stable GPU section lookup passes Apple M4 runtime validation.
 - P7: light culling/chunk light lists.
 - P8: emissive materials.
 
