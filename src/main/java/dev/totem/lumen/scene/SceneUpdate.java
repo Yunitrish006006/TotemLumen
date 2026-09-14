@@ -8,7 +8,8 @@ package dev.totem.lumen.scene;
  */
 public sealed interface SceneUpdate
         permits SceneUpdate.LevelChanged, SceneUpdate.LevelCleared,
-        SceneUpdate.ChunkLoaded, SceneUpdate.ChunkUnloaded, SceneUpdate.BlockChanged {
+        SceneUpdate.ChunkLoaded, SceneUpdate.ChunkUnloaded,
+        SceneUpdate.BlockChanged, SceneUpdate.SectionRebuilt {
 
     long sequence();
 
@@ -32,5 +33,8 @@ public sealed interface SceneUpdate
             int blockZ,
             int updateFlags
     ) implements SceneUpdate {
+    }
+
+    record SectionRebuilt(long sequence, SectionSnapshot snapshot) implements SceneUpdate {
     }
 }

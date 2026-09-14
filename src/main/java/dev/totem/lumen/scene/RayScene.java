@@ -1,18 +1,17 @@
 package dev.totem.lumen.scene;
 
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
 
 /**
- * Minimal CPU-side scene index for P1.
- *
- * <p>P2 replaces chunk-only presence with compact section/material storage while preserving this
- * Minecraft-independent boundary. Dirty sections are tracked separately so later GPU uploads can
- * rebuild only the affected section data.</p>
+ * Totem Lumen-owned CPU scene. No Minecraft world objects are retained here.
  */
 public final class RayScene {
     private final Set<ChunkKey> loadedChunks = new HashSet<>();
     private final Set<SectionKey> dirtySections = new HashSet<>();
+    private final Map<SectionKey, SectionSnapshot> sections = new HashMap<>();
     private String activeDimension;
     private long lastAppliedSequence;
     private long blockChangeCount;
@@ -37,12 +36,14 @@ public final class RayScene {
                 activeDimension = changed.dimensionId();
                 loadedChunks.clear();
                 dirtySections.clear();
+                sections.clear();
                 blockChangeCount = 0;
             }
             case SceneUpdate.LevelCleared ignored -> {
                 activeDimension = null;
                 loadedChunks.clear();
                 dirtySections.clear();
+                sections.clear();
                 blockChangeCount = 0;
             }
             case SceneUpdate.ChunkLoaded loaded -> {
@@ -50,18 +51,34 @@ public final class RayScene {
                     loadedChunks.add(new ChunkKey(loaded.dimensionId(), loaded.chunkX(), loaded.chunkZ()));
                 }
             }
-            case SceneUpdate.ChunkUnloaded unloaded -> {
-                loadedChunks.remove(new ChunkKey(unloaded.dimensionId(), unloaded.chunkX(), unloaded.chunkZ()));
-                dirtySections.removeIf(section ->
-                        section.dimensionId().equals(unloaded.dimensionId())
-                                && section.x() == unloaded.chunkX()
-                                && section.z() == unloaded.chunkZ()
-                );
-            }
+            case SceneUpdate.ChunkUnloaded unloaded -> removeChunk(
+                    unloaded.dimensionId(), unloaded.chunkX(), unloaded.chunkZ()
+            );
             case SceneUpdate.BlockChanged changed -> {
                 if (changed.dimensionId().equals(activeDimension)) {
                     blockChangeCount++;
-                    markDirtyHalo(changed);
+                    SectionCoordinates.forDirtyHalo(
+                            changed.dimensionId(),
+                            changed.blockX(),
+                            changed.blockY(),
+                            changed.blockZ(),
+                            dirtySections::add
+                    );
+                }
+            }
+            case SceneUpdate.SectionRebuilt rebuilt -> {
+                SectionSnapshot snapshot = rebuilt.snapshot();
+                SectionKey key = snapshot.key();
+                if (key.dimensionId().equals(activeDimension)) {
+                    if (snapshot.voxels().isAllAir()) {
+                        sections.remove(key);
+                    } else {
+                        SectionSnapshot current = sections.get(key);
+                        if (current == null || snapshot.revision() >= current.revision()) {
+                            sections.put(key, snapshot);
+                        }
+                    }
+                    dirtySections.remove(key);
                 }
             }
         }
@@ -69,26 +86,16 @@ public final class RayScene {
         lastAppliedSequence = update.sequence();
     }
 
-    /**
-     * Minecraft's LevelExtractor dirties a 3x3x3 block halo around one changed block. The halo
-     * normally maps to one section, but a block on a section edge/corner can affect up to eight.
-     * Mirror that section coverage now so P2/P3 do not miss neighbour-dependent geometry.
-     */
-    private void markDirtyHalo(SceneUpdate.BlockChanged changed) {
-        int minSectionX = Math.floorDiv(changed.blockX() - 1, 16);
-        int maxSectionX = Math.floorDiv(changed.blockX() + 1, 16);
-        int minSectionY = Math.floorDiv(changed.blockY() - 1, 16);
-        int maxSectionY = Math.floorDiv(changed.blockY() + 1, 16);
-        int minSectionZ = Math.floorDiv(changed.blockZ() - 1, 16);
-        int maxSectionZ = Math.floorDiv(changed.blockZ() + 1, 16);
+    private void removeChunk(String dimensionId, int chunkX, int chunkZ) {
+        loadedChunks.remove(new ChunkKey(dimensionId, chunkX, chunkZ));
+        dirtySections.removeIf(section -> inChunk(section, dimensionId, chunkX, chunkZ));
+        sections.keySet().removeIf(section -> inChunk(section, dimensionId, chunkX, chunkZ));
+    }
 
-        for (int sectionX = minSectionX; sectionX <= maxSectionX; sectionX++) {
-            for (int sectionY = minSectionY; sectionY <= maxSectionY; sectionY++) {
-                for (int sectionZ = minSectionZ; sectionZ <= maxSectionZ; sectionZ++) {
-                    dirtySections.add(new SectionKey(changed.dimensionId(), sectionX, sectionY, sectionZ));
-                }
-            }
-        }
+    private static boolean inChunk(SectionKey section, String dimensionId, int chunkX, int chunkZ) {
+        return section.dimensionId().equals(dimensionId)
+                && section.x() == chunkX
+                && section.z() == chunkZ;
     }
 
     public String activeDimension() {
@@ -101,6 +108,14 @@ public final class RayScene {
 
     public int dirtySectionCount() {
         return dirtySections.size();
+    }
+
+    public int populatedSectionCount() {
+        return sections.size();
+    }
+
+    public SectionSnapshot section(SectionKey key) {
+        return sections.get(key);
     }
 
     public boolean isSectionDirty(SectionKey key) {

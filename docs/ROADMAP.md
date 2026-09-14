@@ -2,71 +2,58 @@
 
 ## P0 - Vulkan-only bootstrap
 
-Status: **compile-verified**
-
-- Fabric 26.2 / Java 25 project.
-- Client-only mod metadata.
-- Development launch requests Vulkan.
-- Runtime device/backend probe.
-- Explicit refusal to implement an OpenGL fallback.
-- Apple Silicon platform detection for diagnostics only.
-- CI compilation on Java 25.
-
-Remaining runtime validation:
-
-- Launch the development client on at least one native Vulkan machine and one Apple Silicon Mac.
-- Confirm logs identify backend/GPU correctly on both paths.
+Status: **compile-verified**; native Vulkan and Apple Silicon runtime validation pending.
 
 ## P1 - Scene extraction
+
+Status: **implementation complete**; runtime validation pending.
+
+Implemented:
+- Client level/chunk lifecycle tracking.
+- Renderer-relevant `LevelExtractor.blockChanged` hook.
+- Immutable scene update queue.
+- Dirty-section tracking with section-boundary halo coverage.
+- Extraction-time camera frame snapshot.
+
+## P2 - Materials and CPU scene
 
 Status: **implementation complete; runtime validation pending**
 
 Implemented:
+- Minecraft-independent material flags/definitions and stable integer material IDs.
+- Air is permanently material ID 0.
+- 16x16x16 section voxel snapshots using `(y << 8) | (z << 4) | x` indexing.
+- Initial `BlockState -> MaterialDefinition` adapter.
+- Non-empty sections are scheduled when chunks load.
+- Block updates schedule the same neighbouring section halo used by the renderer dirty path.
+- Section rebuild work is capped at 2 sections per extraction frame to avoid a join-world frame spike.
+- Only already-loaded chunks are read (`ChunkStatus.FULL`, `loadOrGenerate=false`).
+- Rebuilt sections are copied into Minecraft-free `SectionSnapshot` objects before entering `RayScene`.
+- All-air rebuilds explicitly remove previous CPU section data.
+- Chunk unload and dimension changes remove stale snapshots/backlog.
+- Material/section coordinate and scene ownership behavior is unit tested.
 
-- Client level attach/change tracking.
-- Client chunk load/unload tracking.
-- 26.2 `LevelExtractor.blockChanged` hook for renderer-relevant block changes.
-- Bounded thread-safe `SceneUpdateQueue`.
-- Immutable Minecraft-free scene update records.
-- Minimal CPU `RayScene` chunk index.
-- Dirty section deduplication mirroring the 3x3x3 block halo / section-boundary coverage used by the 26.2 extractor.
-- Extraction-time immutable camera/frame snapshot: position, quaternion rotation, FOV, dimension, detached-camera flag.
-- Unit tests for dimension reset, ordering, negative coordinates, boundary halos, and unload cleanup.
+Runtime checks required:
+- Join a world and confirm snapshot backlog drains without a large main-thread spike.
+- Verify stone, glass, torch, glowstone, water, lava and cutout vegetation classification.
+- Place/break blocks and verify only affected sections rebuild.
+- Teleport / switch dimensions and verify stale snapshots disappear.
+- Run the same checks on native Vulkan and Apple Silicon/MoltenVK.
 
-Runtime validation remains required on native Vulkan and Apple Silicon/MoltenVK.
-
-## P2 - Materials and CPU scene
-
-Status: **foundation in progress**
-
-Implemented foundation:
-
-- Minecraft-independent material flags and material definition.
-- Stable integer `MaterialRegistry` with air permanently reserved as ID 0.
-- 16x16x16 `SectionVoxelData` using compact section-local indexing.
-- Immutable `SectionSnapshot` ownership boundary.
-- Initial `BlockState -> MaterialDefinition` integration adapter using 26.2 block properties.
-- Baseline flags support combinations such as CUTOUT+EMISSIVE and TRANSLUCENT+FLUID+EMISSIVE.
-
-Still required:
-
-- Snapshot dirty/loaded sections from `ClientLevel` during extraction with a strict per-frame budget.
-- Register block-state materials while building section snapshots.
-- Publish snapshots into `RayScene` and clear consumed dirty-section markers.
-- Runtime verification for stone, glass, torch, glowstone, water, lava and common cutout blocks.
-
-Exit criteria: stone, glass, torch, glowstone, water, and air map deterministically to distinct material behavior and loaded sections exist entirely in Totem Lumen-owned CPU memory.
+Exit criteria: the visible loaded world has a stable Totem Lumen-owned CPU voxel/material representation that updates incrementally.
 
 ## P3 - Vulkan GPU scene
 
-- Establish the narrow Minecraft Vulkan backend bridge if required.
+Next phase after P2 runtime smoke validation:
+- Establish a narrow bridge to Minecraft's Vulkan backend only where Blaze3D public API is insufficient.
 - Device-local voxel/material/light buffers.
 - Staging/ring upload path.
-- Dirty-section incremental uploads.
+- Incremental section uploads keyed by `SectionKey` + revision.
 - Synchronization/lifetime ownership rules.
-- Timestamp/debug-label infrastructure.
+- GPU timestamp/debug-label infrastructure.
+- No OpenGL path.
 
-Exit criteria: a 3x3-chunk scene can be uploaded and updated without full-scene reupload or validation errors.
+Exit criteria: a 3x3-chunk scene can be uploaded and updated without full-scene reupload or Vulkan validation errors.
 
 ## P4 - Vulkan compute voxel traversal
 
@@ -75,7 +62,7 @@ Exit criteria: a 3x3-chunk scene can be uploaded and updated without full-scene 
 - Chunk/section empty-space skipping.
 - Debug output: hit distance, normal, material ID, voxel position, traversal step count.
 
-Exit criteria: center-screen debug rays match Minecraft blocks across chunk boundaries, negative coordinates, and world height edges.
+Exit criteria: center-screen debug rays match Minecraft blocks across chunk boundaries, negative coordinates, and world-height edges.
 
 ## P5-P8 - Direct lighting
 
