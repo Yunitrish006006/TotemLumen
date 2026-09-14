@@ -13,24 +13,25 @@ Status: **compile/test complete; runtime validation pending**
 - Incremental dirty-section rebuilding capped at 2 sections per extraction frame.
 - No forced chunk loads.
 - All-air rebuild/removal semantics and stale-world cleanup.
-- GPU-facing section/material ABI now has unit-tested packers.
+- GPU-facing section/material ABI has unit-tested packers.
 
 ## P3 - Vulkan GPU scene
 Status: **foundation in progress**
 
-Implemented foundation:
+Implemented:
 - One isolated Mixin accessor exposes Minecraft's already-created `GpuDeviceBackend`.
 - `MinecraftVulkanBridge` accepts only `VulkanDevice`; Totem Lumen never creates a second VkDevice.
-- Diagnostic `VulkanBackendInfo` records queue-family layout, driver/device identity, VMA availability and extensions without exposing native handles to ordinary renderer code.
+- Driver/device/queue/VMA diagnostics without exposing native handles to ordinary renderer code.
+- Runtime core-Vulkan limit probe for storage-buffer size and compute workgroup limits.
+- Hardware-RT extension state is informational/optional; compute RT does not depend on it.
 - Stable GPU ABI: 16 KiB uint32 material-ID payload per populated section and 32-byte material metadata records.
-- CPU packers are unit tested and little-endian for x86-64 and Apple Silicon.
+- Stable fixed-size GPU section-slot allocator with revision filtering and deterministic incremental updates.
 - Native seam ownership rules documented in `docs/VULKAN_INTEROP.md`.
 
 Next:
-- Capability probe based on actual Vulkan feature/extension queries, not OS checks.
-- Totem-Lumen-owned Vulkan resource lifetime manager.
-- Device-local section/material buffers plus bounded staging uploads.
-- Section slot allocator and incremental upload queue keyed by `SectionKey + revision`.
+- Totem-Lumen-owned storage/staging buffer resource types using Minecraft's existing Vulkan device/VMA.
+- Bounded upload queue from `RayScene` section revisions to GPU slots.
+- Coordinate-to-slot GPU lookup structure for P4 traversal.
 - Timestamp/debug-label instrumentation.
 
 Important: public Blaze3D 26.2 has no compute-dispatch abstraction, so P4 compute dispatch will live behind this same narrow Vulkan seam. No OpenGL path will be added.

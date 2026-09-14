@@ -24,10 +24,12 @@ public record VulkanBackendInfo(
         return computeQueueFamily != graphicsQueueFamily;
     }
 
-    /**
-     * Diagnostic hint only. Feature paths must still be selected from actual Vulkan capabilities,
-     * never from this platform guess.
-     */
+    public boolean hasDeviceExtension(String extensionName) {
+        String decorated = extensionName + " (D)";
+        return underlyingExtensions.contains(decorated) || underlyingExtensions.contains(extensionName);
+    }
+
+    /** Diagnostic hint only. Feature paths must still be selected from actual Vulkan capabilities. */
     public boolean likelyMoltenVk() {
         String combined = (vendorName + " " + driverInfo + " " + String.join(" ", underlyingExtensions))
                 .toLowerCase(Locale.ROOT);
