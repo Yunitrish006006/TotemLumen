@@ -2,7 +2,7 @@
 
 ## P0 - Vulkan-only bootstrap
 
-Status: **in progress**
+Status: **compile-verified**
 
 - Fabric 26.2 / Java 25 project.
 - Client-only mod metadata.
@@ -12,20 +12,30 @@ Status: **in progress**
 - Apple Silicon platform detection for diagnostics only.
 - CI compilation on Java 25.
 
-Exit criteria:
+Remaining runtime validation:
 
-- `gradle build` passes.
-- Vulkan development client reaches the title screen/world with Totem Lumen loaded.
-- Logs identify the active backend and GPU.
-- OpenGL startup leaves Totem Lumen disabled instead of calling Vulkan-specific code.
+- Launch the development client on at least one native Vulkan machine and one Apple Silicon Mac.
+- Confirm logs identify backend/GPU correctly on both paths.
 
 ## P1 - Scene extraction
 
-- Track world attach/detach and dimension changes.
-- Track chunk/section load and unload.
-- Track block updates.
-- Define immutable `SceneUpdate` events.
-- Keep Minecraft mutable world state out of the renderer hot path.
+Status: **in progress**
+
+Implemented foundation:
+
+- Client level attach/change tracking.
+- Client chunk load/unload tracking.
+- 26.2 `END_EXTRACTION` frame observation.
+- Bounded thread-safe `SceneUpdateQueue`.
+- Immutable Minecraft-free scene update records.
+- Minimal CPU `RayScene` chunk index.
+- Unit tests for dimension reset, stale dimension updates, and ordering.
+
+Still required to close P1:
+
+- Block update/section dirty tracking for changes inside already-loaded chunks.
+- Camera/extraction frame snapshot owned by Totem Lumen.
+- Runtime debug/HUD verification in a real client.
 
 Exit criteria: a debug counter accurately reports tracked chunks/sections and changes after block placement/destruction.
 
