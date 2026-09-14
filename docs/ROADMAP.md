@@ -38,23 +38,22 @@ Validated:
 - Negative-coordinate-safe section lookup.
 - 3D DDA voxel traversal.
 - Deterministic synthetic ray validation against a CPU-known target.
-- Latest Apple M4 validation: voxel `(-464, 22, 47)`, material `24`, normal `(0, 1, 0)`, distance `0.5`, steps `1`: **PASSED**.
-- Camera-center DDA diagnostic path is operational; a MISS is valid when looking at sky or outside the temporary 64-section debug upload.
+- Latest Apple M4 validation: voxel `(-463, 64, 32)`, material `29`, normal `(0, 1, 0)`, distance `0.5`, steps `1`: **PASSED**.
+- Latest camera-center diagnostic also produced a real hit at voxel `(-462, 63, 40)`, material `29`, distance `0.52381134`, steps `1`.
 
 Remaining architecture improvement (not a P4 blocker):
 - Replace temporary linear 64-section lookup with the permanent coordinate -> stable slot lookup before production-scale rendering.
 
 ## P5 - Debug visualization
-Status: **P5A/P5B runtime-verified on Apple M4; real-world DDA composite gate implemented and awaiting visual validation**
+Status: **P5A/P5B/P5C runtime-verified on Apple M4; persistent live renderer implemented and awaiting runtime validation**
 
 P5A - full-frame DDA debug grid:
 - 160-pixel-wide low-resolution target preserving the current window aspect ratio.
 - One Vulkan compute invocation per debug pixel.
 - Full camera ray generation from extracted camera quaternion/FOV.
 - Debug shader modes implemented: normal, material ID, distance, traversal-step heatmap.
-- Current validation mode: normal.
-- One-time CPU readback is used only as a correctness gate; production hot path will remain GPU-only.
-- Apple M4 runtime result: `160x90`, `14102` hits, `298` misses, center RGBA `0xffff8080`: **PASSED**.
+- One-time CPU readback is used only as a correctness gate; production hot path remains GPU-only.
+- Latest Apple M4 runtime result: `160x90`, `14400` hits, `0` misses, center RGBA `0xff80ff80`: **PASSED**.
 
 P5B - texture/composite gate:
 - Vulkan compute writes an RGBA debug buffer.
@@ -64,17 +63,28 @@ P5B - texture/composite gate:
 - Apple M4 runtime result: `P5 debug composite READY`: **PASSED**.
 
 P5C - real-world DDA image composite:
-- Implemented a one-shot real Minecraft voxel normal-debug render.
+- Real Minecraft voxel normal-debug image rendered by Vulkan compute.
 - Uses the same extracted camera/section model as P5A.
 - GPU DDA output stays on GPU and is copied directly into the Minecraft-owned debug texture.
-- HUD automatically falls back to the deterministic gradient until the real DDA texture is ready, then replaces it.
-- This gate is intentionally one-shot; after visual correctness is confirmed it will become a persistent per-frame renderer.
+- Apple M4 runtime result: `P5 world DDA composite READY`: **PASSED**.
 
-Next after P5C visual validation:
-- Make the debug frame update continuously with camera/scene changes.
-- Add runtime mode switching for Normal / Material / Distance / Steps.
-- Remove the temporary deterministic gradient fallback from normal operation.
-- Replace the temporary 64-section linear lookup with the permanent GPU scene/slot lookup.
+P5D - persistent live debug renderer:
+- Persistent Vulkan upload/storage buffers, compute pipeline, command pool, `GpuTexture`, and texture view.
+- At most one debug frame may be in flight; no mapped upload buffer overwrite while the GPU is using it.
+- Camera/header data updates per submitted frame.
+- Voxel data is only repacked/uploaded when the nearest-section selection or section revision signature changes.
+- Dimension/world detach resets the live resources rather than retaining stale scene state.
+- Runtime visualization modes: Normal / Material / Distance / Steps.
+- F8 cycles visualization mode and can be rebound through Minecraft Controls.
+- Compile/CI baseline: **PASSED** after migration to Fabric 26.2 `keymapping` API.
+- Apple M4 live runtime validation: **PENDING**.
+
+P5 exit criteria:
+- Camera movement updates the debug image continuously without resource churn or Vulkan errors.
+- Block edits/section changes become visible after the section revision changes.
+- F8 correctly cycles Normal / Material / Distance / Steps.
+- Leaving/rejoining a world or changing dimension does not retain stale GPU scene resources.
+- Then replace the temporary 64-section linear lookup with the permanent GPU scene/slot lookup before scaling resolution or entering P6.
 
 ## P6-P8 - Direct lighting
 - Hard shadows.
