@@ -2,6 +2,7 @@ package dev.totem.lumen.scene;
 
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -116,6 +117,13 @@ public final class RayScene {
 
     public SectionSnapshot section(SectionKey key) {
         return sections.get(key);
+    }
+
+    /**
+     * Returns an immutable point-in-time view suitable for short-lived GPU upload preparation.
+     */
+    public List<SectionSnapshot> sectionSnapshots() {
+        return List.copyOf(sections.values());
     }
 
     public boolean isSectionDirty(SectionKey key) {
