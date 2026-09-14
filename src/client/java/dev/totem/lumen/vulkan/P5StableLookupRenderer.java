@@ -34,12 +34,13 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * Persistent P5 renderer using stable section slots plus an open-addressed GPU hash lookup.
+ * Persistent P5/P6 renderer using stable section slots plus an open-addressed GPU hash lookup.
  *
  * <p>The shader no longer linearly scans every resident section for each DDA voxel. CPU scene
  * changes update a 128-bucket section-coordinate lookup and fixed 16 KiB voxel slots. Camera-only
- * frames still upload only the small header. The implementation remains on Minecraft's Vulkan
- * device/submission timeline and permits at most one Totem Lumen frame in flight.</p>
+ * frames still upload only the small header. P6 reuses the same primary-ray path and launches a
+ * second DDA ray from the primary hit point toward a fixed directional debug light to validate
+ * hard-shadow visibility without introducing soft-shadow sampling, culling, or GI yet.</p>
  */
 public final class P5StableLookupRenderer {
     private static final int MAX_SECTIONS = 64;
@@ -70,6 +71,7 @@ public final class P5StableLookupRenderer {
             const uint LOOKUP_WORDS_PER_BUCKET = 4u;
             const uint VOXEL_BASE = 576u;
             const uint VOXELS_PER_SECTION = 4096u;
+            const vec3 DEBUG_LIGHT_DIRECTION = normalize(vec3(0.45, 0.85, 0.30));
 
             struct HitResult {
                 uint hit;
@@ -216,7 +218,7 @@ public final class P5StableLookupRenderer {
                 ) / 255.0;
             }
 
-            uint debugColor(HitResult hit) {
+            uint debugColor(HitResult hit, vec3 primaryOrigin, vec3 primaryDirection) {
                 if (hit.hit == 0u) return packRgba(vec3(0.03, 0.05, 0.08), 255u);
 
                 uint mode = scene.data[22];
@@ -231,9 +233,23 @@ public final class P5StableLookupRenderer {
                     float v = 1.0 - clamp(hit.distance / maxDistance, 0.0, 1.0);
                     return packRgba(vec3(v), 255u);
                 }
+                if (mode == 3u) {
+                    float t = clamp(float(hit.steps) / max(float(scene.data[6]), 1.0), 0.0, 1.0);
+                    return packRgba(vec3(t, t * t, 1.0 - t), 255u);
+                }
 
-                float t = clamp(float(hit.steps) / max(float(scene.data[6]), 1.0), 0.0, 1.0);
-                return packRgba(vec3(t, t * t, 1.0 - t), 255u);
+                vec3 surfaceNormal = normalize(vec3(hit.normal));
+                float nDotL = max(dot(surfaceNormal, DEBUG_LIGHT_DIRECTION), 0.0);
+                float visibility = 0.0;
+                if (nDotL > 0.0) {
+                    vec3 hitPoint = primaryOrigin + primaryDirection * hit.distance;
+                    vec3 shadowOrigin = hitPoint + surfaceNormal * 0.02 + DEBUG_LIGHT_DIRECTION * 0.01;
+                    HitResult blocker = traceRay(shadowOrigin, DEBUG_LIGHT_DIRECTION);
+                    visibility = blocker.hit == 0u ? 1.0 : 0.0;
+                }
+
+                float lighting = 0.12 + 0.88 * nDotL * visibility;
+                return packRgba(materialColor(hit.materialId) * lighting, 255u);
             }
 
             void main() {
@@ -271,8 +287,9 @@ public final class P5StableLookupRenderer {
                     forward + right * (ndcX * aspect * tanHalfFov) + up * (ndcY * tanHalfFov)
                 );
 
+                HitResult primaryHit = traceRay(origin, direction);
                 uint pixelBase = scene.data[3];
-                scene.data[pixelBase + pixel.y * width + pixel.x] = debugColor(traceRay(origin, direction));
+                scene.data[pixelBase + pixel.y * width + pixel.x] = debugColor(primaryHit, origin, direction);
             }
             """;
 
@@ -280,7 +297,8 @@ public final class P5StableLookupRenderer {
         NORMAL(0, "Normal"),
         MATERIAL(1, "Material"),
         DISTANCE(2, "Distance"),
-        STEPS(3, "Steps");
+        STEPS(3, "Steps"),
+        HARD_SHADOW(4, "Hard Shadow");
 
         private final int shaderValue;
         private final String label;
@@ -296,7 +314,7 @@ public final class P5StableLookupRenderer {
     }
 
     private static Resources resources;
-    private static DebugMode mode = DebugMode.NORMAL;
+    private static DebugMode mode = DebugMode.HARD_SHADOW;
     private static boolean inFlight;
     private static boolean ready;
     private static boolean resetRequested;
@@ -377,7 +395,7 @@ public final class P5StableLookupRenderer {
         } catch (Throwable failure) {
             inFlight = false;
             sceneUploadRequired |= fullSceneUpload;
-            TotemLumenClient.LOGGER.error("P5 stable-lookup frame submission failed", failure);
+            TotemLumenClient.LOGGER.error("P6 hard-shadow frame submission failed", failure);
         }
     }
 
@@ -445,6 +463,9 @@ public final class P5StableLookupRenderer {
                     resources == null ? 0 : resources.height,
                     SLOT_ALLOCATOR.usedSlots(), SLOT_ALLOCATOR.capacity(), lastLookupMaxProbe,
                     mode.label(), fullSceneUpload
+            );
+            TotemLumenClient.LOGGER.info(
+                    "P6 hard shadow debug READY: secondary DDA visibility ray active toward fixed directional test light"
             );
         }
         if (resetRequested) {
@@ -716,7 +737,7 @@ public final class P5StableLookupRenderer {
         try {
             closeable.close();
         } catch (Exception exception) {
-            TotemLumenClient.LOGGER.warn("Failed to close P5 stable-lookup resource", exception);
+            TotemLumenClient.LOGGER.warn("Failed to close P6 hard-shadow resource", exception);
         }
     }
 
@@ -772,17 +793,17 @@ public final class P5StableLookupRenderer {
             try {
                 upload = VulkanOwnedBuffer.createUpload(device, totalBytes);
                 scene = VulkanOwnedBuffer.createStorage(device, totalBytes);
-                program = VulkanComputeProgram.create(device, "totem_lumen_p5_stable_lookup.comp", SHADER, scene);
+                program = VulkanComputeProgram.create(device, "totem_lumen_p6_hard_shadow.comp", SHADER, scene);
                 commandPool = new VulkanFrameCommandPool(device);
                 texture = RenderSystem.getDevice().createTexture(
-                        "Totem Lumen stable lookup DDA target",
+                        "Totem Lumen P6 hard shadow target",
                         GpuTexture.USAGE_COPY_DST | GpuTexture.USAGE_TEXTURE_BINDING,
                         GpuFormat.RGBA8_UNORM,
                         width, height, 1, 1
                 );
                 view = RenderSystem.getDevice().createTextureView(texture);
                 if (!(texture instanceof VulkanGpuTexture vulkanTexture)) {
-                    throw new IllegalStateException("Stable lookup target is not backed by VulkanGpuTexture");
+                    throw new IllegalStateException("P6 hard-shadow target is not backed by VulkanGpuTexture");
                 }
                 return new Resources(
                         width, height, pixelBaseWord, pixelBytes, totalBytes,
