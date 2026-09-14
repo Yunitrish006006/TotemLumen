@@ -7,7 +7,7 @@ import dev.totem.lumen.vulkan.P4ComputeSmokeTest;
 import dev.totem.lumen.vulkan.P4DdaSmokeTest;
 import dev.totem.lumen.vulkan.P5DebugCompositeTest;
 import dev.totem.lumen.vulkan.P5DebugRayGridTest;
-import dev.totem.lumen.vulkan.P5LiveDebugRenderer;
+import dev.totem.lumen.vulkan.P5StableLookupRenderer;
 import dev.totem.lumen.vulkan.P5WorldDebugComposite;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
@@ -46,14 +46,14 @@ public final class TotemLumenClient implements ClientModInitializer {
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             RendererBootstrap.tick();
             SceneExtractionBridge.tick();
-            P5LiveDebugRenderer.tickLifecycle(client);
+            P5StableLookupRenderer.tickLifecycle(client);
 
             while (CYCLE_DEBUG_MODE.consumeClick()) {
-                P5LiveDebugRenderer.DebugMode mode = P5LiveDebugRenderer.cycleMode();
+                P5StableLookupRenderer.DebugMode mode = P5StableLookupRenderer.cycleMode();
                 if (client.player != null) {
                     client.player.sendSystemMessage(Component.literal("Totem Lumen debug: " + mode.label()));
                 }
-                LOGGER.info("P5 live debug mode changed to {}", mode.label());
+                LOGGER.info("P5 stable lookup debug mode changed to {}", mode.label());
             }
         });
 
@@ -63,14 +63,14 @@ public final class TotemLumenClient implements ClientModInitializer {
             P5DebugRayGridTest.runOnceOnRenderThread();
             P5DebugCompositeTest.runOnceOnRenderThread();
             P5WorldDebugComposite.runOnceOnRenderThread();
-            P5LiveDebugRenderer.runOnRenderThread();
+            P5StableLookupRenderer.runOnRenderThread();
         });
 
         HudElementRegistry.addLast(
                 Identifier.fromNamespaceAndPath(MOD_ID, "p5_debug_overlay"),
-                (graphics, deltaTracker) -> P5LiveDebugRenderer.drawHud(graphics)
+                (graphics, deltaTracker) -> P5StableLookupRenderer.drawHud(graphics)
         );
 
-        ClientLifecycleEvents.CLIENT_STOPPING.register(client -> P5LiveDebugRenderer.shutdown());
+        ClientLifecycleEvents.CLIENT_STOPPING.register(client -> P5StableLookupRenderer.shutdown());
     }
 }
