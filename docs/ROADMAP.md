@@ -74,30 +74,44 @@ P5D - persistent live debug renderer:
 - F8 cycles visualization mode and can be rebound through Minecraft Controls.
 - Camera movement, all four modes, world exit/rejoin, and resource lifecycle were runtime-verified on Apple M4: **PASSED**.
 
-## GPU scene lookup gate - runtime validation
-Implementation/CI status: **PASSED; Apple M4 runtime validation pending**
+## GPU scene lookup gate
+Status: **COMPLETE on Apple M4 / MoltenVK**
 
-Implemented:
+Validated:
 - Removed the live DDA shader's linear scan over up to 64 sections.
 - Reused `GpuSectionSlotAllocator` so resident section voxel payloads keep stable 16 KiB slots across updates.
 - Added explicit per-section eviction/allocator reset support for moving selection windows and world lifecycle.
 - `GpuSectionLookupTable` uses a 128-bucket open-addressed hash table with 4 words per bucket: `sectionX`, `sectionY`, `sectionZ`, `slot+1`.
 - Slot zero remains representable while zero in the fourth word marks an empty bucket.
 - GLSL and Java use the same 32-bit hash constants/overflow semantics, including negative coordinates.
-- DDA `materialAt()` now resolves `sectionCoord -> stable slot -> fixed voxel payload` through the hash table.
+- DDA `materialAt()` resolves `sectionCoord -> stable slot -> fixed voxel payload` through the hash table.
 - Camera-only frames still upload only the small header; voxel/lookup data is uploaded only when the selected section/revision signature changes.
-- Runtime diagnostics report resident slot count and `lookupMaxProbe`.
 - CPU tests cover negative coordinates, slot zero, collisions/linear probing, and packed GPU ABI layout.
-- Full CI build and development JAR generation: **PASSED**.
+- Apple M4 runtime: stable live image, F8 modes, world rejoin and lifecycle all remained correct.
+- Runtime diagnostic observed `slots=24/64` and `lookupMaxProbe=0` with no Vulkan errors: **PASSED**.
+- HUD texture UV orientation was corrected and visually revalidated in `0.1.0-alpha.9`.
 
-Runtime gate for `0.1.0-alpha.7`:
-- Confirm the real world debug image remains identical/continuous while moving the camera.
-- Confirm F8 Normal / Material / Distance / Steps still work.
-- Confirm world exit/rejoin still resets GPU state cleanly.
-- Confirm log contains `P5 stable GPU lookup READY` with sane `slots` and `lookupMaxProbe` values and no Vulkan errors.
+## P6 - Hard shadows
+Status: **IMPLEMENTED; Apple M4 runtime visual validation pending**
 
-## P6-P8 - Direct lighting
-- P6: hard shadows immediately after the stable GPU section lookup passes Apple M4 runtime validation.
+Implemented in `0.1.0-alpha.10`:
+- Reuses the stable P5 primary-ray DDA and hashed section lookup.
+- Adds a fifth runtime visualization mode: `Hard Shadow`.
+- `Hard Shadow` is the default mode for the P6 validation build; F8 can still cycle through all previous debug modes.
+- After a primary voxel hit, the shader offsets the hit point away from the surface and launches a second DDA ray toward a fixed directional test light.
+- Any blocking voxel produces binary visibility `0`; an unobstructed path produces visibility `1`.
+- Lambert `N·L` plus a small ambient floor makes shadowed vs lit surfaces visually distinguishable.
+- No soft-shadow sampling, temporal filtering, light culling, emissive lighting, or GI is included yet.
+- GLSL/Java CI build: **PASSED**.
+
+Runtime gate:
+- Confirm the default image shows directional lighting rather than the old normal debug colors.
+- Confirm blocks cast visible hard-edged shadows onto other voxel surfaces.
+- Confirm moving the camera keeps shadows stable with no self-shadow acne severe enough to dominate the image.
+- Confirm F8 still cycles Hard Shadow / Normal / Material / Distance / Steps correctly.
+- Confirm log contains `P6 hard shadow debug READY` and no Vulkan/MoltenVK errors.
+
+## P7-P8 - Direct lighting
 - P7: light culling/chunk light lists.
 - P8: emissive materials.
 
