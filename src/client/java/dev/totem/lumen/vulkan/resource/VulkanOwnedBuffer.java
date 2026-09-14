@@ -159,19 +159,14 @@ public final class VulkanOwnedBuffer implements AutoCloseable {
         return MemoryUtil.memByteBuffer(mappedPointer, Math.toIntExact(size)).order(ByteOrder.LITTLE_ENDIAN);
     }
 
-    /**
-     * Flushes host writes for non-coherent memory. Safe to call on coherent memory as well.
-     */
+    /** Flushes host writes for non-coherent memory. Safe on coherent memory as well. */
     public void flush(long offset, long length) {
         ensureOpen();
         if (!hostVisible) {
             throw new IllegalStateException("Cannot flush a non-host-visible buffer");
         }
         checkRange(offset, length);
-        int result = Vma.vmaFlushAllocation(vma, allocation, offset, length);
-        if (result != VK10.VK_SUCCESS) {
-            throw new IllegalStateException("vmaFlushAllocation failed with VkResult " + result);
-        }
+        Vma.vmaFlushAllocation(vma, allocation, offset, length);
     }
 
     public long vkBuffer() {
