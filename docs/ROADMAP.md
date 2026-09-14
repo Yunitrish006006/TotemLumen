@@ -160,10 +160,10 @@ Validated in `0.1.0-alpha.15`:
 - Apple M4 runtime confirmed the soft-shadow path is visually functional and stable: **PASSED**.
 
 ## P10 - Temporal reprojection / history validation
-Status: **IMPLEMENTED / CI PASS; Apple M4 runtime visual validation pending**
+Status: **COMPLETE on Apple M4 / MoltenVK**
 
-Implemented for `0.1.0-alpha.16`:
-- Adds a dedicated `Temporal History` F8 mode and makes it the P10 validation default.
+Validated in `0.1.0-alpha.16`:
+- Adds a dedicated `Temporal History` F8 mode.
 - Allocates two GPU-resident per-pixel history buffers inside the existing storage-buffer scene allocation; no temporal data is read back to CPU.
 - History buffers ping-pong each completed frame so current compute writes never race the history buffer being sampled.
 - Each history record stores accumulated RGBA plus hit voxel, raw face normal and material identity.
@@ -171,20 +171,39 @@ Implemented for `0.1.0-alpha.16`:
 - History is accepted only when the reprojected record still references the same voxel/material/normal; disocclusions and changed geometry fall back to the current sample immediately.
 - Any selected-section/revision scene upload disables history reuse for that frame, so live block edits do not blend against stale geometry.
 - Temporal mode rotates through one of the four P9 area-sun samples per frame and blends accepted history at weight `0.80`, allowing stationary pixels to converge over multiple frames while using one shadow ray per frame.
-- The existing four-sample deterministic `Soft Shadow` mode remains available for A/B comparison.
-- The inter-frame Vulkan buffer barrier now makes previous compute history writes visible to the next compute dispatch in addition to synchronizing the current upload transfer.
+- The inter-frame Vulkan buffer barrier makes previous compute history writes visible to the next compute dispatch in addition to synchronizing the current upload transfer.
+- Apple M4 runtime confirmed stationary convergence, stable camera motion and correct rejection after live geometry updates: **PASSED**.
+
+## P11 - Spatial denoising
+Status: **IMPLEMENTED / CI PASS; Apple M4 runtime visual validation pending**
+
+Implemented for `0.1.0-alpha.17`:
+- Adds a dedicated `Spatial Denoise` F8 mode and makes it the P11 validation default.
+- Reuses P10's immutable previous-frame history read buffer, so no extra storage allocation, CPU readback or additional Vulkan dispatch is required.
+- Reprojection still performs the strict P10 center validation against the same voxel/material/normal before any spatial filtering is allowed.
+- After a valid reprojection, a 3x3 neighborhood is gathered from the previous history buffer.
+- Neighbor samples are accepted only when material ID and face normal match the current hit and each voxel-coordinate delta is at most one block.
+- Center, axial and diagonal samples use progressively lower spatial weights; an additional voxel-distance weight suppresses cross-block smearing.
+- The spatially filtered history is blended against the current rotating P9 sample with the existing P10 temporal history weight of `0.80`.
+- `Temporal History` remains available for direct A/B comparison, and both temporal modes can share a valid history chain when switching between them.
+- Scene changes still invalidate history reuse exactly as in P10, so placed/broken blocks cannot be blurred against stale geometry.
 - Java/CI development-JAR build: **PASSED**.
 
 Runtime gate:
-- Hold the camera still and confirm `Temporal History` converges within several frames toward the appearance of `Soft Shadow`.
-- Move/rotate the camera across clear edges and confirm there is no persistent ghost image or smeared geometry.
-- Place and break blocks while remaining in the world and confirm old history is rejected immediately around changed geometry.
-- Switch between `Temporal History` and `Soft Shadow` with F8 and confirm history restarts safely after mode changes.
-- Confirm log contains `P10 temporal history READY` and no shaderc/Vulkan/MoltenVK errors.
+- Compare `Temporal History` and `Spatial Denoise` with F8 while holding the camera still on a clear penumbra or noisy transition.
+- Confirm `Spatial Denoise` reduces local temporal grain without visibly softening voxel silhouettes, wall corners or material boundaries.
+- Rotate/move the camera across high-contrast edges and confirm there is no new spatial streaking or edge bleed.
+- Place/break blocks and confirm old pixels do not smear into the changed geometry.
+- Confirm log contains `P11 spatial denoise READY: radius=1, kernel=3x3` and no shaderc/Vulkan/MoltenVK errors.
 
-## P11-P12 - Stable GI baseline
-- Spatial denoising.
-- 1-bounce diffuse GI.
+## P12 - 1-bounce diffuse GI
+Status: **NOT STARTED**
+
+Planned baseline:
+- Add one diffuse secondary bounce after the primary surface hit.
+- Reuse stable voxel traversal, emissive material data, temporal history and P11 edge-aware denoising.
+- Keep the first GI implementation intentionally low-sample and compute-based; no hardware-RT dependency.
+- Validate energy/visibility and temporal stability before increasing bounce count or sampling complexity.
 
 Target for first meaningful public alpha.
 
