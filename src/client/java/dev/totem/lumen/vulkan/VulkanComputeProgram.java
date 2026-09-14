@@ -110,6 +110,7 @@ public final class VulkanComputeProgram implements AutoCloseable {
                     .sType$Default()
                     .dstSet(descriptorSet)
                     .dstBinding(0)
+                    .descriptorCount(1)
                     .descriptorType(VK10.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
                     .pBufferInfo(bufferInfo);
             VK10.vkUpdateDescriptorSets(device.vkDevice(), writes, null);
