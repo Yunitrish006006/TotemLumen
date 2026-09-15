@@ -97,10 +97,28 @@ class BlockGeometryCodeTest {
     }
 
     @Test
+    void genericModelMeshUsesFullTwelveBitIdSpace() {
+        int empty = BlockGeometryCode.modelMesh(0);
+        int middle = BlockGeometryCode.modelMesh(1729);
+        int highest = BlockGeometryCode.modelMesh(BlockGeometryCode.PARAM_MASK);
+
+        assertEquals(BlockGeometryCode.MODEL_MESH, BlockGeometryCode.family(empty));
+        assertEquals(0, BlockGeometryCode.modelMeshId(empty));
+        assertEquals(1729, BlockGeometryCode.modelMeshId(middle));
+        assertEquals(BlockGeometryCode.PARAM_MASK, BlockGeometryCode.modelMeshId(highest));
+        assertTrue(BlockGeometryCode.isKnown(empty));
+        assertTrue(BlockGeometryCode.isKnown(middle));
+        assertTrue(BlockGeometryCode.isKnown(highest));
+    }
+
+    @Test
     void invalidPackedParametersFailFast() {
         assertThrows(IllegalArgumentException.class, () -> BlockGeometryCode.stairs(4, false, 0));
         assertThrows(IllegalArgumentException.class, () -> BlockGeometryCode.wall(3, 0, 0, 0, false));
         assertThrows(IllegalArgumentException.class, () -> BlockGeometryCode.fenceGate(-1, false, false));
         assertThrows(IllegalArgumentException.class, () -> BlockGeometryCode.transmissivePane(0, 32));
+        assertThrows(IllegalArgumentException.class, () -> BlockGeometryCode.modelMesh(-1));
+        assertThrows(IllegalArgumentException.class, () -> BlockGeometryCode.modelMesh(0x1000));
+        assertThrows(IllegalArgumentException.class, () -> BlockGeometryCode.modelMeshId(BlockGeometryCode.FULL_CUBE));
     }
 }
