@@ -8,8 +8,8 @@ import java.lang.reflect.Field;
  * Build-time verifier for the exact monolithic shader source used by the live P5-P16 renderer.
  *
  * <p>The production renderer compiles this shader during background prewarm because Minecraft owns
- * the Vulkan device. CI verifies the exact transform + shaderc SPIR-V path without creating a
- * Vulkan device, preventing malformed runtime shader transforms from reaching players.</p>
+ * the Vulkan device. CI verifies the exact transform + production shaderc optimization path without
+ * creating a Vulkan device, preventing malformed runtime shader transforms from reaching players.</p>
  */
 public final class P14ShaderCompileVerifier {
     private static final String SHADER_NAME = "totem_lumen_p12_one_bounce_gi.comp";
@@ -38,8 +38,15 @@ public final class P14ShaderCompileVerifier {
 
         try {
             Shaderc.shaderc_compile_options_set_target_env(options, 0, 4202496);
-            Shaderc.shaderc_compile_options_set_optimization_level(options, 0);
-            System.out.println("P16 runtime shader verification START: chars=" + source.length() + ", optimization=O0");
+            Shaderc.shaderc_compile_options_set_optimization_level(
+                    options,
+                    Shaderc.shaderc_optimization_level_performance
+            );
+            System.out.println(
+                    "P16 runtime shader verification START: chars="
+                            + source.length()
+                            + ", optimization=performance"
+            );
 
             long result = Shaderc.shaderc_compile_into_spv(
                     compiler,
