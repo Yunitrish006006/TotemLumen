@@ -2,8 +2,10 @@ package dev.totem.lumen.integration;
 
 import dev.totem.lumen.gameplay.light.DefaultEmissionColors;
 import dev.totem.lumen.gameplay.light.EmissionColor;
+import dev.totem.lumen.material.BaselineSurfaceProperties;
 import dev.totem.lumen.material.MaterialDefinition;
 import dev.totem.lumen.material.MaterialFlags;
+import dev.totem.lumen.material.SurfaceProperties;
 import dev.totem.lumen.world.LightingWorldRule;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.block.LiquidBlock;
@@ -13,9 +15,9 @@ import net.minecraft.world.level.block.state.BlockState;
 /**
  * Minecraft-facing adapter from BlockState to Totem Lumen-owned material metadata.
  *
- * <p>P15 enables transmission only for vanilla clear/stained glass and panes. Fluids remain merely
- * translucent until their own traversal/refraction milestone, and tinted glass intentionally stays
- * light-blocking to preserve its vanilla gameplay property.</p>
+ * <p>P15 enables transmission only for vanilla clear/stained glass and panes. P16 gives the
+ * existing roughness/metallic fields a deterministic built-in fallback profile until resource-pack
+ * PBR metadata becomes authoritative for client surface appearance.</p>
  */
 public final class MinecraftMaterialResolver {
     private MinecraftMaterialResolver() {
@@ -54,12 +56,11 @@ public final class MinecraftMaterialResolver {
             flags |= MaterialFlags.EMISSIVE;
         }
 
-        float roughness = 0.8f;
+        SurfaceProperties surface = BaselineSurfaceProperties.forBlock(sourceId);
         float opacity = 1.0f;
         float ior = 1.0f;
 
         if (translucent) {
-            roughness = 0.08f;
             if (fluid) {
                 opacity = 0.08f;
             } else if (stainedGlass) {
@@ -92,8 +93,8 @@ public final class MinecraftMaterialResolver {
                 emissionColor.red(),
                 emissionColor.green(),
                 emissionColor.blue(),
-                roughness,
-                0.0f,
+                surface.roughness(),
+                surface.metallic(),
                 opacity,
                 ior,
                 transmissionColor[0],
