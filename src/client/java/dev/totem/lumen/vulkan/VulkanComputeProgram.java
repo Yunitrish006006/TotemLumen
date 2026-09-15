@@ -66,8 +66,9 @@ public final class VulkanComputeProgram implements AutoCloseable {
     }
 
     /**
-     * Starts GLSL -> optimized SPIR-V compilation without touching Minecraft's Vulkan device.
-     * The result is consumed later by the background Vulkan pipeline prewarm.
+     * Starts GLSL -> SPIR-V compilation without touching Minecraft's Vulkan device. The current
+     * P16 monolithic shader intentionally stays at O0: shaderc performance optimization overflows
+     * SPIR-V IDs on this source. The result is consumed by the background Vulkan pipeline prewarm.
      */
     public static void prewarmMainGiShader() {
         synchronized (MAIN_GI_PREWARM_LOCK) {
@@ -86,15 +87,11 @@ public final class VulkanComputeProgram implements AutoCloseable {
                 source = transformMainGiShader(source);
 
                 TotemLumenClient.LOGGER.info(
-                        "Background shader prewarm START: shader={}, sourceChars={}, optimization=performance",
+                        "Background shader prewarm START: shader={}, sourceChars={}, optimization=O0",
                         MAIN_GI_SHADER,
                         source.length()
                 );
-                byte[] spirv = compileShaderBytes(
-                        MAIN_GI_SHADER,
-                        source,
-                        Shaderc.shaderc_optimization_level_performance
-                );
+                byte[] spirv = compileShaderBytes(MAIN_GI_SHADER, source, 0);
                 mainGiPrecompiledSpirv = spirv;
 
                 long elapsedMs = (System.nanoTime() - startedAt) / 1_000_000L;
