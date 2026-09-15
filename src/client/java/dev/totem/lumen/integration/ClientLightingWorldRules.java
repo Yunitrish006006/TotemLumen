@@ -19,9 +19,9 @@ public final class ClientLightingWorldRules {
      * for every voxel.
      */
     public static boolean apply(LightingWorldRuleSet ruleSet) {
-        Map<String, LightingWorldRule> next = new LinkedHashMap<>();
-        ruleSet.rules().forEach((blockId, rule) -> next.put(blockId.toString(), rule));
-        next = Map.copyOf(next);
+        Map<String, LightingWorldRule> mutable = new LinkedHashMap<>();
+        ruleSet.rules().forEach((blockId, rule) -> mutable.put(blockId.toString(), rule));
+        Map<String, LightingWorldRule> next = Map.copyOf(mutable);
 
         if (next.equals(rules)) {
             return false;
