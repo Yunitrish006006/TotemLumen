@@ -19,4 +19,7 @@ public record FrameSnapshot(
         float fovDegrees,
         boolean detachedCamera
 ) {
+    public FrameSnapshot {
+        frameIndex = EnvironmentFrameState.packFrameIndex(frameIndex, dimensionId);
+    }
 }
