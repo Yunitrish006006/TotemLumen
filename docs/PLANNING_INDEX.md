@@ -6,10 +6,27 @@ This file is the repository index for design plans and decision tables. Architec
 | --- | --- | --- |
 | Whole project architecture | [`ARCHITECTURE.md`](ARCHITECTURE.md) | Vulkan/client vs common/server boundaries, authority model, package direction |
 | Renderer phases | [`ROADMAP.md`](ROADMAP.md) | P0+ renderer milestones and runtime validation gates |
+| P16 reflection / roughness | [`P16_REFLECTION_ROUGHNESS.md`](P16_REFLECTION_ROUGHNESS.md) | surface fallback values, 32-bit voxel packing, Fresnel/reflection model, performance scope and runtime validation |
 | Server gameplay-light phases | [`GAMEPLAY_LIGHTING_ROADMAP.md`](GAMEPLAY_LIGHTING_ROADMAP.md) | GL0–GL5 implementation/validation roadmap |
 | Authoritative gameplay-light design | [`SERVER_GAMEPLAY_LIGHTING.md`](SERVER_GAMEPLAY_LIGHTING.md) | storage, propagation, spawn policy, sky/environment, budgets, resource estimates, validation matrix |
 | Data-pack block lighting | [`LIGHTING_WORLD_RULES.md`](LIGHTING_WORLD_RULES.md) | `emission_color`, `gameplay_strength`, reload/sync semantics |
 | Vulkan interoperability | [`VULKAN_INTEROP.md`](VULKAN_INTEROP.md) | Minecraft Vulkan ownership/interoperability constraints |
+
+## Current accepted client-lighting decisions
+
+| Topic | Accepted direction |
+| --- | --- |
+| Reflection baseline | one bounded secondary reflection ray in GI Composite |
+| Roughness | 4-bit full-cube fallback profile; deterministic rough reflection direction |
+| Metallic | 4-bit full-cube fallback profile; metallic F0 tint |
+| Fresnel | Schlick approximation |
+| Reflection distance | 64-block cap for P16 baseline |
+| Reflection through glass | reuse P15 filtered/transmissive trace along the secondary ray |
+| Glass interface reflection | deferred until refraction/Fresnel interface transport |
+| Specular recursion | excluded from P16 |
+| Surface source of truth | built-in fallback now; resource-pack/LabPBR later |
+| Voxel memory growth | none; P16 remains inside the existing 32-bit voxel word |
+| Optimization policy | measure Apple/MoltenVK runtime cost before changing ray count/sampling |
 
 ## Current accepted server-lighting decisions
 
@@ -31,7 +48,7 @@ This file is the repository index for design plans and decision tables. Architec
 
 ## Current resource-planning tables
 
-The canonical detailed estimates live in `SERVER_GAMEPLAY_LIGHTING.md`. The headline budgets are:
+The canonical detailed server estimates live in `SERVER_GAMEPLAY_LIGHTING.md`. The headline budgets are:
 
 | Resource | Baseline target |
 | --- | --- |
