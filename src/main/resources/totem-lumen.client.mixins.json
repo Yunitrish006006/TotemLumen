@@ -5,6 +5,7 @@
     "GpuDeviceAccessor",
     "ClientLevelBlockUpdateMixin",
     "P5StableLookupRendererMixin",
+    "P5RendererResourcesMixin",
     "VulkanComputeProgramMixin"
   ],
   "injectors": {
