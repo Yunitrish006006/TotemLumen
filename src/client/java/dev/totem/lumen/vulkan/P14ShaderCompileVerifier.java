@@ -27,6 +27,7 @@ public final class P14ShaderCompileVerifier {
         source = P13EndBrightnessPatch.apply(source);
         source = P14GeometryShaderPatch.apply(source);
         source = P14CommonGeometryPatch.apply(source);
+        source = P14GeometryCorrectionPatch.apply(source);
         source = P13SkyOcclusionPatch.apply(source);
 
         long compiler = Shaderc.shaderc_compiler_initialize();
