@@ -37,7 +37,7 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 public final class SceneExtractionBridge {
     private static final int MAX_PRIORITY_SECTION_SNAPSHOTS_PER_EXTRACTION = 8;
-    private static final int MAX_BACKGROUND_SECTION_SNAPSHOTS_PER_EXTRACTION = 2;
+    private static final int MAX_BACKGROUND_SECTION_SNAPSHOTS_PER_EXTRACTION = 1;
 
     private static final SceneUpdateQueue UPDATE_QUEUE = new SceneUpdateQueue();
     private static final RayScene SCENE = new RayScene();
