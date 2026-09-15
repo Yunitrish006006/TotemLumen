@@ -49,9 +49,8 @@ public final class TotemLumenClient implements ClientModInitializer {
             }
         });
 
-        // Start the expensive shaderc work as early as possible. This does not touch Minecraft's
-        // Vulkan device and therefore does not need to run on the render thread. World rendering
-        // simply waits to enable Totem Lumen until this background prewarm is complete.
+        // GLSL -> SPIR-V starts before the Vulkan device exists. Once RendererBootstrap sees the
+        // device it separately starts driver/MoltenVK pipeline compilation on another worker.
         VulkanComputeProgram.prewarmMainGiShader();
 
         KeyMapping.Category debugCategory = KeyMapping.Category.register(
@@ -104,9 +103,21 @@ public final class TotemLumenClient implements ClientModInitializer {
                 return;
             }
 
-            // Never wait for shaderc from the render thread. Until the background compiler is done,
-            // vanilla Minecraft keeps rendering normally and Totem Lumen retries on a later frame.
-            if (!VulkanComputeProgram.mainGiShaderPrewarmReady()) {
+            Throwable pipelineFailure = VulkanComputeProgram.mainGiPipelinePrewarmFailure();
+            if (pipelineFailure != null) {
+                rendererRuntimeFailed = true;
+                LOGGER.error(
+                        "Totem Lumen Vulkan pipeline prewarm failed; disabling its renderer for this session while Minecraft continues",
+                        pipelineFailure
+                );
+                return;
+            }
+
+            // Never wait for shaderc, SPIR-V -> MSL conversion, or Metal pipeline compilation from
+            // the render thread. Vanilla Minecraft remains responsive until both background stages
+            // are ready, then Totem Lumen starts on a later frame.
+            if (!VulkanComputeProgram.mainGiShaderPrewarmReady()
+                    || !VulkanComputeProgram.mainGiPipelinePrewarmReady()) {
                 return;
             }
 
