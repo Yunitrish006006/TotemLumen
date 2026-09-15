@@ -281,15 +281,23 @@ public final class VulkanComputeProgram implements AutoCloseable {
     }
 
     private static long createShaderModule(VulkanDevice device, byte[] spirv) {
-        try (MemoryStack stack = MemoryStack.stackPush()) {
-            ByteBuffer code = stack.malloc(spirv.length);
+        if ((spirv.length & 3) != 0) {
+            throw new IllegalArgumentException("SPIR-V byte length must be a multiple of 4: " + spirv.length);
+        }
+
+        ByteBuffer code = MemoryUtil.memAlloc(spirv.length);
+        try {
             code.put(spirv).flip();
-            VkShaderModuleCreateInfo createInfo = VkShaderModuleCreateInfo.calloc(stack)
-                    .sType$Default()
-                    .pCode(code);
-            LongBuffer module = stack.mallocLong(1);
-            check(VK10.vkCreateShaderModule(device.vkDevice(), createInfo, null, module), "vkCreateShaderModule");
-            return module.get(0);
+            try (MemoryStack stack = MemoryStack.stackPush()) {
+                VkShaderModuleCreateInfo createInfo = VkShaderModuleCreateInfo.calloc(stack)
+                        .sType$Default()
+                        .pCode(code);
+                LongBuffer module = stack.mallocLong(1);
+                check(VK10.vkCreateShaderModule(device.vkDevice(), createInfo, null, module), "vkCreateShaderModule");
+                return module.get(0);
+            }
+        } finally {
+            MemoryUtil.memFree(code);
         }
     }
 
