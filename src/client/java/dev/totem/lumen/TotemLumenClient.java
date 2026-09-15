@@ -26,21 +26,24 @@ public final class TotemLumenClient implements ClientModInitializer {
     public static final String MOD_ID = "totem-lumen";
     public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
 
-    private static final KeyMapping.Category DEBUG_CATEGORY = KeyMapping.Category.register(
-            Identifier.fromNamespaceAndPath(MOD_ID, "debug")
-    );
-    private static final KeyMapping CYCLE_DEBUG_MODE = KeyMappingHelper.registerKeyMapping(
-            new KeyMapping(
-                    "key.totem-lumen.cycle_debug_mode",
-                    InputConstants.Type.KEYSYM,
-                    InputConstants.KEY_F8,
-                    DEBUG_CATEGORY
-            )
-    );
+    private static KeyMapping cycleDebugMode;
 
     @Override
     public void onInitializeClient() {
         LOGGER.info("Initializing Totem Lumen");
+
+        KeyMapping.Category debugCategory = KeyMapping.Category.register(
+                Identifier.fromNamespaceAndPath(MOD_ID, "debug")
+        );
+        cycleDebugMode = KeyMappingHelper.registerKeyMapping(
+                new KeyMapping(
+                        "key.totem-lumen.cycle_debug_mode",
+                        InputConstants.Type.KEYSYM,
+                        InputConstants.KEY_F8,
+                        debugCategory
+                )
+        );
+
         RendererBootstrap.initialize();
         // Register the environment capture first so its END_EXTRACTION callback runs before the
         // scene bridge constructs the immutable FrameSnapshot for the same frame.
@@ -52,7 +55,7 @@ public final class TotemLumenClient implements ClientModInitializer {
             SceneExtractionBridge.tick();
             P5StableLookupRenderer.tickLifecycle(client);
 
-            while (CYCLE_DEBUG_MODE.consumeClick()) {
+            while (cycleDebugMode.consumeClick()) {
                 P5StableLookupRenderer.DebugMode mode = P5StableLookupRenderer.cycleMode();
                 if (client.player != null) {
                     client.player.sendSystemMessage(Component.literal("Totem Lumen debug: " + mode.label()));
