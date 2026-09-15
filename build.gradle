@@ -50,6 +50,16 @@ tasks.withType(Test).configureEach {
     useJUnitPlatform()
 }
 
+tasks.register('verifyRuntimeShader', JavaExec) {
+    dependsOn tasks.named('clientClasses')
+    classpath = sourceSets.client.runtimeClasspath + sourceSets.main.runtimeClasspath
+    mainClass = 'dev.totem.lumen.vulkan.P14ShaderCompileVerifier'
+}
+
+tasks.named('check') {
+    dependsOn tasks.named('verifyRuntimeShader')
+}
+
 java {
     withSourcesJar()
     sourceCompatibility = JavaVersion.VERSION_25
