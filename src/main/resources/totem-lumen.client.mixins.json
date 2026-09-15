@@ -3,7 +3,9 @@
   "package": "dev.totem.lumen.mixin",
   "client": [
     "GpuDeviceAccessor",
-    "ClientLevelBlockUpdateMixin"
+    "ClientLevelBlockUpdateMixin",
+    "P5StableLookupRendererMixin",
+    "VulkanComputeProgramMixin"
   ],
   "injectors": {
     "defaultRequire": 1
