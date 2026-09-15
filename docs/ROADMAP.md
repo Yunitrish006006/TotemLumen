@@ -175,35 +175,43 @@ Validated in `0.1.0-alpha.16`:
 - Apple M4 runtime confirmed stationary convergence, stable camera motion and correct rejection after live geometry updates: **PASSED**.
 
 ## P11 - Spatial denoising
-Status: **IMPLEMENTED / CI PASS; Apple M4 runtime visual validation pending**
+Status: **COMPLETE on Apple M4 / MoltenVK**
 
-Implemented for `0.1.0-alpha.17`:
-- Adds a dedicated `Spatial Denoise` F8 mode and makes it the P11 validation default.
+Validated in `0.1.0-alpha.17` / `0.1.0-alpha.18`:
+- Adds a dedicated `Spatial Denoise` F8 mode.
 - Reuses P10's immutable previous-frame history read buffer, so no extra storage allocation, CPU readback or additional Vulkan dispatch is required.
 - Reprojection still performs the strict P10 center validation against the same voxel/material/normal before any spatial filtering is allowed.
 - After a valid reprojection, a 3x3 neighborhood is gathered from the previous history buffer.
 - Neighbor samples are accepted only when material ID and face normal match the current hit and each voxel-coordinate delta is at most one block.
 - Center, axial and diagonal samples use progressively lower spatial weights; an additional voxel-distance weight suppresses cross-block smearing.
 - The spatially filtered history is blended against the current rotating P9 sample with the existing P10 temporal history weight of `0.80`.
-- `Temporal History` remains available for direct A/B comparison, and both temporal modes can share a valid history chain when switching between them.
+- `Temporal History` remains available for direct A/B comparison, and both direct-light temporal modes can share a valid history chain when switching between them.
 - Scene changes still invalidate history reuse exactly as in P10, so placed/broken blocks cannot be blurred against stale geometry.
-- Java/CI development-JAR build: **PASSED**.
-
-Runtime gate:
-- Compare `Temporal History` and `Spatial Denoise` with F8 while holding the camera still on a clear penumbra or noisy transition.
-- Confirm `Spatial Denoise` reduces local temporal grain without visibly softening voxel silhouettes, wall corners or material boundaries.
-- Rotate/move the camera across high-contrast edges and confirm there is no new spatial streaking or edge bleed.
-- Place/break blocks and confirm old pixels do not smear into the changed geometry.
-- Confirm log contains `P11 spatial denoise READY: radius=1, kernel=3x3` and no shaderc/Vulkan/MoltenVK errors.
+- Apple M4 runtime visual validation confirmed the spatial denoise path is usable: **PASSED**.
 
 ## P12 - 1-bounce diffuse GI
-Status: **NOT STARTED**
+Status: **IMPLEMENTED / CI PASS; Apple M4 runtime visual validation pending**
 
-Planned baseline:
-- Add one diffuse secondary bounce after the primary surface hit.
-- Reuse stable voxel traversal, emissive material data, temporal history and P11 edge-aware denoising.
-- Keep the first GI implementation intentionally low-sample and compute-based; no hardware-RT dependency.
-- Validate energy/visibility and temporal stability before increasing bounce count or sampling complexity.
+Implemented for `0.1.0-alpha.19`:
+- Adds one cosine-weighted diffuse hemisphere secondary ray per primary-hit pixel per submitted frame.
+- The GI sample sequence uses pixel coordinates plus the low 8 bits of the frame index, providing changing samples across frames while P9 directional sampling continues to use its 4-sample mask.
+- Secondary diffuse rays reuse the stable hashed voxel scene and 3D DDA path with a baseline GI distance cap of `48` blocks.
+- A secondary-surface radiance estimate combines the hit material color, its emissive RGB, and visibility to the existing directional debug light.
+- The one-bounce contribution is modulated by the primary material color with baseline strength `0.65`.
+- Adds `Indirect GI` mode for viewing only the one-bounce term and `GI Composite` mode for direct + local-light + indirect output.
+- `GI Composite` is the P12 validation default.
+- P12 modes reuse P10 temporal reprojection and P11 edge-aware 3x3 spatial history filtering.
+- History compatibility is now explicit: `Temporal History` / `Spatial Denoise` may share a direct-light history chain, while `Indirect GI` and `GI Composite` only reuse history from the same radiance mode. Switching between incompatible modes invalidates history immediately.
+- Live scene changes still disable history reuse for the changed frame, preserving the P10 geometry-update rejection behavior.
+- Java/tests/CI development-JAR build: **PASSED**.
+
+Runtime gate:
+- Use `Indirect GI` near a bright surface beside a darker perpendicular wall/floor and confirm visible one-bounce light appears where direct light is absent.
+- Confirm occluded corners do not receive obviously impossible light and no bright streaks cross solid voxel boundaries.
+- Hold the camera still and confirm GI noise converges over several frames rather than remaining fully random.
+- Compare `Indirect GI` against `GI Composite` and confirm direct/local light is absent from the pure-indirect mode.
+- Place/break blocks while in `GI Composite` and confirm stale indirect light is rejected rather than ghosting through changed geometry.
+- Confirm log contains `P12 one-bounce GI READY` and no shaderc/Vulkan/MoltenVK errors.
 
 Target for first meaningful public alpha.
 
