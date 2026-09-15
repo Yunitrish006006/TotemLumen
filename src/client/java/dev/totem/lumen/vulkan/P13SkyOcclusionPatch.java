@@ -8,8 +8,8 @@ import dev.totem.lumen.TotemLumenClient;
  * <p>The first environment-lighting baseline evaluated sky radiance directly from the surface
  * normal. That made fully enclosed rooms brighten and darken with the Overworld clock even though
  * the roof correctly blocked the directional sun. This patch adds a conservative world-up sky
- * visibility ray before applying Overworld sky ambient. Because it calls the already-patched
- * traceRay path, P14 slab geometry also participates in skylight occlusion.</p>
+ * visibility ray before applying Overworld sky ambient. P15 is deliberately chained after this
+ * transform so that the same sky visibility path can become RGB-transmissive through glass.</p>
  */
 final class P13SkyOcclusionPatch {
     private P13SkyOcclusionPatch() {
@@ -44,6 +44,6 @@ final class P13SkyOcclusionPatch {
         TotemLumenClient.LOGGER.info(
                 "P13 skylight occlusion active: overworldSkyVisibilityRay=world-up, sealedRoomTimeLeakFix=true"
         );
-        return source;
+        return P15GlassTransmissionPatch.apply(source);
     }
 }
