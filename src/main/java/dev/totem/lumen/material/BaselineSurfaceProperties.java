@@ -39,13 +39,14 @@ public final class BaselineSurfaceProperties {
         if (path.equals("raw_iron_block")) return new SurfaceProperties(0.62f, 0.48f);
         if (path.equals("raw_copper_block")) return new SurfaceProperties(0.52f, 0.55f);
 
-        if (path.contains("oxidized_copper")) return new SurfaceProperties(0.72f, 0.12f);
-        if (path.contains("weathered_copper")) return new SurfaceProperties(0.58f, 0.32f);
-        if (path.contains("exposed_copper")) return new SurfaceProperties(0.44f, 0.56f);
-        if (path.equals("copper_block")
-                || path.startsWith("waxed_copper")
-                || path.contains("cut_copper")) {
-            return new SurfaceProperties(0.32f, 0.78f);
+        String copperPath = path.startsWith("waxed_") ? path.substring("waxed_".length()) : path;
+        if (copperPath.contains("copper")) {
+            if (copperPath.contains("oxidized")) return new SurfaceProperties(0.72f, 0.12f);
+            if (copperPath.contains("weathered")) return new SurfaceProperties(0.58f, 0.32f);
+            if (copperPath.contains("exposed")) return new SurfaceProperties(0.44f, 0.56f);
+            if (copperPath.equals("copper_block") || copperPath.contains("cut_copper")) {
+                return new SurfaceProperties(0.32f, 0.78f);
+            }
         }
 
         if (path.equals("diamond_block")
