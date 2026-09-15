@@ -22,7 +22,7 @@ The server gameplay subsystem never initializes or depends on Vulkan. A dedicate
 `0.1.0-alpha.35` keeps the P16 reflection/roughness renderer from Alpha 33 while fixing the Apple Silicon/MoltenVK startup stalls found in Alpha 33/34 runtime testing:
 
 - the large SPIR-V blob remains off LWJGL `MemoryStack`;
-- production GLSL -> SPIR-V prewarm uses shaderc performance optimization;
+- GLSL -> SPIR-V compilation remains on the background shader-prewarm thread at O0; shaderc performance optimization was rejected after the monolithic P16 shader triggered an optimizer ID overflow;
 - SPIR-V -> MoltenVK/Metal compute-pipeline creation runs on a dedicated background worker;
 - Minecraft's render thread never waits for main-GI pipeline compilation;
 - vanilla rendering remains responsive until the prepared pipeline is ready;
