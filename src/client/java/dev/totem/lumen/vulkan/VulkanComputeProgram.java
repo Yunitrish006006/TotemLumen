@@ -55,6 +55,7 @@ public final class VulkanComputeProgram implements AutoCloseable {
             glsl = P13EndBrightnessPatch.apply(glsl);
             glsl = P14GeometryShaderPatch.apply(glsl);
             glsl = P14CommonGeometryPatch.apply(glsl);
+            glsl = P14GeometryCorrectionPatch.apply(glsl);
             glsl = P13SkyOcclusionPatch.apply(glsl);
         }
         long shaderModule = compileShaderModule(device, name, glsl);
