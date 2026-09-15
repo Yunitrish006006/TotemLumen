@@ -47,6 +47,9 @@ public final class VulkanComputeProgram implements AutoCloseable {
     }
 
     public static VulkanComputeProgram create(VulkanDevice device, String name, String glsl, VulkanOwnedBuffer storage) {
+        if ("totem_lumen_p12_one_bounce_gi.comp".equals(name)) {
+            glsl = P12GiShaderPatch.apply(glsl);
+        }
         long shaderModule = compileShaderModule(device, name, glsl);
         long descriptorSetLayout = 0L;
         long pipelineLayout = 0L;
