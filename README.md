@@ -1,39 +1,57 @@
 # Totem Lumen
 
-Totem Lumen is a client-side Minecraft 26.2 Fabric rendering mod focused on Vulkan-first real-time lighting and voxel ray tracing.
+Totem Lumen is a Minecraft 26.2 Fabric lighting mod with two deliberately separate systems:
+
+- a Vulkan-first, Vulkan-only client renderer for real-time voxel ray tracing, shadows, GI, temporal accumulation, denoising, transmission and composition;
+- server-authoritative gameplay lighting for deterministic RGB light semantics used by spawning and future world rules.
+
+The server gameplay subsystem never initializes or depends on Vulkan. A dedicated server can run Totem Lumen only for authoritative lighting/world rules, while compatible clients render the same server-owned emission colors with their local Vulkan renderer.
 
 ## Project goals
 
-- Vulkan-only rendering path. No OpenGL implementation or fallback inside Totem Lumen.
+- Vulkan-only client rendering path. No OpenGL implementation or fallback inside Totem Lumen.
 - Vulkan compute voxel ray tracing is the cross-platform baseline.
 - Apple Silicon is a first-class target through Minecraft 26.2's Vulkan backend and MoltenVK/Metal path.
 - Vulkan hardware ray tracing is optional acceleration, never a required baseline.
+- Server-authoritative gameplay lighting must remain deterministic, bounded, and independent of client rendering settings.
 - Player runtime dependencies should remain limited to Fabric Loader, Fabric API, and Totem Lumen.
 - Shader binaries and other runtime assets must ship inside the mod; players should not need the Vulkan SDK, MoltenVK, Xcode, RenderDoc, or shader compilers.
 
 ## Current milestone
 
-`P0 - Vulkan-only project bootstrap`
+`0.1.0-alpha.32` adds the first server-authoritative RGB gameplay-lighting baseline on top of the Alpha 31 data-pack lighting rules:
 
-The first implementation establishes the Fabric 26.2 build, client lifecycle, platform detection, and a runtime Vulkan backend gate. World extraction and GPU scene construction come next.
+- packed RGB `0..15` section cache;
+- sparse emissive-source index;
+- bounded chunk scans and local relighting;
+- conservative dirty-region spawn safety;
+- hostile-mob spectral light sensitivity;
+- built-in Nether-mob red-light tolerance;
+- optional dimension environment-light rules;
+- performance counters and an explicit server tick budget.
+
+The existing Vulkan renderer remains isolated on the client and continues to own visual-quality lighting.
 
 ## Runtime requirements
 
 - Minecraft Java Edition 26.2
 - Fabric Loader 0.19.5 or newer
 - Fabric API for Minecraft 26.2
-- Java 25 (normally provided by the Minecraft launcher)
-- A Minecraft-compatible Vulkan backend
+- Java 25 (normally provided by the Minecraft launcher/server runtime)
+- A Minecraft-compatible Vulkan backend **only when using the client renderer**
 
-On Apple Silicon, Totem Lumen uses the Vulkan backend exposed by Minecraft. Minecraft handles the MoltenVK-to-Metal translation; users should not install MoltenVK separately.
+A dedicated server does not need Vulkan, MoltenVK, a GPU renderer, or shader tooling.
+
+On Apple Silicon, the client uses the Vulkan backend exposed by Minecraft. Minecraft handles the MoltenVK-to-Metal translation; users should not install MoltenVK separately.
 
 ## Development
 
-The project targets Java 25 and the Minecraft 26.2 unobfuscated Fabric toolchain.
-
 ```text
-Minecraft 26.2
-  -> Fabric extraction/lifecycle
+Server world/data packs
+  -> Totem Lumen authoritative RGB gameplay light field
+  -> spawning / future gameplay queries
+
+Minecraft client extraction
   -> Totem Lumen RayScene
   -> Vulkan GPU scene
   -> Vulkan compute voxel RT
@@ -41,7 +59,7 @@ Minecraft 26.2
   -> composition
 ```
 
-Development client runs are configured to request the Vulkan backend.
+Development client runs request the Vulkan backend.
 
 Until the Gradle wrapper binary is generated in-repository, use Gradle 9.5.1 locally:
 
@@ -50,11 +68,16 @@ gradle build
 gradle runClient
 ```
 
-CI installs Gradle 9.5.1 explicitly, so the repository build does not depend on a globally configured CI Gradle version.
+CI installs Gradle 9.5.1 explicitly.
 
-## Architecture rules
+## Documentation
 
-See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and [`docs/ROADMAP.md`](docs/ROADMAP.md).
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — client/server layering and hard architectural boundaries.
+- [`docs/ROADMAP.md`](docs/ROADMAP.md) — renderer roadmap and completed milestones.
+- [`docs/SERVER_GAMEPLAY_LIGHTING.md`](docs/SERVER_GAMEPLAY_LIGHTING.md) — authoritative RGB gameplay-lighting design, resource estimates, budgets and validation plan.
+- [`docs/GAMEPLAY_LIGHTING_ROADMAP.md`](docs/GAMEPLAY_LIGHTING_ROADMAP.md) — implementation phases and follow-up work for the server subsystem.
+- [`docs/LIGHTING_WORLD_RULES.md`](docs/LIGHTING_WORLD_RULES.md) — data-pack block lighting rule format.
+- [`docs/PLANNING_INDEX.md`](docs/PLANNING_INDEX.md) — index of planning documents and decision tables.
 
 ## License
 

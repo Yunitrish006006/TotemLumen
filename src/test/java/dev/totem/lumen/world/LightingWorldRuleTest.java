@@ -19,6 +19,18 @@ final class LightingWorldRuleTest {
     }
 
     @Test
+    void validatesGameplayStrengthAndFallsBackToBlockStateEmission() {
+        LightingWorldRule fallback = new LightingWorldRule(1.0f, 0.5f, 0.25f);
+        assertEquals(LightingWorldRule.USE_BLOCK_STATE, fallback.gameplayStrength());
+        assertEquals(11, fallback.gameplayStrengthOr(11));
+
+        LightingWorldRule fixed = new LightingWorldRule(1.0f, 0.5f, 0.25f, 7);
+        assertEquals(7, fixed.gameplayStrengthOr(11));
+        assertThrows(IllegalArgumentException.class, () -> new LightingWorldRule(1.0f, 1.0f, 1.0f, -2));
+        assertThrows(IllegalArgumentException.class, () -> new LightingWorldRule(1.0f, 1.0f, 1.0f, 16));
+    }
+
+    @Test
     void ruleSetCopiesInputAndUsesEmptySingleton() {
         assertSame(LightingWorldRuleSet.EMPTY, LightingWorldRuleSet.of(Map.of()));
 
