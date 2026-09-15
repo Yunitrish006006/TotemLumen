@@ -4,10 +4,6 @@ import com.mojang.blaze3d.platform.InputConstants;
 import dev.totem.lumen.integration.P13EnvironmentCapture;
 import dev.totem.lumen.integration.SceneExtractionBridge;
 import dev.totem.lumen.render.RendererBootstrap;
-import dev.totem.lumen.vulkan.P4ComputeSmokeTest;
-import dev.totem.lumen.vulkan.P4DdaSmokeTest;
-import dev.totem.lumen.vulkan.P5DebugCompositeTest;
-import dev.totem.lumen.vulkan.P5DebugRayGridTest;
 import dev.totem.lumen.vulkan.P5StableLookupRenderer;
 import dev.totem.lumen.vulkan.P5WorldDebugComposite;
 import net.fabricmc.api.ClientModInitializer;
@@ -27,6 +23,7 @@ public final class TotemLumenClient implements ClientModInitializer {
     public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
 
     private static KeyMapping cycleDebugMode;
+    private static boolean rendererRuntimeFailed;
 
     @Override
     public void onInitializeClient() {
@@ -65,12 +62,25 @@ public final class TotemLumenClient implements ClientModInitializer {
         });
 
         LevelRenderEvents.START_MAIN.register(context -> {
-            P4ComputeSmokeTest.runOnceOnRenderThread();
-            P4DdaSmokeTest.runOnceOnRenderThread();
-            P5DebugRayGridTest.runOnceOnRenderThread();
-            P5DebugCompositeTest.runOnceOnRenderThread();
+            // P4/P5 smoke tests used to run here during normal world entry. They duplicated shader
+            // compilation, scene packing, GPU allocations and readback on the render thread. Those
+            // correctness gates belong in CI/developer validation, not the player hot path.
             P5WorldDebugComposite.runOnceOnRenderThread();
-            P5StableLookupRenderer.runOnRenderThread();
+
+            if (!rendererRuntimeFailed) {
+                try {
+                    P5StableLookupRenderer.runOnRenderThread();
+                } catch (Throwable failure) {
+                    // A renderer bootstrap failure must never prevent the player from entering the
+                    // world. Disable Totem Lumen rendering for this client session and leave vanilla
+                    // rendering usable while preserving the failure in the log for diagnosis.
+                    rendererRuntimeFailed = true;
+                    LOGGER.error(
+                            "Totem Lumen persistent renderer failed during world entry; disabling it for this session so Minecraft can continue",
+                            failure
+                    );
+                }
+            }
         });
 
         // The ray-traced world composite is still temporarily presented through the HUD pipeline.
