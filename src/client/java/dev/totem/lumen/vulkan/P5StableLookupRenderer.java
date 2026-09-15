@@ -68,6 +68,7 @@ public final class P5StableLookupRenderer {
     private static final int SPATIAL_DENOISE_RADIUS = 1;
     private static final float GI_MAX_DISTANCE = 48.0f;
     private static final float GI_STRENGTH = 0.65f;
+    private static final int GI_HISTORY_MAX_SAMPLES = 64;
 
     private static final GpuSectionSlotAllocator SLOT_ALLOCATOR = new GpuSectionSlotAllocator(MAX_SECTIONS);
     private static final Set<SectionKey> RESIDENT_KEYS = new HashSet<>();
@@ -94,6 +95,8 @@ public final class P5StableLookupRenderer {
             const uint MATERIAL_EMISSION_WORDS_PER_RECORD = 4u;
             const uint HISTORY_RECORD_WORDS = 8u;
             const float TEMPORAL_HISTORY_WEIGHT = 0.80;
+            const uint GI_HISTORY_MAX_SAMPLES = 64u;
+            const uint HISTORY_MATERIAL_MASK = 0x0000FFFFu;
             const float GI_MAX_DISTANCE = 48.0;
             const float GI_STRENGTH = 0.65;
             const vec3 DEBUG_LIGHT_DIRECTION = normalize(vec3(0.45, 0.85, 0.30));
@@ -566,8 +569,16 @@ public final class P5StableLookupRenderer {
                 return true;
             }
 
+            uint historyMaterial(uint historyBase) {
+                return scene.data[historyBase + 7u] & HISTORY_MATERIAL_MASK;
+            }
+
+            uint historySampleCount(uint historyBase) {
+                return scene.data[historyBase + 7u] >> 16u;
+            }
+
             bool historyMatches(uint historyBase, HitResult hit) {
-                if (scene.data[historyBase + 7u] != hit.materialId + 1u) return false;
+                if (historyMaterial(historyBase) != hit.materialId + 1u) return false;
                 ivec3 previousVoxel = ivec3(
                     int(scene.data[historyBase + 1u]),
                     int(scene.data[historyBase + 2u]),
@@ -602,7 +613,7 @@ public final class P5StableLookupRenderer {
 
                         uint sampleLinear = uint(samplePixel.y) * width + uint(samplePixel.x);
                         uint sampleBase = scene.data[24] + sampleLinear * HISTORY_RECORD_WORDS;
-                        if (scene.data[sampleBase + 7u] != hit.materialId + 1u) continue;
+                        if (historyMaterial(sampleBase) != hit.materialId + 1u) continue;
 
                         ivec3 sampleNormal = ivec3(
                             int(scene.data[sampleBase + 4u]),
@@ -660,9 +671,11 @@ public final class P5StableLookupRenderer {
                     vec3 primaryDirection,
                     uvec2 pixel,
                     uint width,
-                    uint height
+                    uint height,
+                    out uint outputSampleCount
             ) {
                 uint currentColor = currentTemporalSampleColor(hit, primaryOrigin, primaryDirection, pixel);
+                outputSampleCount = 1u;
                 if (scene.data[26] == 0u) return currentColor;
 
                 vec3 hitPoint = primaryOrigin + primaryDirection * hit.distance;
@@ -679,10 +692,16 @@ public final class P5StableLookupRenderer {
                 if (mode == 9u || mode == 10u || mode == 11u) {
                     historyRgb = spatialHistoryRgb(previousPixel, width, height, hit, historyRgb);
                 }
+                if (mode == 10u || mode == 11u) {
+                    uint previousSamples = clamp(historySampleCount(historyBase), 1u, GI_HISTORY_MAX_SAMPLES);
+                    outputSampleCount = min(previousSamples + 1u, GI_HISTORY_MAX_SAMPLES);
+                    float historyWeight = float(previousSamples) / float(previousSamples + 1u);
+                    return packRgba(mix(currentRgb, historyRgb, historyWeight), 255u);
+                }
                 return packRgba(mix(currentRgb, historyRgb, TEMPORAL_HISTORY_WEIGHT), 255u);
             }
 
-            void writeHistory(uvec2 pixel, uint width, HitResult hit, uint color) {
+            void writeHistory(uvec2 pixel, uint width, HitResult hit, uint color, uint sampleCount) {
                 uint linear = pixel.y * width + pixel.x;
                 uint historyBase = scene.data[25] + linear * HISTORY_RECORD_WORDS;
                 scene.data[historyBase] = color;
@@ -696,7 +715,8 @@ public final class P5StableLookupRenderer {
                 scene.data[historyBase + 4u] = uint(hit.normal.x);
                 scene.data[historyBase + 5u] = uint(hit.normal.y);
                 scene.data[historyBase + 6u] = uint(hit.normal.z);
-                scene.data[historyBase + 7u] = hit.materialId + 1u;
+                uint packedSamples = min(sampleCount, GI_HISTORY_MAX_SAMPLES) << 16u;
+                scene.data[historyBase + 7u] = packedSamples | ((hit.materialId + 1u) & HISTORY_MATERIAL_MASK);
             }
 
             uint debugColor(HitResult hit, vec3 primaryOrigin, vec3 primaryDirection) {
@@ -769,12 +789,13 @@ public final class P5StableLookupRenderer {
                 uint mode = scene.data[22];
                 uint color;
                 if (mode == 8u || mode == 9u || mode == 10u || mode == 11u) {
+                    uint historySamples = 1u;
                     if (primaryHit.hit == 0u) {
                         color = packRgba(vec3(0.03, 0.05, 0.08), 255u);
                     } else {
-                        color = temporalHistoryColor(primaryHit, origin, direction, pixel, width, height);
+                        color = temporalHistoryColor(primaryHit, origin, direction, pixel, width, height, historySamples);
                     }
-                    writeHistory(pixel, width, primaryHit, color);
+                    writeHistory(pixel, width, primaryHit, color, historySamples);
                 } else {
                     color = debugColor(primaryHit, origin, direction);
                 }
@@ -1087,9 +1108,10 @@ public final class P5StableLookupRenderer {
         if (!p12Logged) {
             p12Logged = true;
             TotemLumenClient.LOGGER.info(
-                    "P12 one-bounce GI READY: bounceSamplesPerFrame=1, maxDistance={}, strength={}, temporal=true, spatial=true, mode={}",
+                    "P12 one-bounce GI READY: bounceSamplesPerFrame=1, maxDistance={}, strength={}, progressiveHistoryMaxSamples={}, spatial=true, mode={}",
                     GI_MAX_DISTANCE,
                     GI_STRENGTH,
+                    GI_HISTORY_MAX_SAMPLES,
                     submittedMode.label()
             );
         }
@@ -1216,7 +1238,7 @@ public final class P5StableLookupRenderer {
             );
             putWord(buffer, 40, Float.floatToRawIntBits(resources.width / (float) resources.height));
         }
-        putWord(buffer, 41, (int) (frame.frameIndex() & 0xFFL));
+        putWord(buffer, 41, (int) frame.frameIndex());
     }
 
     private static void packLookupSectionsAndLights(ByteBuffer buffer, List<SectionSnapshot> sections) {
