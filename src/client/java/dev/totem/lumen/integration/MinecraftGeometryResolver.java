@@ -11,8 +11,9 @@ import net.minecraft.world.level.block.state.properties.SlabType;
  * Minecraft-facing block-state classifier for Totem Lumen's compact block-local geometry ABI.
  *
  * <p>P14B keeps slabs on their proven dedicated codes and adds compact parameterized families for
- * stairs, fences, walls, panes/bars, doors and trapdoors. Property names are read generically so the
- * renderer does not depend on individual vanilla block implementation classes for every family.</p>
+ * stairs, fences, walls, panes/bars, doors, trapdoors and fence gates. Property names are read
+ * generically so the renderer does not depend on individual vanilla block implementation classes
+ * for every family.</p>
  */
 public final class MinecraftGeometryResolver {
     private MinecraftGeometryResolver() {
@@ -37,6 +38,13 @@ public final class MinecraftGeometryResolver {
                     direction(propertyValue(state, "facing", "north")),
                     propertyValue(state, "half", "bottom").equals("top"),
                     stairShape(propertyValue(state, "shape", "straight"))
+            );
+        }
+        if (sourceId.endsWith("_fence_gate")) {
+            return BlockGeometryCode.fenceGate(
+                    direction(propertyValue(state, "facing", "north")),
+                    booleanProperty(state, "open"),
+                    booleanProperty(state, "in_wall")
             );
         }
         if (sourceId.endsWith("_fence")) {
