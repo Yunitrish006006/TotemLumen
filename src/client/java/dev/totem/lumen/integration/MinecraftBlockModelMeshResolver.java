@@ -42,6 +42,16 @@ public final class MinecraftBlockModelMeshResolver {
     private MinecraftBlockModelMeshResolver() {
     }
 
+    /** Called once per extraction frame so resource-pack model reloads refresh resident sections. */
+    public static void checkModelSetReload() {
+        try {
+            observeModelSet(Minecraft.getInstance().getModelManager().getBlockStateModelSet());
+        } catch (Throwable ignored) {
+            // Model access can be unavailable during early/late client lifecycle. Actual extraction
+            // retains its own logged fallback and will observe the model set once it becomes valid.
+        }
+    }
+
     public static int geometryCode(BlockState state, ClientLevel level, BlockPos pos) {
         if (state.isAir()) {
             return BlockGeometryCode.FULL_CUBE;
@@ -68,8 +78,12 @@ public final class MinecraftBlockModelMeshResolver {
             return BlockGeometryCode.modelMesh(0);
         }
 
+        boolean hadStaticGeometry = false;
+        boolean registryCapacityFallback = false;
+
         float[] modelQuads = emitModelQuads(state, level, pos);
         if (modelQuads.length > 0) {
+            hadStaticGeometry = true;
             if (isCanonicalUnitCube(modelQuads)) {
                 return BlockGeometryCode.surfaceCube(surface.roughness(), surface.metallic());
             }
@@ -77,12 +91,14 @@ public final class MinecraftBlockModelMeshResolver {
             if (meshId >= 0) {
                 return BlockGeometryCode.modelMesh(meshId);
             }
+            registryCapacityFallback = true;
         }
 
         // Models rendered by special/block-entity paths may not emit chunk quads. Their outline
         // shape is a conservative geometry fallback until that dynamic render domain is captured.
         float[] shapeQuads = outlineShapeQuads(state.getShape(level, pos));
         if (shapeQuads.length > 0) {
+            hadStaticGeometry = true;
             if (isCanonicalUnitCube(shapeQuads)) {
                 return BlockGeometryCode.surfaceCube(surface.roughness(), surface.metallic());
             }
@@ -90,6 +106,13 @@ public final class MinecraftBlockModelMeshResolver {
             if (shapeId >= 0) {
                 return BlockGeometryCode.modelMesh(shapeId);
             }
+            registryCapacityFallback = true;
+        }
+
+        // Capacity exhaustion must never make visible geometry disappear. A solid voxel is less
+        // accurate than the emitted mesh, but remains conservative for lighting and traversal.
+        if (registryCapacityFallback || hadStaticGeometry) {
+            return BlockGeometryCode.surfaceCube(surface.roughness(), surface.metallic());
         }
 
         // Empty model + empty outline should not become a fake solid cube.
