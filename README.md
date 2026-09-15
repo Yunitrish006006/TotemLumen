@@ -19,17 +19,17 @@ The server gameplay subsystem never initializes or depends on Vulkan. A dedicate
 
 ## Current milestone
 
-`0.1.0-alpha.36` replaces the P16 monolithic reflection injection with a true multi-pass client renderer after Apple M4 + MoltenVK 1.4.2 runtime testing showed the Alpha 35 background Metal compile could remain inside `vkCreateComputePipelines` for more than five minutes.
+`0.1.0-alpha.37` adds the P14C static block-model geometry gate before P17 dynamic entities.
 
-- the base compute pipeline now contains P12-P15 only and can become renderer-ready independently;
-- P16 reflection/roughness is a second compute pass over the same scene SSBO;
-- the second dispatch is inserted after the base compute dispatch and before the existing buffer-to-image copy;
-- an explicit compute-to-compute buffer barrier makes the first pass pixel output visible to the reflection pass;
-- the P16 shader reuses extracted P14 geometry tracing and P15 filtered-glass/environment helpers without carrying temporal/denoise/GI main-flow code;
-- P16 shader/pipeline compilation runs on its own daemon worker; failure or a slow Metal compiler leaves the P12-P15 renderer active instead of leaving the whole mod on vanilla rendering;
-- CI compiles the base and reflection shaders independently using their production shaderc settings.
+- ordinary chunk-rendered block states no longer rely on a short block-id shape table or default to full cubes;
+- Totem Lumen asks Minecraft/Fabric's resolved `BlockStateModel` to emit its real quad geometry and copies only immutable vertex positions into a deduplicated client mesh registry;
+- a new `MODEL_MESH` geometry family stores a 12-bit mesh id without widening the 32-bit per-voxel ABI;
+- canonical full cubes retain the established fast path, while arbitrary model quads use block-local triangle intersection after voxel DDA broad phase;
+- the same P14 trace functions are shared by primary rays, shadows, diffuse GI, environment visibility, P15 glass traversal and P16 reflection;
+- model meshes live in a shared scene-SSBO tail and are uploaded with static scene revisions rather than every camera frame;
+- resource-model reloads progressively refresh populated sections through the existing bounded background extraction queue.
 
-P16 still provides one bounded secondary reflection ray, roughness-controlled spread, Schlick Fresnel and metallic F0 without increasing the per-voxel GPU ABI. Alpha 32's server-authoritative RGB gameplay-lighting baseline remains intact. Dedicated-server runtime/TPS stress validation is intentionally deferred while client renderer development continues.
+This milestone deliberately does **not** claim that every Minecraft renderer domain is now identical to vanilla. Special/block-entity renderers, exact fluid surfaces, texture-alpha cutout silhouettes and per-position/out-of-cell model transforms are separate geometry domains documented in `P14C_GENERIC_BLOCK_MODELS.md`. Those domains must receive explicit extraction/validation gates rather than silently falling back to cubes. P16 multi-pass reflection from Alpha 36 and Alpha 32's server-authoritative gameplay lighting remain intact. Dedicated-server runtime/TPS stress validation is still deferred while client renderer development continues.
 
 ## Runtime requirements
 
@@ -51,8 +51,8 @@ Server world/data packs
   -> spawning / future gameplay queries
 
 Minecraft client extraction
-  -> Totem Lumen RayScene
-  -> Vulkan GPU scene
+  -> static BlockStateModel quad extraction / immutable RayScene
+  -> Vulkan GPU scene + shared generic model mesh pool
   -> P12-P15 base compute pass
   -> P16 reflection compute pass
   -> composition
@@ -73,6 +73,7 @@ CI installs Gradle 9.5.1 explicitly.
 
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — client/server layering and hard architectural boundaries.
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — renderer roadmap and completed milestones.
+- [`docs/P14C_GENERIC_BLOCK_MODELS.md`](docs/P14C_GENERIC_BLOCK_MODELS.md) — generic static block-model extraction, GPU ABI, geometry-domain matrix, limits and validation plan.
 - [`docs/P16_REFLECTION_ROUGHNESS.md`](docs/P16_REFLECTION_ROUGHNESS.md) — reflection model, surface profiles, ABI choice, limitations and validation plan.
 - [`docs/P16_MOLTENVK_PIPELINE_STALL.md`](docs/P16_MOLTENVK_PIPELINE_STALL.md) — Alpha 34/35 MoltenVK pipeline findings and the Alpha 36 multi-pass resolution.
 - [`docs/P16_MULTIPASS_SPLIT.md`](docs/P16_MULTIPASS_SPLIT.md) — Alpha 36 pass boundaries, synchronization, fallback semantics and runtime validation.
