@@ -15,6 +15,26 @@ final class BaselineSurfacePropertiesTest {
     }
 
     @Test
+    void handlesWaxedAndCutCopperOxidationVariants() {
+        assertEquals(
+                new SurfaceProperties(0.32f, 0.78f),
+                BaselineSurfaceProperties.forBlock("minecraft:waxed_cut_copper")
+        );
+        assertEquals(
+                new SurfaceProperties(0.44f, 0.56f),
+                BaselineSurfaceProperties.forBlock("minecraft:waxed_exposed_cut_copper")
+        );
+        assertEquals(
+                new SurfaceProperties(0.58f, 0.32f),
+                BaselineSurfaceProperties.forBlock("minecraft:weathered_cut_copper")
+        );
+        assertEquals(
+                new SurfaceProperties(0.72f, 0.12f),
+                BaselineSurfaceProperties.forBlock("minecraft:waxed_oxidized_copper")
+        );
+    }
+
+    @Test
     void validatesNormalizedSurfaceValues() {
         assertThrows(IllegalArgumentException.class, () -> new SurfaceProperties(-0.01f, 0.0f));
         assertThrows(IllegalArgumentException.class, () -> new SurfaceProperties(0.5f, 1.01f));
