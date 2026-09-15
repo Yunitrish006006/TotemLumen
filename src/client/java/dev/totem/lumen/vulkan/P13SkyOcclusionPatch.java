@@ -41,6 +41,19 @@ final class P13SkyOcclusionPatch {
         }
         source = source.replace(oldAmbient, newAmbient);
 
+        // P15's helper body is injected later near the P13 environment functions, while
+        // localLightColor appears earlier in the monolithic shader. GLSL therefore needs a
+        // prototype before that first call site.
+        String localLightMarker = "uint localLightColor(";
+        if (!source.contains(localLightMarker)) {
+            throw new IllegalStateException("P15 forward declaration marker missing: localLightColor");
+        }
+        source = source.replace(
+                localLightMarker,
+                "vec3 p15RayTransmission(vec3 origin, vec3 direction, float maxDistance);\n\n"
+                        + localLightMarker
+        );
+
         TotemLumenClient.LOGGER.info(
                 "P13 skylight occlusion active: overworldSkyVisibilityRay=world-up, sealedRoomTimeLeakFix=true"
         );
