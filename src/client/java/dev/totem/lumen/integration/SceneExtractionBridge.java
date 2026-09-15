@@ -258,7 +258,9 @@ public final class SceneExtractionBridge {
                     for (int localX = 0; localX < SectionVoxelData.SIZE; localX++) {
                         var blockState = section.getBlockState(localX, localY, localZ);
                         int materialId = MATERIALS.idFor(MinecraftMaterialResolver.resolve(blockState));
-                        materialIds[SectionVoxelData.index(localX, localY, localZ)] = materialId;
+                        int geometryCode = MinecraftGeometryResolver.geometryCode(blockState);
+                        materialIds[SectionVoxelData.index(localX, localY, localZ)] =
+                                SectionVoxelData.packVoxelWord(materialId, geometryCode);
                     }
                 }
             }
