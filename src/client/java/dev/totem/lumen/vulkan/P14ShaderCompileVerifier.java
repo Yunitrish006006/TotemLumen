@@ -32,18 +32,11 @@ public final class P14ShaderCompileVerifier {
         }
 
         try {
-            compileAndVerify(
-                    compiler,
-                    BASE_SHADER_NAME,
-                    baseSource,
-                    0,
-                    "P12-P15 base pass"
-            );
+            compileAndVerify(compiler, BASE_SHADER_NAME, baseSource, "P12-P15 base pass");
             compileAndVerify(
                     compiler,
                     P16ReflectionPassShader.SHADER_NAME,
                     reflectionSource,
-                    Shaderc.shaderc_optimization_level_performance,
                     "P16 split reflection pass"
             );
         } finally {
@@ -51,13 +44,7 @@ public final class P14ShaderCompileVerifier {
         }
     }
 
-    private static void compileAndVerify(
-            long compiler,
-            String shaderName,
-            String source,
-            int optimizationLevel,
-            String label
-    ) {
+    private static void compileAndVerify(long compiler, String shaderName, String source, String label) {
         long options = Shaderc.shaderc_compile_options_initialize();
         if (options == 0L) {
             throw new IllegalStateException("Failed to initialize shaderc options for " + label);
@@ -65,11 +52,8 @@ public final class P14ShaderCompileVerifier {
 
         try {
             Shaderc.shaderc_compile_options_set_target_env(options, 0, 4202496);
-            Shaderc.shaderc_compile_options_set_optimization_level(options, optimizationLevel);
-            String optimization = optimizationLevel == 0 ? "O0" : "performance";
-            System.out.println(
-                    label + " verification START: chars=" + source.length() + ", optimization=" + optimization
-            );
+            Shaderc.shaderc_compile_options_set_optimization_level(options, Shaderc.shaderc_optimization_level_zero);
+            System.out.println(label + " verification START: chars=" + source.length() + ", optimization=O0");
 
             long result = Shaderc.shaderc_compile_into_spv(
                     compiler,
