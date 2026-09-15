@@ -103,18 +103,14 @@ final class P12GiShaderPatch {
                 """;
         source = source.replace(marker, helpers + marker);
 
-        String oldMainBranch = """
-                if (mode == 8u || mode == 9u || mode == 10u || mode == 11u) {
-                    if (primaryHit.hit == 0u) {
-                        color = packRgba(vec3(0.03, 0.05, 0.08), 255u);
-                    } else {
-                        color = temporalHistoryColor(primaryHit, origin, direction, pixel, width, height);
-                    }
-                    writeHistory(pixel, width, primaryHit, color);
-                } else {
-                    color = debugColor(primaryHit, origin, direction);
-                }
-                """;
+        String branchStart = "    if (mode == 8u || mode == 9u || mode == 10u || mode == 11u) {";
+        String branchEnd = "    uint pixelBase = scene.data[3];";
+        int startIndex = source.indexOf(branchStart);
+        int endIndex = source.indexOf(branchEnd, startIndex);
+        if (startIndex < 0 || endIndex < 0 || endIndex <= startIndex) {
+            throw new IllegalStateException("P12 GI shader patch marker missing: temporal main branch");
+        }
+
         String newMainBranch = """
                 if (mode == 10u || mode == 11u) {
                     if (primaryHit.hit == 0u) {
@@ -143,12 +139,9 @@ final class P12GiShaderPatch {
                 } else {
                     color = debugColor(primaryHit, origin, direction);
                 }
-                """;
+                """.indent(4);
 
-        if (!source.contains(oldMainBranch)) {
-            throw new IllegalStateException("P12 GI shader patch marker missing: temporal main branch");
-        }
-        source = source.replace(oldMainBranch, newMainBranch);
+        source = source.substring(0, startIndex) + newMainBranch + source.substring(endIndex);
 
         TotemLumenClient.LOGGER.info(
                 "P12 GI shader correctness patch active: samplesPerFrame={}, historyWeight={}, peakClamp={}, history=indirect-only",
