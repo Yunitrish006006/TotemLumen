@@ -108,12 +108,21 @@ P16 multipass reflection READY
 
 The key Alpha 36 requirement is that `P5 stable GPU lookup READY` does not depend on `P16 split pipeline creation COMPLETE`.
 
-## CI gates
+## CI gates and shaderc policy
 
-CI must compile both shader sources independently using their production settings:
+CI compiles both shader sources independently with the same optimization level used at runtime:
 
-- P12-P15 base shader: O0, because the established monolithic base path is already validated there;
-- P16 split shader: performance optimization, matching the generic non-main `VulkanComputeProgram.create` path.
+- P12-P15 base shader: O0;
+- P16 split reflection shader: O0.
+
+The P16 pass was initially tested with shaderc performance optimization. Although compilation succeeded, that experiment produced a 1,515,084-byte SPIR-V module from a 40,898-character source and took roughly 20 seconds in CI. The O0 build of the same split source produces 107,128 bytes and verifies essentially immediately. The performance-optimization path is therefore explicitly rejected for P16 until the shader structure changes enough to justify retesting it.
+
+The accepted Alpha 36 CI measurements are:
+
+| Pass | GLSL chars | Optimization | SPIR-V bytes | Result |
+| --- | ---: | --- | ---: | --- |
+| P12-P15 base | 60,796 | O0 | 157,952 | 0 warnings / 0 errors |
+| P16 reflection | 40,898 | O0 | 107,128 | 0 warnings / 0 errors |
 
 A change is not mergeable if either shader fails shaderc verification.
 
