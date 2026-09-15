@@ -66,7 +66,11 @@ public final class TotemLumenClient implements ClientModInitializer {
             P5StableLookupRenderer.runOnRenderThread();
         });
 
-        HudElementRegistry.addLast(
+        // The ray-traced world composite is still temporarily presented through the HUD pipeline.
+        // Register it first so vanilla HUD elements (hotbar, health, crosshair, chat, etc.) render
+        // afterwards and remain visible. A later renderer milestone will move this composite out of
+        // the HUD pipeline entirely and into the world/composite stage.
+        HudElementRegistry.addFirst(
                 Identifier.fromNamespaceAndPath(MOD_ID, "p5_debug_overlay"),
                 (graphics, deltaTracker) -> P5StableLookupRenderer.drawHud(graphics)
         );
