@@ -39,16 +39,9 @@ public final class BlockModelMeshRegistry {
     private BlockModelMeshRegistry() {
     }
 
-    /**
-     * Registers immutable local-space quads and returns a 12-bit mesh id. Zero represents no
-     * geometry; negative one means the registry cannot represent this mesh and the caller should
-     * use a conservative fallback.
-     */
     public static synchronized int register(float[] quadPositions) {
         int quadCount = validatePositions(quadPositions);
-        if (quadCount == 0) {
-            return 0;
-        }
+        if (quadCount == 0) return 0;
         if (quadCount > MAX_QUADS_PER_MESH) {
             logPerMeshCapacity(quadCount);
             return -1;
@@ -56,9 +49,7 @@ public final class BlockModelMeshRegistry {
 
         MeshKey key = MeshKey.of(quadPositions);
         Integer existing = STATIC_IDS.get(key);
-        if (existing != null) {
-            return existing;
-        }
+        if (existing != null) return existing;
         if (!hasQuadCapacity(0, quadCount)) {
             logGlobalCapacity();
             return -1;
@@ -70,25 +61,18 @@ public final class BlockModelMeshRegistry {
             return -1;
         }
 
-        float[] owned = quadPositions.clone();
-        MESHES.put(id, new StoredMesh(id, owned, false));
+        MESHES.put(id, new StoredMesh(id, quadPositions.clone(), false));
         STATIC_IDS.put(key, id);
         totalQuads += quadCount;
         revision++;
         return id;
     }
 
-    /**
-     * Creates or updates one stable block-entity mesh id. The id remains stable while the key is
-     * loaded, even if animation changes the quad payload or quad count.
-     */
     public static synchronized DynamicUpsertResult upsertDynamic(
             DynamicMeshKey key,
             float[] quadPositions
     ) {
-        if (key == null) {
-            throw new IllegalArgumentException("dynamic mesh key cannot be null");
-        }
+        if (key == null) throw new IllegalArgumentException("dynamic mesh key cannot be null");
         int quadCount = validatePositions(quadPositions);
         if (quadCount <= 0 || quadCount > MAX_QUADS_PER_MESH) {
             if (quadCount > MAX_QUADS_PER_MESH) logPerMeshCapacity(quadCount);
@@ -133,14 +117,11 @@ public final class BlockModelMeshRegistry {
         return new DynamicUpsertResult(id, true, true, true);
     }
 
-    /** Releases one loaded block-entity mesh id so future block entities can reuse it. */
     public static synchronized boolean releaseDynamic(DynamicMeshKey key) {
         Integer id = DYNAMIC_IDS.remove(key);
         if (id == null) return false;
         StoredMesh removed = MESHES.remove(id);
-        if (removed != null) {
-            totalQuads -= removed.positions.length / FLOATS_PER_QUAD;
-        }
+        if (removed != null) totalQuads -= removed.positions.length / FLOATS_PER_QUAD;
         REUSABLE_IDS.add(id);
         revision++;
         return true;
@@ -172,6 +153,13 @@ public final class BlockModelMeshRegistry {
             firstQuad += quadCount;
         }
         return new Snapshot(List.copyOf(meshes), firstQuad, revision);
+    }
+
+    /** Returns a defensive copy of one currently-live mesh payload, or an empty array for id zero. */
+    public static synchronized float[] positionsForMesh(int meshId) {
+        if (meshId == 0) return new float[0];
+        StoredMesh mesh = MESHES.get(meshId);
+        return mesh == null ? null : mesh.positions.clone();
     }
 
     public static synchronized int meshCount() {
