@@ -130,24 +130,25 @@ final class P14GenericModelMeshPatch {
 
         source = replaceRequiredOnce(
                 source,
-                "                    hitDistance = bestDistance;",
+                "hitNormal = bestNormal;",
                 """
-                                    if ((geometryCode & 0xF000u) == 0xA000u) {
-                                        p14TryModelMesh(
-                                            origin,
-                                            direction,
-                                            voxel,
-                                            geometryCode & 0x0FFFu,
-                                            cellEntryDistance,
-                                            cellExitDistance,
-                                            found,
-                                            bestDistance,
-                                            bestNormal
-                                        );
-                                    }
+                if ((geometryCode & 0xF000u) == 0xA000u) {
+                    p14TryModelMesh(
+                        origin,
+                        direction,
+                        voxel,
+                        geometryCode & 0x0FFFu,
+                        cellEntryDistance,
+                        cellExitDistance,
+                        found,
+                        bestDistance,
+                        bestNormal
+                    );
+                }
 
-                                    hitDistance = bestDistance;
-                """.stripTrailing(),
+                hitDistance = bestDistance;
+                hitNormal = bestNormal;
+                """.strip(),
                 "generic mesh intersection"
         );
 
