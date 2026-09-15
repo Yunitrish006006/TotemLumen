@@ -79,7 +79,7 @@ public final class BlockEntityRenderGeometryCache {
                     meshId < 0 ? "pending-section-resolve" : Integer.toString(meshId)
             );
         }
-        if (needsSectionRefresh) SceneExtractionBridge.refreshBlockEntityGeometry(pos);
+        if (needsSectionRefresh) SceneExtractionBridge.onBlockChanged(pos, 0);
     }
 
     /**
