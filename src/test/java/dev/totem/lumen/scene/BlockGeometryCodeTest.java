@@ -50,19 +50,26 @@ class BlockGeometryCodeTest {
     }
 
     @Test
-    void doorAndTrapdoorStateBitsDoNotChangeFamily() {
+    void doorTrapdoorAndFenceGateStateBitsDoNotChangeFamily() {
         int door = BlockGeometryCode.door(BlockGeometryCode.SOUTH, true, true);
         int trapdoor = BlockGeometryCode.trapdoor(BlockGeometryCode.EAST, true, true);
+        int fenceGate = BlockGeometryCode.fenceGate(BlockGeometryCode.WEST, true, true);
 
         assertEquals(BlockGeometryCode.DOOR, BlockGeometryCode.family(door));
         assertEquals(BlockGeometryCode.TRAPDOOR, BlockGeometryCode.family(trapdoor));
+        assertEquals(BlockGeometryCode.FENCE_GATE, BlockGeometryCode.family(fenceGate));
+        assertEquals(BlockGeometryCode.WEST, fenceGate & 0x3);
+        assertTrue((fenceGate & BlockGeometryCode.OPEN) != 0);
+        assertTrue((fenceGate & BlockGeometryCode.IN_WALL) != 0);
         assertTrue(BlockGeometryCode.isKnown(door));
         assertTrue(BlockGeometryCode.isKnown(trapdoor));
+        assertTrue(BlockGeometryCode.isKnown(fenceGate));
     }
 
     @Test
     void invalidPackedParametersFailFast() {
         assertThrows(IllegalArgumentException.class, () -> BlockGeometryCode.stairs(4, false, 0));
         assertThrows(IllegalArgumentException.class, () -> BlockGeometryCode.wall(3, 0, 0, 0, false));
+        assertThrows(IllegalArgumentException.class, () -> BlockGeometryCode.fenceGate(-1, false, false));
     }
 }
