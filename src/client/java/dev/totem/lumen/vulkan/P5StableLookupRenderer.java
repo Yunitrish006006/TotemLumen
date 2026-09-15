@@ -35,15 +35,8 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * Persistent P5-P11 renderer using stable section slots, hashed lookup, local light lists,
- * GPU-resident temporal history and edge-aware spatial denoising.
- *
- * <p>P5 supplies the live primary DDA image, P6 adds binary secondary-ray visibility, P7 extracts
- * emissive voxels into compact point-light records, P8 carries material emissive RGB through both
- * local-light records and directly visible emissive surfaces, P9 adds deterministic multi-ray
- * directional-light visibility, P10 adds validated world-space reprojection into ping-pong history
- * buffers without CPU readback, and P11 filters validated previous-frame history through a compact
- * 3x3 material/normal/voxel-aware neighborhood.</p>
+ * Persistent P5-P12 renderer using stable section slots, hashed lookup, local light lists,
+ * GPU-resident temporal history, edge-aware spatial denoising and a one-bounce diffuse GI baseline.
  */
 public final class P5StableLookupRenderer {
     private static final int MAX_SECTIONS = 64;
@@ -73,6 +66,8 @@ public final class P5StableLookupRenderer {
     private static final float SOFT_SHADOW_ANGULAR_RADIUS = 0.055f;
     private static final float TEMPORAL_HISTORY_WEIGHT = 0.80f;
     private static final int SPATIAL_DENOISE_RADIUS = 1;
+    private static final float GI_MAX_DISTANCE = 48.0f;
+    private static final float GI_STRENGTH = 0.65f;
 
     private static final GpuSectionSlotAllocator SLOT_ALLOCATOR = new GpuSectionSlotAllocator(MAX_SECTIONS);
     private static final Set<SectionKey> RESIDENT_KEYS = new HashSet<>();
@@ -99,6 +94,8 @@ public final class P5StableLookupRenderer {
             const uint MATERIAL_EMISSION_WORDS_PER_RECORD = 4u;
             const uint HISTORY_RECORD_WORDS = 8u;
             const float TEMPORAL_HISTORY_WEIGHT = 0.80;
+            const float GI_MAX_DISTANCE = 48.0;
+            const float GI_STRENGTH = 0.65;
             const vec3 DEBUG_LIGHT_DIRECTION = normalize(vec3(0.45, 0.85, 0.30));
             const float SOFT_SHADOW_ANGULAR_RADIUS = 0.055;
             const vec2 SOFT_SHADOW_OFFSETS[4] = vec2[4](
@@ -292,6 +289,46 @@ public final class P5StableLookupRenderer {
                 return normalize(normal);
             }
 
+            uint hashBits(uint value) {
+                value ^= value >> 16u;
+                value *= 0x7FEB352Du;
+                value ^= value >> 15u;
+                value *= 0x846CA68Bu;
+                value ^= value >> 16u;
+                return value;
+            }
+
+            float random01(inout uint state) {
+                state = hashBits(state);
+                return float(state & 0x00FFFFFFu) / 16777216.0;
+            }
+
+            vec3 cosineHemisphereDirection(vec3 normal, uvec2 pixel, uint sampleIndex) {
+                uint state = hashBits(
+                    pixel.x * 0x9E3779B1u
+                    ^ pixel.y * 0x85EBCA77u
+                    ^ sampleIndex * 0xC2B2AE3Du
+                );
+                float u1 = random01(state);
+                float u2 = random01(state);
+                float radius = sqrt(max(u1, 0.0));
+                float phi = 6.28318530718 * u2;
+                vec3 localDirection = vec3(
+                    radius * cos(phi),
+                    radius * sin(phi),
+                    sqrt(max(0.0, 1.0 - u1))
+                );
+
+                vec3 helper = abs(normal.y) < 0.95 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+                vec3 tangent = normalize(cross(helper, normal));
+                vec3 bitangent = normalize(cross(normal, tangent));
+                return normalize(
+                    tangent * localDirection.x
+                    + bitangent * localDirection.y
+                    + normal * localDirection.z
+                );
+            }
+
             vec3 directionalSampleDirection(uint sampleIndex) {
                 vec3 helper = abs(DEBUG_LIGHT_DIRECTION.y) < 0.95
                         ? vec3(0.0, 1.0, 0.0)
@@ -369,6 +406,118 @@ public final class P5StableLookupRenderer {
                 vec3 emitted = surfaceEmission.rgb * surfaceEmission.a * 1.6;
                 float lighting = 0.12 + 0.88 * nDotL * visibility;
                 return packRgba(materialColor(hit.materialId) * lighting + emitted, 255u);
+            }
+
+            vec3 secondarySurfaceRadiance(HitResult hit, vec3 rayOrigin, vec3 rayDirection) {
+                vec3 surfaceNormal = resolvedSurfaceNormal(hit, rayDirection);
+                float nDotL = max(dot(surfaceNormal, DEBUG_LIGHT_DIRECTION), 0.0);
+                float visibility = 0.0;
+                if (nDotL > 0.0) {
+                    vec3 hitPoint = rayOrigin + rayDirection * hit.distance;
+                    vec3 shadowOrigin = hitPoint + surfaceNormal * 0.025 + DEBUG_LIGHT_DIRECTION * 0.01;
+                    HitResult blocker = traceRay(shadowOrigin, DEBUG_LIGHT_DIRECTION);
+                    visibility = blocker.hit == 0u ? 1.0 : 0.0;
+                }
+
+                vec4 emission = materialEmission(hit.materialId);
+                vec3 emitted = emission.rgb * emission.a * 1.6;
+                float lighting = 0.04 + 0.96 * nDotL * visibility;
+                return materialColor(hit.materialId) * lighting + emitted;
+            }
+
+            vec3 oneBounceIndirectRgb(
+                    HitResult primaryHit,
+                    vec3 primaryOrigin,
+                    vec3 primaryDirection,
+                    uvec2 pixel,
+                    uint sampleIndex
+            ) {
+                vec3 primaryNormal = resolvedSurfaceNormal(primaryHit, primaryDirection);
+                vec3 primaryPoint = primaryOrigin + primaryDirection * primaryHit.distance;
+                vec3 bounceDirection = cosineHemisphereDirection(primaryNormal, pixel, sampleIndex);
+                vec3 bounceOrigin = primaryPoint + primaryNormal * 0.035 + bounceDirection * 0.01;
+                HitResult bounceHit = traceRayLimited(bounceOrigin, bounceDirection, GI_MAX_DISTANCE);
+                if (bounceHit.hit == 0u) return vec3(0.0);
+
+                vec3 incomingRadiance = secondarySurfaceRadiance(bounceHit, bounceOrigin, bounceDirection);
+                return materialColor(primaryHit.materialId) * incomingRadiance * GI_STRENGTH;
+            }
+
+            uint localLightColor(HitResult hit, vec3 primaryOrigin, vec3 primaryDirection, bool emissiveMode) {
+                int slot = sectionSlotForVoxel(hit.voxel);
+                vec4 surfaceEmission = emissiveMode ? materialEmission(hit.materialId) : vec4(0.0);
+                vec3 emitted = surfaceEmission.rgb * surfaceEmission.a * 1.6;
+                if (slot < 0) {
+                    return packRgba(materialColor(hit.materialId) * 0.05 + emitted, 255u);
+                }
+
+                vec3 surfaceNormal = resolvedSurfaceNormal(hit, primaryDirection);
+                vec3 hitPoint = primaryOrigin + primaryDirection * hit.distance;
+                vec3 lighting = vec3(0.045);
+                uint lightCount = min(scene.data[SECTION_LIGHT_COUNT_BASE + uint(slot)], MAX_LIGHTS_PER_SECTION);
+
+                for (uint localIndex = 0u; localIndex < lightCount; localIndex++) {
+                    uint listWord = SECTION_LIGHT_INDEX_BASE + uint(slot) * MAX_LIGHTS_PER_SECTION + localIndex;
+                    uint lightIndex = scene.data[listWord];
+                    uint lightBase = LIGHT_DATA_BASE + lightIndex * LIGHT_WORDS_PER_RECORD;
+                    vec3 lightPosition = vec3(
+                        uintBitsToFloat(scene.data[lightBase]),
+                        uintBitsToFloat(scene.data[lightBase + 1u]),
+                        uintBitsToFloat(scene.data[lightBase + 2u])
+                    );
+                    float radius = uintBitsToFloat(scene.data[lightBase + 3u]);
+                    vec3 lightColor = emissiveMode ? vec3(
+                        uintBitsToFloat(scene.data[lightBase + 4u]),
+                        uintBitsToFloat(scene.data[lightBase + 5u]),
+                        uintBitsToFloat(scene.data[lightBase + 6u])
+                    ) : vec3(1.0, 0.82, 0.58);
+                    float intensity = emissiveMode
+                            ? uintBitsToFloat(scene.data[lightBase + 7u])
+                            : clamp((radius - 0.5) / 15.0, 0.0, 1.0);
+                    vec3 toLight = lightPosition - hitPoint;
+                    float distanceToLight = length(toLight);
+                    if (distanceToLight <= 0.0001 || distanceToLight >= radius) continue;
+
+                    vec3 lightDirection = toLight / distanceToLight;
+                    float nDotL = max(dot(surfaceNormal, lightDirection), 0.0);
+                    if (nDotL <= 0.0) continue;
+
+                    float visibility = 1.0;
+                    float shadowMaxDistance = max(distanceToLight - 0.55, 0.0);
+                    if (shadowMaxDistance > 0.02) {
+                        vec3 shadowOrigin = hitPoint + surfaceNormal * 0.025 + lightDirection * 0.01;
+                        HitResult blocker = traceRayLimited(shadowOrigin, lightDirection, shadowMaxDistance);
+                        visibility = blocker.hit == 0u ? 1.0 : 0.0;
+                    }
+
+                    float range = clamp(1.0 - distanceToLight / radius, 0.0, 1.0);
+                    float attenuation = range * range;
+                    lighting += lightColor * (2.4 * nDotL * attenuation * intensity * visibility);
+                }
+
+                return packRgba(materialColor(hit.materialId) * lighting + emitted, 255u);
+            }
+
+            uint giCurrentColor(
+                    HitResult hit,
+                    vec3 primaryOrigin,
+                    vec3 primaryDirection,
+                    uvec2 pixel,
+                    uint sampleIndex,
+                    bool indirectOnly
+            ) {
+                vec3 indirect = oneBounceIndirectRgb(hit, primaryOrigin, primaryDirection, pixel, sampleIndex);
+                if (indirectOnly) {
+                    return packRgba(indirect * 1.35, 255u);
+                }
+
+                vec3 direct = unpackRgb(temporalCurrentColor(hit, primaryOrigin, primaryDirection, sampleIndex));
+                vec3 localWithBase = unpackRgb(localLightColor(hit, primaryOrigin, primaryDirection, true));
+                vec4 emission = materialEmission(hit.materialId);
+                vec3 emitted = emission.rgb * emission.a * 1.6;
+                vec3 localBase = materialColor(hit.materialId) * 0.045 + emitted;
+                vec3 localContribution = max(localWithBase - localBase, vec3(0.0));
+                return packRgba(direct + localContribution + indirect, 255u);
             }
 
             bool reprojectToPrevious(vec3 worldPoint, uint width, uint height, out uvec2 previousPixel) {
@@ -488,6 +637,23 @@ public final class P5StableLookupRenderer {
                 return totalWeight > 0.0001 ? weightedRgb / totalWeight : centerRgb;
             }
 
+            uint currentTemporalSampleColor(
+                    HitResult hit,
+                    vec3 primaryOrigin,
+                    vec3 primaryDirection,
+                    uvec2 pixel
+            ) {
+                uint mode = scene.data[22];
+                uint sampleIndex = scene.data[41];
+                if (mode == 10u) {
+                    return giCurrentColor(hit, primaryOrigin, primaryDirection, pixel, sampleIndex, true);
+                }
+                if (mode == 11u) {
+                    return giCurrentColor(hit, primaryOrigin, primaryDirection, pixel, sampleIndex, false);
+                }
+                return temporalCurrentColor(hit, primaryOrigin, primaryDirection, sampleIndex);
+            }
+
             uint temporalHistoryColor(
                     HitResult hit,
                     vec3 primaryOrigin,
@@ -496,7 +662,7 @@ public final class P5StableLookupRenderer {
                     uint width,
                     uint height
             ) {
-                uint currentColor = temporalCurrentColor(hit, primaryOrigin, primaryDirection, scene.data[41]);
+                uint currentColor = currentTemporalSampleColor(hit, primaryOrigin, primaryDirection, pixel);
                 if (scene.data[26] == 0u) return currentColor;
 
                 vec3 hitPoint = primaryOrigin + primaryDirection * hit.distance;
@@ -509,7 +675,8 @@ public final class P5StableLookupRenderer {
 
                 vec3 currentRgb = unpackRgb(currentColor);
                 vec3 historyRgb = unpackRgb(scene.data[historyBase]);
-                if (scene.data[22] == 9u) {
+                uint mode = scene.data[22];
+                if (mode == 9u || mode == 10u || mode == 11u) {
                     historyRgb = spatialHistoryRgb(previousPixel, width, height, hit, historyRgb);
                 }
                 return packRgba(mix(currentRgb, historyRgb, TEMPORAL_HISTORY_WEIGHT), 255u);
@@ -530,61 +697,6 @@ public final class P5StableLookupRenderer {
                 scene.data[historyBase + 5u] = uint(hit.normal.y);
                 scene.data[historyBase + 6u] = uint(hit.normal.z);
                 scene.data[historyBase + 7u] = hit.materialId + 1u;
-            }
-
-            uint localLightColor(HitResult hit, vec3 primaryOrigin, vec3 primaryDirection, bool emissiveMode) {
-                int slot = sectionSlotForVoxel(hit.voxel);
-                vec4 surfaceEmission = emissiveMode ? materialEmission(hit.materialId) : vec4(0.0);
-                vec3 emitted = surfaceEmission.rgb * surfaceEmission.a * 1.6;
-                if (slot < 0) {
-                    return packRgba(materialColor(hit.materialId) * 0.05 + emitted, 255u);
-                }
-
-                vec3 surfaceNormal = resolvedSurfaceNormal(hit, primaryDirection);
-                vec3 hitPoint = primaryOrigin + primaryDirection * hit.distance;
-                vec3 lighting = vec3(0.045);
-                uint lightCount = min(scene.data[SECTION_LIGHT_COUNT_BASE + uint(slot)], MAX_LIGHTS_PER_SECTION);
-
-                for (uint localIndex = 0u; localIndex < lightCount; localIndex++) {
-                    uint listWord = SECTION_LIGHT_INDEX_BASE + uint(slot) * MAX_LIGHTS_PER_SECTION + localIndex;
-                    uint lightIndex = scene.data[listWord];
-                    uint lightBase = LIGHT_DATA_BASE + lightIndex * LIGHT_WORDS_PER_RECORD;
-                    vec3 lightPosition = vec3(
-                        uintBitsToFloat(scene.data[lightBase]),
-                        uintBitsToFloat(scene.data[lightBase + 1u]),
-                        uintBitsToFloat(scene.data[lightBase + 2u])
-                    );
-                    float radius = uintBitsToFloat(scene.data[lightBase + 3u]);
-                    vec3 lightColor = emissiveMode ? vec3(
-                        uintBitsToFloat(scene.data[lightBase + 4u]),
-                        uintBitsToFloat(scene.data[lightBase + 5u]),
-                        uintBitsToFloat(scene.data[lightBase + 6u])
-                    ) : vec3(1.0, 0.82, 0.58);
-                    float intensity = emissiveMode
-                            ? uintBitsToFloat(scene.data[lightBase + 7u])
-                            : clamp((radius - 0.5) / 15.0, 0.0, 1.0);
-                    vec3 toLight = lightPosition - hitPoint;
-                    float distanceToLight = length(toLight);
-                    if (distanceToLight <= 0.0001 || distanceToLight >= radius) continue;
-
-                    vec3 lightDirection = toLight / distanceToLight;
-                    float nDotL = max(dot(surfaceNormal, lightDirection), 0.0);
-                    if (nDotL <= 0.0) continue;
-
-                    float visibility = 1.0;
-                    float shadowMaxDistance = max(distanceToLight - 0.55, 0.0);
-                    if (shadowMaxDistance > 0.02) {
-                        vec3 shadowOrigin = hitPoint + surfaceNormal * 0.025 + lightDirection * 0.01;
-                        HitResult blocker = traceRayLimited(shadowOrigin, lightDirection, shadowMaxDistance);
-                        visibility = blocker.hit == 0u ? 1.0 : 0.0;
-                    }
-
-                    float range = clamp(1.0 - distanceToLight / radius, 0.0, 1.0);
-                    float attenuation = range * range;
-                    lighting += lightColor * (2.4 * nDotL * attenuation * intensity * visibility);
-                }
-
-                return packRgba(materialColor(hit.materialId) * lighting + emitted, 255u);
             }
 
             uint debugColor(HitResult hit, vec3 primaryOrigin, vec3 primaryDirection) {
@@ -656,7 +768,7 @@ public final class P5StableLookupRenderer {
                 HitResult primaryHit = traceRay(origin, direction);
                 uint mode = scene.data[22];
                 uint color;
-                if (mode == 8u || mode == 9u) {
+                if (mode == 8u || mode == 9u || mode == 10u || mode == 11u) {
                     if (primaryHit.hit == 0u) {
                         color = packRgba(vec3(0.03, 0.05, 0.08), 255u);
                     } else {
@@ -681,6 +793,8 @@ public final class P5StableLookupRenderer {
         SOFT_SHADOW(7, "Soft Shadow"),
         TEMPORAL_HISTORY(8, "Temporal History"),
         SPATIAL_DENOISE(9, "Spatial Denoise"),
+        INDIRECT_GI(10, "Indirect GI"),
+        GI_COMPOSITE(11, "GI Composite"),
         LOCAL_LIGHTS(5, "Local Lights"),
         EMISSIVE_MATERIALS(6, "Emissive Materials");
 
@@ -698,7 +812,7 @@ public final class P5StableLookupRenderer {
     }
 
     private static Resources resources;
-    private static DebugMode mode = DebugMode.SPATIAL_DENOISE;
+    private static DebugMode mode = DebugMode.GI_COMPOSITE;
     private static boolean inFlight;
     private static boolean ready;
     private static boolean resetRequested;
@@ -708,6 +822,7 @@ public final class P5StableLookupRenderer {
     private static boolean p9Logged;
     private static boolean p10Logged;
     private static boolean p11Logged;
+    private static boolean p12Logged;
     private static boolean sceneUploadRequired = true;
     private static boolean historyValid;
     private static long sceneSignature = Long.MIN_VALUE;
@@ -726,7 +841,18 @@ public final class P5StableLookupRenderer {
     }
 
     private static boolean usesTemporalHistory(DebugMode debugMode) {
-        return debugMode == DebugMode.TEMPORAL_HISTORY || debugMode == DebugMode.SPATIAL_DENOISE;
+        return debugMode == DebugMode.TEMPORAL_HISTORY
+                || debugMode == DebugMode.SPATIAL_DENOISE
+                || debugMode == DebugMode.INDIRECT_GI
+                || debugMode == DebugMode.GI_COMPOSITE;
+    }
+
+    private static boolean historyCompatible(DebugMode current, DebugMode previous) {
+        if (current == null || previous == null) return false;
+        boolean currentDirectTemporal = current == DebugMode.TEMPORAL_HISTORY || current == DebugMode.SPATIAL_DENOISE;
+        boolean previousDirectTemporal = previous == DebugMode.TEMPORAL_HISTORY || previous == DebugMode.SPATIAL_DENOISE;
+        if (currentDirectTemporal && previousDirectTemporal) return true;
+        return current == previous && (current == DebugMode.INDIRECT_GI || current == DebugMode.GI_COMPOSITE);
     }
 
     public static void runOnRenderThread() {
@@ -776,7 +902,7 @@ public final class P5StableLookupRenderer {
         DebugMode submittedMode = mode;
         boolean canReuseHistory = usesTemporalHistory(submittedMode)
                 && historyValid
-                && usesTemporalHistory(lastCompletedMode)
+                && historyCompatible(submittedMode, lastCompletedMode)
                 && lastCompletedFrame != null
                 && !fullSceneUpload
                 && frame.dimensionId().equals(lastCompletedFrame.dimensionId());
@@ -819,7 +945,7 @@ public final class P5StableLookupRenderer {
         } catch (Throwable failure) {
             inFlight = false;
             sceneUploadRequired |= fullSceneUpload;
-            TotemLumenClient.LOGGER.error("P11 spatial-denoise frame submission failed", failure);
+            TotemLumenClient.LOGGER.error("P12 one-bounce GI frame submission failed", failure);
         }
     }
 
@@ -837,9 +963,10 @@ public final class P5StableLookupRenderer {
     }
 
     public static DebugMode cycleMode() {
+        DebugMode previous = mode;
         DebugMode[] values = DebugMode.values();
         mode = values[(mode.ordinal() + 1) % values.length];
-        if (!usesTemporalHistory(mode)) {
+        if (!historyCompatible(mode, previous)) {
             historyValid = false;
         }
         return mode;
@@ -957,6 +1084,15 @@ public final class P5StableLookupRenderer {
                     submittedMode.label()
             );
         }
+        if (!p12Logged) {
+            p12Logged = true;
+            TotemLumenClient.LOGGER.info(
+                    "P12 one-bounce GI READY: bounceSamplesPerFrame=1, maxDistance={}, strength={}, temporal=true, spatial=true, mode={}",
+                    GI_MAX_DISTANCE,
+                    GI_STRENGTH,
+                    submittedMode.label()
+            );
+        }
         if (resetRequested) {
             resetRequested = false;
             destroyResourcesIfSafe();
@@ -1028,6 +1164,7 @@ public final class P5StableLookupRenderer {
         p9Logged = false;
         p10Logged = false;
         p11Logged = false;
+        p12Logged = false;
     }
 
     private static void packHeader(
@@ -1079,7 +1216,7 @@ public final class P5StableLookupRenderer {
             );
             putWord(buffer, 40, Float.floatToRawIntBits(resources.width / (float) resources.height));
         }
-        putWord(buffer, 41, (int) (frame.frameIndex() & 3L));
+        putWord(buffer, 41, (int) (frame.frameIndex() & 0xFFL));
     }
 
     private static void packLookupSectionsAndLights(ByteBuffer buffer, List<SectionSnapshot> sections) {
@@ -1336,7 +1473,7 @@ public final class P5StableLookupRenderer {
         try {
             closeable.close();
         } catch (Exception exception) {
-            TotemLumenClient.LOGGER.warn("Failed to close P11 spatial-denoise resource", exception);
+            TotemLumenClient.LOGGER.warn("Failed to close P12 one-bounce GI resource", exception);
         }
     }
 
@@ -1411,17 +1548,17 @@ public final class P5StableLookupRenderer {
             try {
                 upload = VulkanOwnedBuffer.createUpload(device, totalBytes);
                 scene = VulkanOwnedBuffer.createStorage(device, totalBytes);
-                program = VulkanComputeProgram.create(device, "totem_lumen_p11_spatial_denoise.comp", SHADER, scene);
+                program = VulkanComputeProgram.create(device, "totem_lumen_p12_one_bounce_gi.comp", SHADER, scene);
                 commandPool = new VulkanFrameCommandPool(device);
                 texture = RenderSystem.getDevice().createTexture(
-                        "Totem Lumen P11 spatial denoise target",
+                        "Totem Lumen P12 one-bounce GI target",
                         GpuTexture.USAGE_COPY_DST | GpuTexture.USAGE_TEXTURE_BINDING,
                         GpuFormat.RGBA8_UNORM,
                         width, height, 1, 1
                 );
                 view = RenderSystem.getDevice().createTextureView(texture);
                 if (!(texture instanceof VulkanGpuTexture vulkanTexture)) {
-                    throw new IllegalStateException("P11 spatial denoise target is not backed by VulkanGpuTexture");
+                    throw new IllegalStateException("P12 one-bounce GI target is not backed by VulkanGpuTexture");
                 }
                 return new Resources(
                         width,
