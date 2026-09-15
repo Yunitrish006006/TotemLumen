@@ -122,7 +122,7 @@ final class P15GlassTransmissionPatch {
                             candidate.voxel
                         );
                         float advance = candidate.distance + exitDistance + 0.002;
-                        if (!isfinite(advance) || advance >= remaining) {
+                        if (isnan(advance) || isinf(advance) || advance >= remaining) {
                             result.hit.hit = 0u;
                             result.hit.distance = maxDistance;
                             return result;
@@ -235,37 +235,7 @@ final class P15GlassTransmissionPatch {
                 """;
         source = replaceRequiredOnce(source, oldBounce, newBounce, "GI bounce transmission");
 
-        String oldLocalVisibility = """
-                    float visibility = 1.0;
-                    float shadowMaxDistance = max(distanceToLight - 0.55, 0.0);
-                    if (shadowMaxDistance > 0.02) {
-                        vec3 shadowOrigin = hitPoint + surfaceNormal * 0.025 + lightDirection * 0.01;
-                        HitResult blocker = traceRayLimited(shadowOrigin, lightDirection, shadowMaxDistance);
-                        visibility = blocker.hit == 0u ? 1.0 : 0.0;
-                    }
-
-                    float range = clamp(1.0 - distanceToLight / radius, 0.0, 1.0);
-                    float attenuation = range * range;
-                    lighting += lightColor * (2.4 * nDotL * attenuation * intensity * visibility);
-                """;
-        String newLocalVisibility = """
-                    vec3 lightTransmission = vec3(1.0);
-                    float shadowMaxDistance = max(distanceToLight - 0.55, 0.0);
-                    if (shadowMaxDistance > 0.02) {
-                        vec3 shadowOrigin = hitPoint + surfaceNormal * 0.025 + lightDirection * 0.01;
-                        lightTransmission = p15RayTransmission(
-                            shadowOrigin,
-                            lightDirection,
-                            shadowMaxDistance
-                        );
-                    }
-
-                    float range = clamp(1.0 - distanceToLight / radius, 0.0, 1.0);
-                    float attenuation = range * range;
-                    lighting += lightColor * lightTransmission
-                            * (2.4 * nDotL * attenuation * intensity);
-                """;
-        source = replaceRequiredOnce(source, oldLocalVisibility, newLocalVisibility, "local light transmission");
+        source = patchLocalLightFunction(source);
 
         source = replaceRequiredOnce(
                 source,
@@ -310,6 +280,43 @@ final class P15GlassTransmissionPatch {
                 "P15 glass transmission active: clearGlass=true, stainedGlassRgb=true, panes=true, maxTransparentLayers=8, sun+sky+local+GI=true, refraction=false"
         );
         return source;
+    }
+
+    private static String patchLocalLightFunction(String source) {
+        String localStartMarker = "uint localLightColor(";
+        String localEndMarker = "uint giCurrentColor(";
+        int localStart = source.indexOf(localStartMarker);
+        int localEnd = source.indexOf(localEndMarker, localStart);
+        if (localStart < 0 || localEnd < 0 || localEnd <= localStart) {
+            throw new IllegalStateException("P15 glass patch marker missing: localLightColor span");
+        }
+
+        String local = source.substring(localStart, localEnd);
+        local = replaceRequiredOnce(
+                local,
+                "float visibility = 1.0;",
+                "vec3 lightTransmission = vec3(1.0);",
+                "local light visibility declaration"
+        );
+        local = replaceRequiredOnce(
+                local,
+                "HitResult blocker = traceRayLimited(shadowOrigin, lightDirection, shadowMaxDistance);\n"
+                        + "                        visibility = blocker.hit == 0u ? 1.0 : 0.0;",
+                "lightTransmission = p15RayTransmission(\n"
+                        + "                            shadowOrigin,\n"
+                        + "                            lightDirection,\n"
+                        + "                            shadowMaxDistance\n"
+                        + "                        );",
+                "local light blocker"
+        );
+        local = replaceRequiredOnce(
+                local,
+                "lighting += lightColor * (2.4 * nDotL * attenuation * intensity * visibility);",
+                "lighting += lightColor * lightTransmission\n"
+                        + "                            * (2.4 * nDotL * attenuation * intensity);",
+                "local light accumulation"
+        );
+        return source.substring(0, localStart) + local + source.substring(localEnd);
     }
 
     private static String replaceRequiredOnce(String source, String oldText, String newText, String label) {
