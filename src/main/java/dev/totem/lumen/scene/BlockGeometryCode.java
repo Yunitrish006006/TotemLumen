@@ -6,8 +6,8 @@ package dev.totem.lumen.scene;
  * <p>Code zero intentionally means the legacy/full-cube fast path. P14B reserves the upper nibble
  * as a geometry family and the low 12 bits as family-specific parameters. P15 reuses spare family
  * and pane parameter bits for compact glass transmission metadata without growing the voxel word.
- * P16 adds a full-cube surface family carrying quantized roughness/metallic response while keeping
- * the same 32-bit voxel ABI.</p>
+ * P16 adds a full-cube surface family carrying quantized roughness/metallic response. P14C reserves
+ * one family for a deduplicated generic block-model mesh id, keeping the same 32-bit voxel ABI.</p>
  */
 public final class BlockGeometryCode {
     public static final int FULL_CUBE = 0;
@@ -26,6 +26,7 @@ public final class BlockGeometryCode {
     public static final int FENCE_GATE = 0x7000;
     public static final int GLASS_CUBE = 0x8000;
     public static final int SURFACE_CUBE = 0x9000;
+    public static final int MODEL_MESH = 0xA000;
 
     public static final int NORTH = 0;
     public static final int EAST = 1;
@@ -95,12 +96,10 @@ public final class BlockGeometryCode {
         return FENCE | (connections & 0xF);
     }
 
-    /**
-     * Packs four wall-side states (0 none, 1 low, 2 tall) in N/E/S/W order plus the center-post bit.
-     */
+    /** Packs four wall-side states (0 none, 1 low, 2 tall) plus the center-post bit. */
     public static int wall(int north, int east, int south, int west, boolean up) {
         return WALL
-                | (wallSide(north))
+                | wallSide(north)
                 | (wallSide(east) << 2)
                 | (wallSide(south) << 4)
                 | (wallSide(west) << 6)
@@ -122,11 +121,26 @@ public final class BlockGeometryCode {
         return GLASS_CUBE | (tint & 0x1F);
     }
 
-    /** Full-cube fast path with P16 optical response encoded in otherwise spare geometry bits. */
+    /** Full-cube fast path with P16 optical response encoded in spare geometry bits. */
     public static int surfaceCube(float roughness, float metallic) {
         return SURFACE_CUBE
                 | quantizeNormalized(roughness, "roughness")
                 | (quantizeNormalized(metallic, "metallic") << SURFACE_METALLIC_SHIFT);
+    }
+
+    /** P14C generic block-model mesh. Mesh id zero intentionally means no static model geometry. */
+    public static int modelMesh(int meshId) {
+        if (meshId < 0 || meshId > PARAM_MASK) {
+            throw new IllegalArgumentException("model mesh id must be in [0, 4095]: " + meshId);
+        }
+        return MODEL_MESH | meshId;
+    }
+
+    public static int modelMeshId(int geometryCode) {
+        if (family(geometryCode) != MODEL_MESH) {
+            throw new IllegalArgumentException("geometry code is not a P14C model mesh: " + geometryCode);
+        }
+        return geometryCode & PARAM_MASK;
     }
 
     public static float surfaceRoughness(int geometryCode) {
@@ -179,7 +193,8 @@ public final class BlockGeometryCode {
             return true;
         }
         return switch (family(geometryCode)) {
-            case STAIRS, FENCE, WALL, PANE, DOOR, TRAPDOOR, FENCE_GATE, GLASS_CUBE, SURFACE_CUBE -> true;
+            case STAIRS, FENCE, WALL, PANE, DOOR, TRAPDOOR, FENCE_GATE,
+                    GLASS_CUBE, SURFACE_CUBE, MODEL_MESH -> true;
             default -> false;
         };
     }
