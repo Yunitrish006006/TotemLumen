@@ -221,7 +221,7 @@ public final class VulkanComputeProgram implements AutoCloseable {
         long shaderModule = compileShaderModule(device, name, glsl);
         PipelineHandles handles = null;
         try {
-            handles = createPipelineHandles(device, shaderModule);
+            handles = createPipelineHandles(device, shaderModule, name);
             return bindStorage(
                     device,
                     handles.descriptorSetLayout,
@@ -243,7 +243,7 @@ public final class VulkanComputeProgram implements AutoCloseable {
     private static PreparedPipeline createPreparedPipeline(VulkanDevice device, byte[] spirv) {
         long shaderModule = createShaderModule(device, spirv);
         try {
-            PipelineHandles handles = createPipelineHandles(device, shaderModule);
+            PipelineHandles handles = createPipelineHandles(device, shaderModule, MAIN_GI_SHADER);
             return new PreparedPipeline(
                     device.vkDevice(),
                     handles.descriptorSetLayout,
@@ -255,7 +255,7 @@ public final class VulkanComputeProgram implements AutoCloseable {
         }
     }
 
-    private static PipelineHandles createPipelineHandles(VulkanDevice device, long shaderModule) {
+    private static PipelineHandles createPipelineHandles(VulkanDevice device, long shaderModule, String shaderName) {
         long descriptorSetLayout = 0L;
         long pipelineLayout = 0L;
         long pipeline = 0L;
@@ -288,7 +288,10 @@ public final class VulkanComputeProgram implements AutoCloseable {
             VkComputePipelineCreateInfo.Buffer pipelineInfo = VkComputePipelineCreateInfo.calloc(1, stack);
             pipelineInfo.get(0).sType$Default().stage(stage).layout(pipelineLayout);
             LongBuffer pipelinePtr = stack.mallocLong(1);
-            check(VK10.vkCreateComputePipelines(device.vkDevice(), 0L, pipelineInfo, null, pipelinePtr), "vkCreateComputePipelines");
+            check(
+                    VulkanPipelineCacheStore.createComputePipelines(device, pipelineInfo, pipelinePtr, shaderName),
+                    "vkCreateComputePipelines"
+            );
             pipeline = pipelinePtr.get(0);
 
             return new PipelineHandles(descriptorSetLayout, pipelineLayout, pipeline);
