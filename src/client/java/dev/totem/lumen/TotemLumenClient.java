@@ -6,6 +6,7 @@ import dev.totem.lumen.integration.SceneExtractionBridge;
 import dev.totem.lumen.render.RendererBootstrap;
 import dev.totem.lumen.vulkan.P5StableLookupRenderer;
 import dev.totem.lumen.vulkan.P5WorldDebugComposite;
+import dev.totem.lumen.vulkan.VulkanComputeProgram;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
@@ -28,6 +29,11 @@ public final class TotemLumenClient implements ClientModInitializer {
     @Override
     public void onInitializeClient() {
         LOGGER.info("Initializing Totem Lumen");
+
+        // Start the expensive shaderc work as early as possible. This does not touch Minecraft's
+        // Vulkan device and therefore does not need to run on the render thread. World rendering
+        // simply waits to enable Totem Lumen until this background prewarm is complete.
+        VulkanComputeProgram.prewarmMainGiShader();
 
         KeyMapping.Category debugCategory = KeyMapping.Category.register(
                 Identifier.fromNamespaceAndPath(MOD_ID, "debug")
@@ -62,24 +68,40 @@ public final class TotemLumenClient implements ClientModInitializer {
         });
 
         LevelRenderEvents.START_MAIN.register(context -> {
-            // P4/P5 smoke tests used to run here during normal world entry. They duplicated shader
-            // compilation, scene packing, GPU allocations and readback on the render thread. Those
-            // correctness gates belong in CI/developer validation, not the player hot path.
+            // The old P5 world bootstrap is now a zero-GPU compatibility gate.
             P5WorldDebugComposite.runOnceOnRenderThread();
 
-            if (!rendererRuntimeFailed) {
-                try {
-                    P5StableLookupRenderer.runOnRenderThread();
-                } catch (Throwable failure) {
-                    // A renderer bootstrap failure must never prevent the player from entering the
-                    // world. Disable Totem Lumen rendering for this client session and leave vanilla
-                    // rendering usable while preserving the failure in the log for diagnosis.
-                    rendererRuntimeFailed = true;
-                    LOGGER.error(
-                            "Totem Lumen persistent renderer failed during world entry; disabling it for this session so Minecraft can continue",
-                            failure
-                    );
-                }
+            if (rendererRuntimeFailed) {
+                return;
+            }
+
+            Throwable shaderFailure = VulkanComputeProgram.mainGiShaderPrewarmFailure();
+            if (shaderFailure != null) {
+                rendererRuntimeFailed = true;
+                LOGGER.error(
+                        "Totem Lumen shader prewarm failed; disabling its renderer for this session while Minecraft continues",
+                        shaderFailure
+                );
+                return;
+            }
+
+            // Never wait for shaderc from the render thread. Until the background compiler is done,
+            // vanilla Minecraft keeps rendering normally and Totem Lumen retries on a later frame.
+            if (!VulkanComputeProgram.mainGiShaderPrewarmReady()) {
+                return;
+            }
+
+            try {
+                P5StableLookupRenderer.runOnRenderThread();
+            } catch (Throwable failure) {
+                // A renderer bootstrap failure must never prevent the player from entering the
+                // world. Disable Totem Lumen rendering for this client session and leave vanilla
+                // rendering usable while preserving the failure in the log for diagnosis.
+                rendererRuntimeFailed = true;
+                LOGGER.error(
+                        "Totem Lumen persistent renderer failed during world entry; disabling it for this session so Minecraft can continue",
+                        failure
+                );
             }
         });
 
