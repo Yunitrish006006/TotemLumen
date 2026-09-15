@@ -17,9 +17,8 @@ final class P14GeometryCorrectionPatch {
     static String apply(String source) {
         source = replaceRequiredOnce(
                 source,
-                "                        || family == 0x6000u;",
-                "                        || family == 0x6000u\n"
-                        + "                        || family == 0x7000u;",
+                "|| family == 0x6000u;",
+                "|| family == 0x6000u\n        || family == 0x7000u;",
                 "local-geometry family list"
         );
 
@@ -59,8 +58,8 @@ final class P14GeometryCorrectionPatch {
 
         source = replaceRequiredOnce(
                 source,
-                "                            if (open) panelFacing = (facing + (hingeRight ? 1u : 3u)) & 3u;",
-                "                            if (open) panelFacing = (facing + (hingeRight ? 3u : 1u)) & 3u;",
+                "if (open) panelFacing = (facing + (hingeRight ? 1u : 3u)) & 3u;",
+                "if (open) panelFacing = (facing + (hingeRight ? 3u : 1u)) & 3u;",
                 "door hinge rotation"
         );
 
