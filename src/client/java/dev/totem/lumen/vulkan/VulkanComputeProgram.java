@@ -482,6 +482,6 @@ public final class VulkanComputeProgram implements AutoCloseable {
     private record PipelineHandles(long descriptorSetLayout, long pipelineLayout, long pipeline) {
     }
 
-    private record PreparedPipeline(long deviceHandle, long descriptorSetLayout, long pipelineLayout, long pipeline) {
+    private record PreparedPipeline(Object deviceHandle, long descriptorSetLayout, long pipelineLayout, long pipeline) {
     }
 }
