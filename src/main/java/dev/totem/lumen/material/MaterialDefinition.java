@@ -1,10 +1,11 @@
 package dev.totem.lumen.material;
 
 /**
- * Minecraft-independent baseline material definition.
+ * Minecraft-independent material definition owned by Totem Lumen.
  *
- * <p>Texture/PBR handles are intentionally absent in P2. They can be appended later without making
- * the scene depend on BlockState or Minecraft renderer classes.</p>
+ * <p>P15 adds a compact RGB transmission tint. Opacity remains the scalar absorption/coverage
+ * control and IOR remains reserved for the later refraction path. Keeping transmission metadata in
+ * the material definition avoids hard-coding Minecraft block identifiers in Vulkan shaders.</p>
  */
 public record MaterialDefinition(
         String sourceId,
@@ -16,17 +17,51 @@ public record MaterialDefinition(
         float roughness,
         float metallic,
         float opacity,
-        float indexOfRefraction
+        float indexOfRefraction,
+        float transmissionR,
+        float transmissionG,
+        float transmissionB
 ) {
     public static final MaterialDefinition AIR = new MaterialDefinition(
             "minecraft:air", MaterialFlags.AIR, 0,
             0.0f, 0.0f, 0.0f,
-            1.0f, 0.0f, 0.0f, 1.0f
+            1.0f, 0.0f, 0.0f, 1.0f,
+            1.0f, 1.0f, 1.0f
     );
+
+    /** Compatibility constructor for callers that already provide explicit emissive RGB. */
+    public MaterialDefinition(
+            String sourceId,
+            int flags,
+            int emissionLevel,
+            float emissionR,
+            float emissionG,
+            float emissionB,
+            float roughness,
+            float metallic,
+            float opacity,
+            float indexOfRefraction
+    ) {
+        this(
+                sourceId,
+                flags,
+                emissionLevel,
+                emissionR,
+                emissionG,
+                emissionB,
+                roughness,
+                metallic,
+                opacity,
+                indexOfRefraction,
+                1.0f,
+                1.0f,
+                1.0f
+        );
+    }
 
     /**
      * Compatibility constructor for non-emissive/baseline callers. Emissive materials created
-     * through this constructor default to neutral white and can later opt into explicit RGB.
+     * through this constructor default to neutral white and transmission defaults to neutral RGB.
      */
     public MaterialDefinition(
             String sourceId,
@@ -47,7 +82,10 @@ public record MaterialDefinition(
                 roughness,
                 metallic,
                 opacity,
-                indexOfRefraction
+                indexOfRefraction,
+                1.0f,
+                1.0f,
+                1.0f
         );
     }
 
@@ -72,6 +110,11 @@ public record MaterialDefinition(
         }
         if (indexOfRefraction <= 0.0f) {
             throw new IllegalArgumentException("indexOfRefraction must be positive");
+        }
+        if (!isNormalized(transmissionR)
+                || !isNormalized(transmissionG)
+                || !isNormalized(transmissionB)) {
+            throw new IllegalArgumentException("transmission RGB must be in [0, 1]");
         }
     }
 
