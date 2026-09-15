@@ -7,7 +7,7 @@ This file is the repository index for design plans and decision tables. Architec
 | Whole project architecture | [`ARCHITECTURE.md`](ARCHITECTURE.md) | Vulkan/client vs common/server boundaries, authority model, package direction |
 | Renderer phases | [`ROADMAP.md`](ROADMAP.md) | P0+ renderer milestones and runtime validation gates |
 | P16 reflection / roughness | [`P16_REFLECTION_ROUGHNESS.md`](P16_REFLECTION_ROUGHNESS.md) | surface fallback values, 32-bit voxel packing, Fresnel/reflection model, performance scope and runtime validation |
-| P16 MoltenVK startup stalls | [`P16_MOLTENVK_PIPELINE_STALL.md`](P16_MOLTENVK_PIPELINE_STALL.md) | Alpha 34 runtime stall, non-blocking pipeline prewarm, optimized SPIR-V and persistent pipeline-cache follow-up |
+| P16 MoltenVK startup stalls | [`P16_MOLTENVK_PIPELINE_STALL.md`](P16_MOLTENVK_PIPELINE_STALL.md) | Alpha 34 runtime stall, non-blocking pipeline prewarm, O0 monolithic shader constraint and persistent pipeline-cache follow-up |
 | Server gameplay-light phases | [`GAMEPLAY_LIGHTING_ROADMAP.md`](GAMEPLAY_LIGHTING_ROADMAP.md) | GL0–GL5 implementation/validation roadmap |
 | Authoritative gameplay-light design | [`SERVER_GAMEPLAY_LIGHTING.md`](SERVER_GAMEPLAY_LIGHTING.md) | storage, propagation, spawn policy, sky/environment, budgets, resource estimates, validation matrix |
 | Data-pack block lighting | [`LIGHTING_WORLD_RULES.md`](LIGHTING_WORLD_RULES.md) | `emission_color`, `gameplay_strength`, reload/sync semantics |
@@ -27,7 +27,7 @@ This file is the repository index for design plans and decision tables. Architec
 | Specular recursion | excluded from P16 |
 | Surface source of truth | built-in fallback now; resource-pack/LabPBR later |
 | Voxel memory growth | none; P16 remains inside the existing 32-bit voxel word |
-| GLSL -> SPIR-V | background shaderc prewarm with performance optimization |
+| GLSL -> SPIR-V | background shaderc prewarm at O0 for the current monolithic P16 shader; performance optimizer rejected after SPIR-V ID overflow |
 | SPIR-V -> driver pipeline | background Vulkan pipeline prewarm; never block the Minecraft render thread |
 | MoltenVK pipeline cache | planned persistent cache keyed by device/driver compatibility and shader revision |
 | Optimization policy | measure Apple/MoltenVK runtime cost before changing ray count/sampling |
