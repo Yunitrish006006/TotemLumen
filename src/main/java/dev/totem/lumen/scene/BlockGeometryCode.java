@@ -5,7 +5,9 @@ package dev.totem.lumen.scene;
  *
  * <p>Code zero intentionally means the legacy/full-cube fast path. P14B reserves the upper nibble
  * as a geometry family and the low 12 bits as family-specific parameters. P15 reuses spare family
- * and pane parameter bits for compact glass transmission metadata without growing the voxel word.</p>
+ * and pane parameter bits for compact glass transmission metadata without growing the voxel word.
+ * P16 adds a full-cube surface family carrying quantized roughness/metallic response while keeping
+ * the same 32-bit voxel ABI.</p>
  */
 public final class BlockGeometryCode {
     public static final int FULL_CUBE = 0;
@@ -23,6 +25,7 @@ public final class BlockGeometryCode {
     public static final int TRAPDOOR = 0x6000;
     public static final int FENCE_GATE = 0x7000;
     public static final int GLASS_CUBE = 0x8000;
+    public static final int SURFACE_CUBE = 0x9000;
 
     public static final int NORTH = 0;
     public static final int EAST = 1;
@@ -38,6 +41,11 @@ public final class BlockGeometryCode {
     public static final int PANE_TRANSMISSIVE = 1 << 4;
     public static final int TRANSMISSION_TINT_SHIFT = 5;
     public static final int TRANSMISSION_TINT_MASK = 0x1F << TRANSMISSION_TINT_SHIFT;
+
+    /** P16 surface-cube parameters: 4-bit roughness followed by 4-bit metallic response. */
+    public static final int SURFACE_ROUGHNESS_MASK = 0xF;
+    public static final int SURFACE_METALLIC_SHIFT = 4;
+    public static final int SURFACE_METALLIC_MASK = 0xF << SURFACE_METALLIC_SHIFT;
 
     public static final int TINT_CLEAR = 0;
     public static final int TINT_WHITE = 1;
@@ -114,6 +122,23 @@ public final class BlockGeometryCode {
         return GLASS_CUBE | (tint & 0x1F);
     }
 
+    /** Full-cube fast path with P16 optical response encoded in otherwise spare geometry bits. */
+    public static int surfaceCube(float roughness, float metallic) {
+        return SURFACE_CUBE
+                | quantizeNormalized(roughness, "roughness")
+                | (quantizeNormalized(metallic, "metallic") << SURFACE_METALLIC_SHIFT);
+    }
+
+    public static float surfaceRoughness(int geometryCode) {
+        requireSurfaceCube(geometryCode);
+        return (geometryCode & SURFACE_ROUGHNESS_MASK) / 15.0f;
+    }
+
+    public static float surfaceMetallic(int geometryCode) {
+        requireSurfaceCube(geometryCode);
+        return ((geometryCode & SURFACE_METALLIC_MASK) >> SURFACE_METALLIC_SHIFT) / 15.0f;
+    }
+
     public static int door(int facing, boolean open, boolean hingeRight) {
         return DOOR
                 | directionBits(facing)
@@ -154,7 +179,7 @@ public final class BlockGeometryCode {
             return true;
         }
         return switch (family(geometryCode)) {
-            case STAIRS, FENCE, WALL, PANE, DOOR, TRAPDOOR, FENCE_GATE, GLASS_CUBE -> true;
+            case STAIRS, FENCE, WALL, PANE, DOOR, TRAPDOOR, FENCE_GATE, GLASS_CUBE, SURFACE_CUBE -> true;
             default -> false;
         };
     }
@@ -164,6 +189,19 @@ public final class BlockGeometryCode {
             throw new IllegalArgumentException("transmission tint must be in [0, 31]: " + tint);
         }
         return (tint & 0x1F) << TRANSMISSION_TINT_SHIFT;
+    }
+
+    private static int quantizeNormalized(float value, String field) {
+        if (!Float.isFinite(value) || value < 0.0f || value > 1.0f) {
+            throw new IllegalArgumentException(field + " must be a finite value in [0, 1]");
+        }
+        return Math.round(value * 15.0f) & 0xF;
+    }
+
+    private static void requireSurfaceCube(int geometryCode) {
+        if (family(geometryCode) != SURFACE_CUBE) {
+            throw new IllegalArgumentException("geometry code is not a P16 surface cube: " + geometryCode);
+        }
     }
 
     private static int directionBits(int facing) {
