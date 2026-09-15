@@ -96,14 +96,33 @@ public final class LightingWorldRulesReloadListener extends SimpleReloadListener
         }
 
         try {
+            int gameplayStrength = LightingWorldRule.USE_BLOCK_STATE;
+            if (object.has("gameplay_strength")) {
+                JsonElement strengthElement = object.get("gameplay_strength");
+                if (!strengthElement.isJsonPrimitive()
+                        || !strengthElement.getAsJsonPrimitive().isNumber()) {
+                    throw new JsonParseException("gameplay_strength must be an integer in [0, 15]");
+                }
+                double rawStrength = strengthElement.getAsDouble();
+                if (!Double.isFinite(rawStrength)
+                        || rawStrength != Math.rint(rawStrength)
+                        || rawStrength < 0.0
+                        || rawStrength > 15.0) {
+                    throw new JsonParseException("gameplay_strength must be an integer in [0, 15]");
+                }
+                gameplayStrength = (int) rawStrength;
+            }
+
             return new LightingWorldRule(
                     color.get(0).getAsFloat(),
                     color.get(1).getAsFloat(),
-                    color.get(2).getAsFloat()
+                    color.get(2).getAsFloat(),
+                    gameplayStrength
             );
         } catch (RuntimeException exception) {
             throw new JsonParseException(
-                    "emission_color for " + blockId + " must contain finite numbers in [0, 1]",
+                    "lighting rule for " + blockId + " must contain valid finite values: "
+                            + exception.getMessage(),
                     exception
             );
         }

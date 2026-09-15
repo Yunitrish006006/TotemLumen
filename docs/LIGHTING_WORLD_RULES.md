@@ -1,8 +1,6 @@
 # Server Lighting World Rules
 
-Totem Lumen Alpha 31 can treat emissive light color as a server-authoritative world rule.
-The rules are loaded from the world's enabled server data packs and synchronized to every connected
-Totem Lumen client that advertises the matching payload channel.
+Totem Lumen Alpha 32 treats emissive color and stable gameplay intensity as server-authoritative world data. Rules are loaded from the world's enabled server data packs. Emissive color is synchronized to compatible Totem Lumen clients; gameplay intensity remains server-side and feeds the authoritative RGB gameplay-light field.
 
 ## Rule location
 
@@ -25,33 +23,34 @@ data/examplemod/totem_lumen/lighting/crystal_lamp.json
     -> examplemod:crystal_lamp
 ```
 
-Because these are normal server-data resources, Minecraft's data-pack stack decides which file wins
-when several enabled packs provide the same resource.
+Minecraft's normal data-pack stack determines which resource wins when several enabled packs provide the same path.
 
 ## Format
 
 ```json
 {
-  "emission_color": [1.0, 0.55, 0.22]
+  "emission_color": [1.0, 0.55, 0.22],
+  "gameplay_strength": 13
 }
 ```
 
-`emission_color` is normalized RGB. Each component must be a finite number from `0.0` through `1.0`.
-Invalid rules fail the data-pack reload instead of silently applying a partial rule set.
+`emission_color` is normalized RGB. Every component must be a finite value from `0.0` through `1.0`.
 
-Alpha 31 intentionally controls color only. Minecraft `BlockState#getLightEmission()` still controls
-whether a state emits and its normal 0-15 emission level. A lighting rule therefore does not turn a
-normally dark block state into a light source.
+`gameplay_strength` is optional and must be an integer from `0` through `15`. When omitted, gameplay lighting uses the block state's vanilla `getLightEmission()` value. This is the stable representative value for flickering visual lights.
+
+A rule still cannot turn a normally non-emissive `BlockState` into a source. This keeps source discovery bounded and compatible with Minecraft's existing emissive-state semantics.
+
+Invalid rules fail data-pack reload instead of partially applying an inconsistent authoritative state.
 
 ## Runtime behavior
 
-- The server loads rules with its `SERVER_DATA` resource manager.
-- A joining Totem Lumen client receives the current complete rule snapshot.
-- A successful `/reload` sends the new complete snapshot to all connected Totem Lumen clients.
-- Clients that do not advertise the Totem Lumen payload are skipped by the server.
-- A Totem Lumen client gradually re-extracts already populated sections using the existing
-  background section budget, avoiding one large synchronous rebuild after `/reload`.
-- Blocks without an explicit world rule keep Totem Lumen's built-in vanilla color fallback.
+- Server data resources own the authoritative rule set.
+- Joining compatible clients receive the complete RGB color snapshot.
+- Successful `/reload` broadcasts the new color snapshot.
+- The existing client wire format intentionally remains RGB-only for Alpha 31 compatibility.
+- `gameplay_strength` is server-only and does not need to be synchronized to Vulkan rendering.
+- The server keeps all vanilla-emissive positions in a sparse source index, including sources currently configured to gameplay strength `0`. This allows `/reload` to re-enable them without scanning every loaded voxel.
+- Rule changes queue bounded local relights instead of synchronously rebuilding the loaded world.
+- Blocks without an explicit rule use Totem Lumen's shared built-in fallback tint and their vanilla emission level.
 
-The Vulkan renderer does not know whether a color came from a world rule or the fallback. Both paths
-resolve to the same `MaterialDefinition` emission RGB and existing GPU material ABI.
+See [`SERVER_GAMEPLAY_LIGHTING.md`](SERVER_GAMEPLAY_LIGHTING.md) for storage, propagation, spawning, spectral sensitivity, dimension lighting and performance budgets.

@@ -3,7 +3,7 @@
   "id": "totem-lumen",
   "version": "${version}",
   "name": "Totem Lumen",
-  "description": "Vulkan-first real-time lighting and voxel ray tracing for Minecraft 26.2.",
+  "description": "Vulkan-first real-time lighting and voxel ray tracing for Minecraft 26.2, with server-authoritative gameplay lighting.",
   "authors": [
     "Yunitrish006006"
   ],
@@ -21,6 +21,7 @@
     ]
   },
   "mixins": [
+    "totem-lumen.mixins.json",
     {
       "config": "totem-lumen.client.mixins.json",
       "environment": "client"

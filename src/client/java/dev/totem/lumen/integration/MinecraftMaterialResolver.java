@@ -1,5 +1,7 @@
 package dev.totem.lumen.integration;
 
+import dev.totem.lumen.gameplay.light.DefaultEmissionColors;
+import dev.totem.lumen.gameplay.light.EmissionColor;
 import dev.totem.lumen.material.MaterialDefinition;
 import dev.totem.lumen.material.MaterialFlags;
 import dev.totem.lumen.world.LightingWorldRule;
@@ -68,16 +70,16 @@ public final class MinecraftMaterialResolver {
             ior = sourceId.equals("minecraft:water") ? 1.333f : 1.5f;
         }
 
-        float[] emissionColor = baselineEmissionColor(sourceId, emission);
+        EmissionColor emissionColor = DefaultEmissionColors.forBlock(sourceId, emission);
         LightingWorldRule serverRule = emission > 0
                 ? ClientLightingWorldRules.ruleFor(sourceId)
                 : null;
         if (serverRule != null) {
-            emissionColor = new float[]{
+            emissionColor = new EmissionColor(
                     serverRule.emissionR(),
                     serverRule.emissionG(),
                     serverRule.emissionB()
-            };
+            );
         }
 
         float[] transmissionColor = transmissiveGlass
@@ -87,9 +89,9 @@ public final class MinecraftMaterialResolver {
                 sourceId,
                 flags,
                 emission,
-                emissionColor[0],
-                emissionColor[1],
-                emissionColor[2],
+                emissionColor.red(),
+                emissionColor.green(),
+                emissionColor.blue(),
                 roughness,
                 0.0f,
                 opacity,
@@ -132,53 +134,5 @@ public final class MinecraftMaterialResolver {
         if (sourceId.startsWith("minecraft:red_")) return new float[]{0.96f, 0.34f, 0.30f};
         if (sourceId.startsWith("minecraft:black_")) return new float[]{0.24f, 0.25f, 0.29f};
         return new float[]{1.0f, 1.0f, 1.0f};
-    }
-
-    /**
-     * Baseline vanilla tint approximation. Server world rules override this color when present;
-     * keeping the fallback here preserves sensible lighting on servers that do not define a rule.
-     */
-    private static float[] baselineEmissionColor(String sourceId, int emission) {
-        if (emission <= 0) {
-            return new float[]{0.0f, 0.0f, 0.0f};
-        }
-        if (sourceId.contains("soul_")) {
-            return new float[]{0.28f, 0.78f, 1.0f};
-        }
-        if (sourceId.contains("redstone_torch")) {
-            return new float[]{1.0f, 0.18f, 0.06f};
-        }
-        if (sourceId.contains("lava") || sourceId.contains("magma")) {
-            return new float[]{1.0f, 0.32f, 0.08f};
-        }
-        if (sourceId.contains("ochre_froglight")) {
-            return new float[]{1.0f, 0.76f, 0.35f};
-        }
-        if (sourceId.contains("verdant_froglight")) {
-            return new float[]{0.58f, 1.0f, 0.62f};
-        }
-        if (sourceId.contains("pearlescent_froglight")) {
-            return new float[]{1.0f, 0.62f, 0.92f};
-        }
-        if (sourceId.contains("sea_lantern") || sourceId.contains("conduit")) {
-            return new float[]{0.62f, 0.90f, 1.0f};
-        }
-        if (sourceId.contains("end_rod")) {
-            return new float[]{0.88f, 0.84f, 1.0f};
-        }
-        if (sourceId.contains("glowstone")) {
-            return new float[]{1.0f, 0.78f, 0.42f};
-        }
-        if (sourceId.contains("shroomlight")) {
-            return new float[]{1.0f, 0.48f, 0.18f};
-        }
-        if (sourceId.contains("fire")
-                || sourceId.contains("torch")
-                || sourceId.contains("lantern")
-                || sourceId.contains("campfire")
-                || sourceId.contains("jack_o_lantern")) {
-            return new float[]{1.0f, 0.55f, 0.22f};
-        }
-        return new float[]{1.0f, 0.86f, 0.66f};
     }
 }

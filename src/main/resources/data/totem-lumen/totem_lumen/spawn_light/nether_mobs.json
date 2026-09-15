@@ -1,0 +1,8 @@
+{
+  "priority": 100,
+  "entity_tags": [
+    "totem-lumen:nether_mobs"
+  ],
+  "block_sensitivity": [0.35, 1.0, 1.0],
+  "environment_sensitivity": [0.10, 1.0, 1.0]
+}
