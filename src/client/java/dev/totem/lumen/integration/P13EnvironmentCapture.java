@@ -25,14 +25,15 @@ public final class P13EnvironmentCapture {
 
     private static void capture(ClientLevel level) {
         String dimensionId = level.dimension().identifier().toString();
-        EnvironmentFrameState.capture(dimensionId, level.getDayTime());
+        long overworldClockTime = level.getOverworldClockTime();
+        EnvironmentFrameState.capture(dimensionId, overworldClockTime);
 
         if (!dimensionId.equals(lastDimensionId)) {
             lastDimensionId = dimensionId;
             TotemLumenClient.LOGGER.info(
-                    "P13 environment source active: dimension={}, dayTime={}",
+                    "P13 environment source active: dimension={}, overworldClockTime={}",
                     dimensionId,
-                    level.getDayTime()
+                    overworldClockTime
             );
         }
     }
