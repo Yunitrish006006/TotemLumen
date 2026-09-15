@@ -1,8 +1,10 @@
 package dev.totem.lumen;
 
 import com.mojang.blaze3d.platform.InputConstants;
+import dev.totem.lumen.integration.ClientLightingWorldRules;
 import dev.totem.lumen.integration.P13EnvironmentCapture;
 import dev.totem.lumen.integration.SceneExtractionBridge;
+import dev.totem.lumen.network.LightingWorldRulesPayload;
 import dev.totem.lumen.render.RendererBootstrap;
 import dev.totem.lumen.vulkan.P5StableLookupRenderer;
 import dev.totem.lumen.vulkan.P5WorldDebugComposite;
@@ -11,6 +13,8 @@ import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper;
+import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
+import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
 import net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderEvents;
 import net.minecraft.client.KeyMapping;
@@ -29,6 +33,21 @@ public final class TotemLumenClient implements ClientModInitializer {
     @Override
     public void onInitializeClient() {
         LOGGER.info("Initializing Totem Lumen");
+
+        ClientPlayNetworking.registerGlobalReceiver(LightingWorldRulesPayload.TYPE, (payload, context) -> {
+            if (ClientLightingWorldRules.apply(payload.rules())) {
+                SceneExtractionBridge.refreshLightingWorldRules();
+            }
+            LOGGER.info(
+                    "Applied {} server-authoritative lighting world rule(s)",
+                    payload.rules().size()
+            );
+        });
+        ClientPlayConnectionEvents.DISCONNECT.register((listener, client) -> {
+            if (ClientLightingWorldRules.reset()) {
+                LOGGER.info("Cleared server-authoritative lighting world rules after disconnect");
+            }
+        });
 
         // Start the expensive shaderc work as early as possible. This does not touch Minecraft's
         // Vulkan device and therefore does not need to run on the render thread. World rendering

@@ -2,6 +2,7 @@ package dev.totem.lumen.integration;
 
 import dev.totem.lumen.material.MaterialDefinition;
 import dev.totem.lumen.material.MaterialFlags;
+import dev.totem.lumen.world.LightingWorldRule;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.world.level.block.TransparentBlock;
@@ -68,6 +69,17 @@ public final class MinecraftMaterialResolver {
         }
 
         float[] emissionColor = baselineEmissionColor(sourceId, emission);
+        LightingWorldRule serverRule = emission > 0
+                ? ClientLightingWorldRules.ruleFor(sourceId)
+                : null;
+        if (serverRule != null) {
+            emissionColor = new float[]{
+                    serverRule.emissionR(),
+                    serverRule.emissionG(),
+                    serverRule.emissionB()
+            };
+        }
+
         float[] transmissionColor = transmissiveGlass
                 ? baselineTransmissionColor(sourceId)
                 : new float[]{1.0f, 1.0f, 1.0f};
@@ -123,9 +135,8 @@ public final class MinecraftMaterialResolver {
     }
 
     /**
-     * Baseline vanilla tint approximation until texture/resource-pack emissive data is available.
-     * Keeping this on the extraction side means the Vulkan shader consumes generic material data
-     * rather than hard-coding Minecraft block identifiers.
+     * Baseline vanilla tint approximation. Server world rules override this color when present;
+     * keeping the fallback here preserves sensible lighting on servers that do not define a rule.
      */
     private static float[] baselineEmissionColor(String sourceId, int emission) {
         if (emission <= 0) {

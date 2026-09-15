@@ -106,6 +106,28 @@ public final class SceneExtractionBridge {
         }
     }
 
+    /**
+     * Re-resolves currently populated sections after a server lighting-rule snapshot changes.
+     * Work is deliberately fed into the existing one-section-per-extraction background budget so a
+     * data-pack reload does not turn into a large synchronous client hitch.
+     */
+    public static void refreshLightingWorldRules() {
+        if (!sceneTrackingEnabled()) {
+            return;
+        }
+
+        int scheduled = 0;
+        for (SectionSnapshot snapshot : SCENE.sectionSnapshots()) {
+            scheduleBackgroundSnapshot(snapshot.key());
+            scheduled++;
+        }
+
+        TotemLumenClient.LOGGER.info(
+                "Queued {} populated section(s) for lighting world-rule refresh",
+                scheduled
+        );
+    }
+
     private static void onChunkLoaded(ClientLevel level, LevelChunk chunk) {
         if (!sceneTrackingEnabled()) {
             return;
