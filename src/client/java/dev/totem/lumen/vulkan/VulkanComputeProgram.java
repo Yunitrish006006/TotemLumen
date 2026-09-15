@@ -224,6 +224,7 @@ public final class VulkanComputeProgram implements AutoCloseable {
         source = P14CommonGeometryPatch.apply(source);
         source = P14GeometryCorrectionPatch.apply(source);
         source = P13SkyOcclusionPatch.apply(source);
+        source = P16ReflectionRoughnessPatch.apply(source);
         return source;
     }
 
@@ -240,25 +241,36 @@ public final class VulkanComputeProgram implements AutoCloseable {
             if (compiler != 0L) Shaderc.shaderc_compiler_release(compiler);
             throw new IllegalStateException("Failed to initialize shaderc");
         }
+
         try {
             Shaderc.shaderc_compile_options_set_target_env(options, 0, 4202496);
             Shaderc.shaderc_compile_options_set_optimization_level(options, optimizationLevel);
             long result = Shaderc.shaderc_compile_into_spv(
-                    compiler, source, Shaderc.shaderc_compute_shader, name, "main", options
+                    compiler,
+                    source,
+                    Shaderc.shaderc_compute_shader,
+                    name,
+                    "main",
+                    options
             );
             if (result == 0L) {
-                throw new IllegalStateException("shaderc returned a null compilation result for " + name);
+                throw new IllegalStateException("shaderc returned a null result for " + name);
             }
             try {
-                if (Shaderc.shaderc_result_get_compilation_status(result) != 0) {
+                int status = Shaderc.shaderc_result_get_compilation_status(result);
+                if (status != 0) {
                     throw new IllegalStateException(
-                            "Compute shader compilation failed: " + Shaderc.shaderc_result_get_error_message(result)
+                            "Shader compilation failed for " + name + ": "
+                                    + Shaderc.shaderc_result_get_error_message(result)
                     );
                 }
                 ByteBuffer bytes = Shaderc.shaderc_result_get_bytes(result);
-                byte[] copy = new byte[bytes.remaining()];
-                bytes.get(copy);
-                return copy;
+                if (bytes == null || !bytes.hasRemaining()) {
+                    throw new IllegalStateException("Shader compilation produced no SPIR-V for " + name);
+                }
+                byte[] spirv = new byte[bytes.remaining()];
+                bytes.get(spirv);
+                return spirv;
             } finally {
                 Shaderc.shaderc_result_release(result);
             }
@@ -268,24 +280,16 @@ public final class VulkanComputeProgram implements AutoCloseable {
         }
     }
 
-    private static long createShaderModule(VulkanDevice device, byte[] spirvBytes) {
-        if (spirvBytes.length == 0 || (spirvBytes.length & 3) != 0) {
-            throw new IllegalArgumentException("Invalid SPIR-V byte length: " + spirvBytes.length);
-        }
-
-        ByteBuffer spirv = MemoryUtil.memAlloc(spirvBytes.length);
-        try {
-            spirv.put(spirvBytes).flip();
-            try (MemoryStack stack = MemoryStack.stackPush()) {
-                VkShaderModuleCreateInfo createInfo = VkShaderModuleCreateInfo.calloc(stack)
-                        .sType$Default()
-                        .pCode(spirv);
-                LongBuffer modulePtr = stack.mallocLong(1);
-                check(VK10.vkCreateShaderModule(device.vkDevice(), createInfo, null, modulePtr), "vkCreateShaderModule");
-                return modulePtr.get(0);
-            }
-        } finally {
-            MemoryUtil.memFree(spirv);
+    private static long createShaderModule(VulkanDevice device, byte[] spirv) {
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            ByteBuffer code = stack.malloc(spirv.length);
+            code.put(spirv).flip();
+            VkShaderModuleCreateInfo createInfo = VkShaderModuleCreateInfo.calloc(stack)
+                    .sType$Default()
+                    .pCode(code);
+            LongBuffer module = stack.mallocLong(1);
+            check(VK10.vkCreateShaderModule(device.vkDevice(), createInfo, null, module), "vkCreateShaderModule");
+            return module.get(0);
         }
     }
 
@@ -305,6 +309,7 @@ public final class VulkanComputeProgram implements AutoCloseable {
     public void close() {
         if (closed) return;
         closed = true;
+        VK10.vkDeviceWaitIdle(device.vkDevice());
         VK10.vkDestroyDescriptorPool(device.vkDevice(), descriptorPool, null);
         VK10.vkDestroyPipeline(device.vkDevice(), pipeline, null);
         VK10.vkDestroyPipelineLayout(device.vkDevice(), pipelineLayout, null);
@@ -313,7 +318,7 @@ public final class VulkanComputeProgram implements AutoCloseable {
 
     private static void check(int result, String operation) {
         if (result != VK10.VK_SUCCESS) {
-            throw new IllegalStateException(operation + " failed with VkResult " + result);
+            throw new IllegalStateException(operation + " failed: " + result);
         }
     }
 }
