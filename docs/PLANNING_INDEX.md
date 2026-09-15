@@ -10,6 +10,7 @@ This file is the repository index for design plans and decision tables. Architec
 | P16 reflection / roughness | [`P16_REFLECTION_ROUGHNESS.md`](P16_REFLECTION_ROUGHNESS.md) | surface fallback values, 32-bit voxel packing, Fresnel/reflection model, performance scope and runtime validation |
 | P16 MoltenVK startup stalls | [`P16_MOLTENVK_PIPELINE_STALL.md`](P16_MOLTENVK_PIPELINE_STALL.md) | Alpha 34/35 runtime stalls, non-blocking pipeline prewarm and why waiting/cache alone is insufficient |
 | P16 multi-pass split | [`P16_MULTIPASS_SPLIT.md`](P16_MULTIPASS_SPLIT.md) | Alpha 36 pass boundaries, shared-SSBO synchronization, independent reflection readiness, shader compile policy and fallback semantics |
+| Persistent Vulkan pipeline cache | [`PERSISTENT_VULKAN_PIPELINE_CACHE.md`](PERSISTENT_VULKAN_PIPELINE_CACHE.md) | Alpha 37 startup measurements, Alpha 38 VkPipelineCache persistence, cache identity/fallback rules and runtime validation |
 | Server gameplay-light phases | [`GAMEPLAY_LIGHTING_ROADMAP.md`](GAMEPLAY_LIGHTING_ROADMAP.md) | GL0–GL5 implementation/validation roadmap |
 | Authoritative gameplay-light design | [`SERVER_GAMEPLAY_LIGHTING.md`](SERVER_GAMEPLAY_LIGHTING.md) | storage, propagation, spawn policy, sky/environment, budgets, resource estimates, validation matrix |
 | Data-pack block lighting | [`LIGHTING_WORLD_RULES.md`](LIGHTING_WORLD_RULES.md) | `emission_color`, `gameplay_strength`, reload/sync semantics |
@@ -46,7 +47,7 @@ This file is the repository index for design plans and decision tables. Architec
 | P16 shaderc performance optimization | rejected for current split source: produced 1,515,084-byte SPIR-V and about 20 s CI compile time |
 | SPIR-V -> driver pipeline | background Vulkan pipeline work; never block the Minecraft render thread |
 | Reflection failure policy | keep P12-P15 renderer active; disable only P16 reflection for that resource generation |
-| MoltenVK pipeline cache | planned persistent cache as a startup optimization, not a correctness dependency |
+| MoltenVK/Vulkan pipeline cache | Alpha 38 persists driver/device-keyed opaque `VkPipelineCache` data; cache remains an optimization, never a correctness dependency |
 | Future shader growth | prefer bounded additional passes over rebuilding a P12+ monolithic mega-shader |
 | Optimization policy | measure Apple/MoltenVK runtime cost before changing ray count/sampling |
 
