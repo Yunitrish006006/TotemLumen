@@ -21,6 +21,7 @@ public final class BlockGeometryCode {
     public static final int PANE = 0x4000;
     public static final int DOOR = 0x5000;
     public static final int TRAPDOOR = 0x6000;
+    public static final int FENCE_GATE = 0x7000;
 
     public static final int NORTH = 0;
     public static final int EAST = 1;
@@ -46,6 +47,7 @@ public final class BlockGeometryCode {
     public static final int OPEN = 1 << 2;
     public static final int HINGE_RIGHT = 1 << 3;
     public static final int TOP_HALF = 1 << 3;
+    public static final int IN_WALL = 1 << 3;
 
     private BlockGeometryCode() {
     }
@@ -91,6 +93,13 @@ public final class BlockGeometryCode {
                 | (top ? TOP_HALF : 0);
     }
 
+    public static int fenceGate(int facing, boolean open, boolean inWall) {
+        return FENCE_GATE
+                | directionBits(facing)
+                | (open ? OPEN : 0)
+                | (inWall ? IN_WALL : 0);
+    }
+
     public static int family(int geometryCode) {
         return geometryCode & FAMILY_MASK;
     }
@@ -100,7 +109,7 @@ public final class BlockGeometryCode {
             return true;
         }
         return switch (family(geometryCode)) {
-            case STAIRS, FENCE, WALL, PANE, DOOR, TRAPDOOR -> true;
+            case STAIRS, FENCE, WALL, PANE, DOOR, TRAPDOOR, FENCE_GATE -> true;
             default -> false;
         };
     }
