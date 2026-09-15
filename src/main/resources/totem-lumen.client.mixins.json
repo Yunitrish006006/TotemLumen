@@ -4,6 +4,11 @@
   "client": [
     "GpuDeviceAccessor",
     "ClientLevelBlockUpdateMixin",
+    "BlockEntityRenderDispatcherMixin",
+    "SubmitNodeStorageBlockEntityMixin",
+    "SubmitNodeCollectionBlockEntityMixin",
+    "MinecraftBlockModelMeshResolverMixin",
+    "SceneExtractionBridgeBlockEntityMixin",
     "P5StableLookupRendererMixin",
     "P5RendererResourcesMixin",
     "VulkanComputeProgramMixin"
