@@ -108,11 +108,13 @@ public final class GpuSectionLightLists {
         List<PointLight> lights = new ArrayList<>();
         outer:
         for (SectionSnapshot section : sections) {
-            int[] materialIds = section.voxels().copyMaterialIds();
             for (int localY = 0; localY < SectionVoxelData.SIZE; localY++) {
                 for (int localZ = 0; localZ < SectionVoxelData.SIZE; localZ++) {
                     for (int localX = 0; localX < SectionVoxelData.SIZE; localX++) {
-                        int materialId = materialIds[SectionVoxelData.index(localX, localY, localZ)];
+                        // P14 packs geometry into the upper half of each GPU voxel word. CPU light
+                        // extraction must resolve the raw material ID instead of consuming the
+                        // packed upload word as a material-table index.
+                        int materialId = section.voxels().materialId(localX, localY, localZ);
                         if (materialId == 0) {
                             continue;
                         }
