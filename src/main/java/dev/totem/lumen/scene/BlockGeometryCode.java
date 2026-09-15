@@ -3,9 +3,9 @@ package dev.totem.lumen.scene;
 /**
  * Compact block-local geometry identifiers packed into the high 16 bits of each GPU voxel word.
  *
- * <p>Code zero intentionally means the legacy/full-cube fast path so existing snapshots remain
- * valid. P14B reserves the upper nibble as a geometry family and the low 12 bits as family-specific
- * parameters. The two P14A slab codes remain stable for compatibility with the first runtime gate.</p>
+ * <p>Code zero intentionally means the legacy/full-cube fast path. P14B reserves the upper nibble
+ * as a geometry family and the low 12 bits as family-specific parameters. P15 reuses spare family
+ * and pane parameter bits for compact glass transmission metadata without growing the voxel word.</p>
  */
 public final class BlockGeometryCode {
     public static final int FULL_CUBE = 0;
@@ -22,6 +22,7 @@ public final class BlockGeometryCode {
     public static final int DOOR = 0x5000;
     public static final int TRAPDOOR = 0x6000;
     public static final int FENCE_GATE = 0x7000;
+    public static final int GLASS_CUBE = 0x8000;
 
     public static final int NORTH = 0;
     public static final int EAST = 1;
@@ -32,6 +33,29 @@ public final class BlockGeometryCode {
     public static final int CONNECT_EAST = 1 << 1;
     public static final int CONNECT_SOUTH = 1 << 2;
     public static final int CONNECT_WEST = 1 << 3;
+
+    /** P15 pane parameter bit: same PANE geometry, but ray transport may continue through it. */
+    public static final int PANE_TRANSMISSIVE = 1 << 4;
+    public static final int TRANSMISSION_TINT_SHIFT = 5;
+    public static final int TRANSMISSION_TINT_MASK = 0x1F << TRANSMISSION_TINT_SHIFT;
+
+    public static final int TINT_CLEAR = 0;
+    public static final int TINT_WHITE = 1;
+    public static final int TINT_ORANGE = 2;
+    public static final int TINT_MAGENTA = 3;
+    public static final int TINT_LIGHT_BLUE = 4;
+    public static final int TINT_YELLOW = 5;
+    public static final int TINT_LIME = 6;
+    public static final int TINT_PINK = 7;
+    public static final int TINT_GRAY = 8;
+    public static final int TINT_LIGHT_GRAY = 9;
+    public static final int TINT_CYAN = 10;
+    public static final int TINT_PURPLE = 11;
+    public static final int TINT_BLUE = 12;
+    public static final int TINT_BROWN = 13;
+    public static final int TINT_GREEN = 14;
+    public static final int TINT_RED = 15;
+    public static final int TINT_BLACK = 16;
 
     public static final int STAIR_TOP = 1 << 2;
     public static final int STAIR_SHAPE_SHIFT = 3;
@@ -79,6 +103,17 @@ public final class BlockGeometryCode {
         return PANE | (connections & 0xF);
     }
 
+    public static int transmissivePane(int connections, int tint) {
+        return PANE
+                | (connections & 0xF)
+                | PANE_TRANSMISSIVE
+                | transmissionTintBits(tint);
+    }
+
+    public static int glassCube(int tint) {
+        return GLASS_CUBE | (tint & 0x1F);
+    }
+
     public static int door(int facing, boolean open, boolean hingeRight) {
         return DOOR
                 | directionBits(facing)
@@ -104,14 +139,31 @@ public final class BlockGeometryCode {
         return geometryCode & FAMILY_MASK;
     }
 
+    public static int transmissionTint(int geometryCode) {
+        if (family(geometryCode) == GLASS_CUBE) {
+            return geometryCode & 0x1F;
+        }
+        if (family(geometryCode) == PANE && (geometryCode & PANE_TRANSMISSIVE) != 0) {
+            return (geometryCode & TRANSMISSION_TINT_MASK) >> TRANSMISSION_TINT_SHIFT;
+        }
+        return TINT_CLEAR;
+    }
+
     public static boolean isKnown(int geometryCode) {
         if (geometryCode == FULL_CUBE || geometryCode == SLAB_BOTTOM || geometryCode == SLAB_TOP) {
             return true;
         }
         return switch (family(geometryCode)) {
-            case STAIRS, FENCE, WALL, PANE, DOOR, TRAPDOOR, FENCE_GATE -> true;
+            case STAIRS, FENCE, WALL, PANE, DOOR, TRAPDOOR, FENCE_GATE, GLASS_CUBE -> true;
             default -> false;
         };
+    }
+
+    private static int transmissionTintBits(int tint) {
+        if (tint < 0 || tint > 31) {
+            throw new IllegalArgumentException("transmission tint must be in [0, 31]: " + tint);
+        }
+        return (tint & 0x1F) << TRANSMISSION_TINT_SHIFT;
     }
 
     private static int directionBits(int facing) {
