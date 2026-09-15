@@ -19,17 +19,17 @@ The server gameplay subsystem never initializes or depends on Vulkan. A dedicate
 
 ## Current milestone
 
-`0.1.0-alpha.33` adds the P16 client reflection/roughness baseline:
+`0.1.0-alpha.35` keeps the P16 reflection/roughness renderer from Alpha 33 while fixing the Apple Silicon/MoltenVK startup stalls found in Alpha 33/34 runtime testing:
 
-- one bounded secondary reflection ray in the GI composite path;
-- roughness-controlled deterministic reflection spread;
-- Schlick Fresnel response and metallic F0 tint;
-- built-in client surface profiles until resource-pack/LabPBR integration;
-- 4-bit roughness + 4-bit metallic packed into the existing 32-bit voxel word;
-- reflected rays reuse P14 geometry and P15 RGB filtered glass transmission;
-- no recursive specular transport or additional per-voxel GPU buffer.
+- the large SPIR-V blob remains off LWJGL `MemoryStack`;
+- GLSL -> SPIR-V compilation remains on the background shader-prewarm thread at O0; shaderc performance optimization was rejected after the monolithic P16 shader triggered an optimizer ID overflow;
+- SPIR-V -> MoltenVK/Metal compute-pipeline creation runs on a dedicated background worker;
+- Minecraft's render thread never waits for main-GI pipeline compilation;
+- vanilla rendering remains responsive until the prepared pipeline is ready;
+- the prepared main GI pipeline is reused across Totem Lumen render-resource recreations;
+- persistent Vulkan/MoltenVK pipeline-cache serialization is the next startup-performance follow-up.
 
-Alpha 32's server-authoritative RGB gameplay-lighting baseline remains intact. Dedicated-server runtime/TPS stress validation is intentionally deferred while client renderer development continues.
+P16 still provides one bounded secondary reflection ray, roughness-controlled spread, Schlick Fresnel and metallic F0 without increasing the per-voxel GPU ABI. Alpha 32's server-authoritative RGB gameplay-lighting baseline remains intact. Dedicated-server runtime/TPS stress validation is intentionally deferred while client renderer development continues.
 
 ## Runtime requirements
 
@@ -73,7 +73,8 @@ CI installs Gradle 9.5.1 explicitly.
 
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — client/server layering and hard architectural boundaries.
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — renderer roadmap and completed milestones.
-- [`docs/P16_REFLECTION_ROUGHNESS.md`](docs/P16_REFLECTION_ROUGHNESS.md) — Alpha 33 reflection model, surface profiles, ABI choice, limitations and validation plan.
+- [`docs/P16_REFLECTION_ROUGHNESS.md`](docs/P16_REFLECTION_ROUGHNESS.md) — reflection model, surface profiles, ABI choice, limitations and validation plan.
+- [`docs/P16_MOLTENVK_PIPELINE_STALL.md`](docs/P16_MOLTENVK_PIPELINE_STALL.md) — Alpha 34 MoltenVK pipeline stall, Alpha 35 non-blocking prewarm, and pipeline-cache follow-up.
 - [`docs/SERVER_GAMEPLAY_LIGHTING.md`](docs/SERVER_GAMEPLAY_LIGHTING.md) — authoritative RGB gameplay-lighting design, resource estimates, budgets and validation plan.
 - [`docs/GAMEPLAY_LIGHTING_ROADMAP.md`](docs/GAMEPLAY_LIGHTING_ROADMAP.md) — implementation phases and follow-up work for the server subsystem.
 - [`docs/LIGHTING_WORLD_RULES.md`](docs/LIGHTING_WORLD_RULES.md) — data-pack block lighting rule format.

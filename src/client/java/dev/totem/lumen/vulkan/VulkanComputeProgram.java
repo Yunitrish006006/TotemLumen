@@ -22,15 +22,21 @@ import org.lwjgl.vulkan.VkWriteDescriptorSet;
 import java.lang.reflect.Field;
 import java.nio.ByteBuffer;
 import java.nio.LongBuffer;
+import java.util.concurrent.CountDownLatch;
 
 /** Minimal single-storage-buffer Vulkan compute pipeline used by Totem Lumen compute passes. */
 public final class VulkanComputeProgram implements AutoCloseable {
     private static final String MAIN_GI_SHADER = "totem_lumen_p12_one_bounce_gi.comp";
     private static final Object MAIN_GI_PREWARM_LOCK = new Object();
+    private static final Object MAIN_GI_PIPELINE_LOCK = new Object();
+    private static final CountDownLatch MAIN_GI_SHADER_DONE = new CountDownLatch(1);
 
     private static volatile boolean mainGiPrewarmStarted;
     private static volatile byte[] mainGiPrecompiledSpirv;
     private static volatile Throwable mainGiPrewarmFailure;
+    private static volatile boolean mainGiPipelinePrewarmStarted;
+    private static volatile PreparedPipeline mainGiPreparedPipeline;
+    private static volatile Throwable mainGiPipelinePrewarmFailure;
 
     private final VulkanDevice device;
     private final long descriptorSetLayout;
@@ -38,6 +44,7 @@ public final class VulkanComputeProgram implements AutoCloseable {
     private final long pipeline;
     private final long descriptorPool;
     private final long descriptorSet;
+    private final boolean ownsPipelineObjects;
     private boolean closed;
 
     private VulkanComputeProgram(
@@ -46,7 +53,8 @@ public final class VulkanComputeProgram implements AutoCloseable {
             long pipelineLayout,
             long pipeline,
             long descriptorPool,
-            long descriptorSet
+            long descriptorSet,
+            boolean ownsPipelineObjects
     ) {
         this.device = device;
         this.descriptorSetLayout = descriptorSetLayout;
@@ -54,12 +62,13 @@ public final class VulkanComputeProgram implements AutoCloseable {
         this.pipeline = pipeline;
         this.descriptorPool = descriptorPool;
         this.descriptorSet = descriptorSet;
+        this.ownsPipelineObjects = ownsPipelineObjects;
     }
 
     /**
-     * Starts compilation of the large production GI shader without touching Minecraft's Vulkan
-     * device. shaderc only needs the GLSL source, so this expensive step can safely happen before a
-     * world is entered and away from the render thread.
+     * Starts GLSL -> SPIR-V compilation without touching Minecraft's Vulkan device. The current
+     * P16 monolithic shader intentionally stays at O0: shaderc performance optimization overflows
+     * SPIR-V IDs on this source. The result is consumed by the background Vulkan pipeline prewarm.
      */
     public static void prewarmMainGiShader() {
         synchronized (MAIN_GI_PREWARM_LOCK) {
@@ -98,8 +107,72 @@ public final class VulkanComputeProgram implements AutoCloseable {
                         "Background shader prewarm FAILED; Totem Lumen rendering will remain disabled while Minecraft continues",
                         failure
                 );
+            } finally {
+                MAIN_GI_SHADER_DONE.countDown();
             }
         }, "TotemLumen-ShaderPrewarm");
+        worker.setDaemon(true);
+        worker.start();
+    }
+
+    /**
+     * Starts the expensive SPIR-V -> driver pipeline creation away from Minecraft's render thread.
+     * This is especially important for MoltenVK, which converts SPIR-V to MSL and invokes Metal's
+     * compiler during vkCreateComputePipelines.
+     */
+    public static void prewarmMainGiPipeline(VulkanDevice device) {
+        if (device == null) {
+            return;
+        }
+        synchronized (MAIN_GI_PIPELINE_LOCK) {
+            if (mainGiPipelinePrewarmStarted || mainGiPreparedPipeline != null) {
+                return;
+            }
+            mainGiPipelinePrewarmStarted = true;
+        }
+
+        Thread worker = new Thread(() -> {
+            long startedAt = System.nanoTime();
+            try {
+                MAIN_GI_SHADER_DONE.await();
+                Throwable shaderFailure = mainGiPrewarmFailure;
+                if (shaderFailure != null) {
+                    throw new IllegalStateException("Main GI shader background prewarm failed", shaderFailure);
+                }
+                byte[] spirv = mainGiPrecompiledSpirv;
+                if (spirv == null) {
+                    throw new IllegalStateException("Main GI shader prewarm completed without SPIR-V");
+                }
+
+                TotemLumenClient.LOGGER.info(
+                        "Background Vulkan pipeline creation START: shader={}, spirvBytes={}",
+                        MAIN_GI_SHADER,
+                        spirv.length
+                );
+                PreparedPipeline prepared = createPreparedPipeline(device, spirv);
+                mainGiPreparedPipeline = prepared;
+
+                long elapsedMs = (System.nanoTime() - startedAt) / 1_000_000L;
+                TotemLumenClient.LOGGER.info(
+                        "Background Vulkan pipeline creation COMPLETE: shader={}, elapsed={} ms",
+                        MAIN_GI_SHADER,
+                        elapsedMs
+                );
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                mainGiPipelinePrewarmFailure = interrupted;
+                TotemLumenClient.LOGGER.error(
+                        "Background Vulkan pipeline creation interrupted; Totem Lumen rendering will remain disabled",
+                        interrupted
+                );
+            } catch (Throwable failure) {
+                mainGiPipelinePrewarmFailure = failure;
+                TotemLumenClient.LOGGER.error(
+                        "Background Vulkan pipeline creation FAILED; Totem Lumen rendering will remain disabled while Minecraft continues",
+                        failure
+                );
+            }
+        }, "TotemLumen-PipelinePrewarm");
         worker.setDaemon(true);
         worker.start();
     }
@@ -112,29 +185,80 @@ public final class VulkanComputeProgram implements AutoCloseable {
         return mainGiPrewarmFailure;
     }
 
+    public static boolean mainGiPipelinePrewarmReady() {
+        return mainGiPreparedPipeline != null;
+    }
+
+    public static Throwable mainGiPipelinePrewarmFailure() {
+        return mainGiPipelinePrewarmFailure;
+    }
+
     public static VulkanComputeProgram create(VulkanDevice device, String name, String glsl, VulkanOwnedBuffer storage) {
-        long shaderModule;
         if (MAIN_GI_SHADER.equals(name)) {
-            byte[] precompiled = mainGiPrecompiledSpirv;
-            if (precompiled == null) {
-                Throwable failure = mainGiPrewarmFailure;
+            PreparedPipeline prepared = mainGiPreparedPipeline;
+            if (prepared == null) {
+                Throwable failure = mainGiPipelinePrewarmFailure;
                 if (failure != null) {
-                    throw new IllegalStateException("Main GI shader background prewarm failed", failure);
+                    throw new IllegalStateException("Main GI Vulkan pipeline background prewarm failed", failure);
                 }
                 throw new IllegalStateException(
-                        "Main GI shader was requested before background prewarm completed"
+                        "Main GI Vulkan pipeline was requested before background prewarm completed"
                 );
             }
-            shaderModule = createShaderModule(device, precompiled);
-        } else {
-            shaderModule = compileShaderModule(device, name, glsl);
+            if (prepared.deviceHandle != device.vkDevice()) {
+                throw new IllegalStateException("Prepared main GI pipeline belongs to a different Vulkan device");
+            }
+            return bindStorage(
+                    device,
+                    prepared.descriptorSetLayout,
+                    prepared.pipelineLayout,
+                    prepared.pipeline,
+                    storage,
+                    false
+            );
         }
 
+        long shaderModule = compileShaderModule(device, name, glsl);
+        PipelineHandles handles = null;
+        try {
+            handles = createPipelineHandles(device, shaderModule);
+            return bindStorage(
+                    device,
+                    handles.descriptorSetLayout,
+                    handles.pipelineLayout,
+                    handles.pipeline,
+                    storage,
+                    true
+            );
+        } catch (Throwable failure) {
+            if (handles != null) {
+                destroyPipelineHandles(device, handles);
+            }
+            throw failure;
+        } finally {
+            VK10.vkDestroyShaderModule(device.vkDevice(), shaderModule, null);
+        }
+    }
+
+    private static PreparedPipeline createPreparedPipeline(VulkanDevice device, byte[] spirv) {
+        long shaderModule = createShaderModule(device, spirv);
+        try {
+            PipelineHandles handles = createPipelineHandles(device, shaderModule);
+            return new PreparedPipeline(
+                    device.vkDevice(),
+                    handles.descriptorSetLayout,
+                    handles.pipelineLayout,
+                    handles.pipeline
+            );
+        } finally {
+            VK10.vkDestroyShaderModule(device.vkDevice(), shaderModule, null);
+        }
+    }
+
+    private static PipelineHandles createPipelineHandles(VulkanDevice device, long shaderModule) {
         long descriptorSetLayout = 0L;
         long pipelineLayout = 0L;
         long pipeline = 0L;
-        long descriptorPool = 0L;
-
         try (MemoryStack stack = MemoryStack.stackPush()) {
             VkDescriptorSetLayoutBinding.Buffer bindings = VkDescriptorSetLayoutBinding.calloc(1, stack);
             bindings.get(0)
@@ -164,15 +288,28 @@ public final class VulkanComputeProgram implements AutoCloseable {
             VkComputePipelineCreateInfo.Buffer pipelineInfo = VkComputePipelineCreateInfo.calloc(1, stack);
             pipelineInfo.get(0).sType$Default().stage(stage).layout(pipelineLayout);
             LongBuffer pipelinePtr = stack.mallocLong(1);
-            if (MAIN_GI_SHADER.equals(name)) {
-                TotemLumenClient.LOGGER.info("P14B Vulkan pipeline creation START: shader={}", name);
-            }
             check(VK10.vkCreateComputePipelines(device.vkDevice(), 0L, pipelineInfo, null, pipelinePtr), "vkCreateComputePipelines");
             pipeline = pipelinePtr.get(0);
-            if (MAIN_GI_SHADER.equals(name)) {
-                TotemLumenClient.LOGGER.info("P14B Vulkan pipeline creation COMPLETE: shader={}", name);
-            }
 
+            return new PipelineHandles(descriptorSetLayout, pipelineLayout, pipeline);
+        } catch (Throwable failure) {
+            if (pipeline != 0L) VK10.vkDestroyPipeline(device.vkDevice(), pipeline, null);
+            if (pipelineLayout != 0L) VK10.vkDestroyPipelineLayout(device.vkDevice(), pipelineLayout, null);
+            if (descriptorSetLayout != 0L) VK10.vkDestroyDescriptorSetLayout(device.vkDevice(), descriptorSetLayout, null);
+            throw failure;
+        }
+    }
+
+    private static VulkanComputeProgram bindStorage(
+            VulkanDevice device,
+            long descriptorSetLayout,
+            long pipelineLayout,
+            long pipeline,
+            VulkanOwnedBuffer storage,
+            boolean ownsPipelineObjects
+    ) {
+        long descriptorPool = 0L;
+        try (MemoryStack stack = MemoryStack.stackPush()) {
             VkDescriptorPoolSize.Buffer poolSizes = VkDescriptorPoolSize.calloc(1, stack);
             poolSizes.get(0).type(VK10.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER).descriptorCount(1);
             VkDescriptorPoolCreateInfo poolInfo = VkDescriptorPoolCreateInfo.calloc(stack)
@@ -204,16 +341,17 @@ public final class VulkanComputeProgram implements AutoCloseable {
             VK10.vkUpdateDescriptorSets(device.vkDevice(), writes, null);
 
             return new VulkanComputeProgram(
-                    device, descriptorSetLayout, pipelineLayout, pipeline, descriptorPool, descriptorSet
+                    device,
+                    descriptorSetLayout,
+                    pipelineLayout,
+                    pipeline,
+                    descriptorPool,
+                    descriptorSet,
+                    ownsPipelineObjects
             );
         } catch (Throwable failure) {
             if (descriptorPool != 0L) VK10.vkDestroyDescriptorPool(device.vkDevice(), descriptorPool, null);
-            if (pipeline != 0L) VK10.vkDestroyPipeline(device.vkDevice(), pipeline, null);
-            if (pipelineLayout != 0L) VK10.vkDestroyPipelineLayout(device.vkDevice(), pipelineLayout, null);
-            if (descriptorSetLayout != 0L) VK10.vkDestroyDescriptorSetLayout(device.vkDevice(), descriptorSetLayout, null);
             throw failure;
-        } finally {
-            VK10.vkDestroyShaderModule(device.vkDevice(), shaderModule, null);
         }
     }
 
@@ -229,7 +367,7 @@ public final class VulkanComputeProgram implements AutoCloseable {
     }
 
     private static long compileShaderModule(VulkanDevice device, String name, String source) {
-        byte[] spirv = compileShaderBytes(name, source, 2);
+        byte[] spirv = compileShaderBytes(name, source, Shaderc.shaderc_optimization_level_performance);
         return createShaderModule(device, spirv);
     }
 
@@ -319,14 +457,28 @@ public final class VulkanComputeProgram implements AutoCloseable {
         closed = true;
         VK10.vkDeviceWaitIdle(device.vkDevice());
         VK10.vkDestroyDescriptorPool(device.vkDevice(), descriptorPool, null);
-        VK10.vkDestroyPipeline(device.vkDevice(), pipeline, null);
-        VK10.vkDestroyPipelineLayout(device.vkDevice(), pipelineLayout, null);
-        VK10.vkDestroyDescriptorSetLayout(device.vkDevice(), descriptorSetLayout, null);
+        if (ownsPipelineObjects) {
+            VK10.vkDestroyPipeline(device.vkDevice(), pipeline, null);
+            VK10.vkDestroyPipelineLayout(device.vkDevice(), pipelineLayout, null);
+            VK10.vkDestroyDescriptorSetLayout(device.vkDevice(), descriptorSetLayout, null);
+        }
+    }
+
+    private static void destroyPipelineHandles(VulkanDevice device, PipelineHandles handles) {
+        VK10.vkDestroyPipeline(device.vkDevice(), handles.pipeline, null);
+        VK10.vkDestroyPipelineLayout(device.vkDevice(), handles.pipelineLayout, null);
+        VK10.vkDestroyDescriptorSetLayout(device.vkDevice(), handles.descriptorSetLayout, null);
     }
 
     private static void check(int result, String operation) {
         if (result != VK10.VK_SUCCESS) {
             throw new IllegalStateException(operation + " failed: " + result);
         }
+    }
+
+    private record PipelineHandles(long descriptorSetLayout, long pipelineLayout, long pipeline) {
+    }
+
+    private record PreparedPipeline(Object deviceHandle, long descriptorSetLayout, long pipelineLayout, long pipeline) {
     }
 }
