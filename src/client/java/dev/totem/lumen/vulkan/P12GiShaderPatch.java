@@ -3,14 +3,13 @@ package dev.totem.lumen.vulkan;
 import dev.totem.lumen.TotemLumenClient;
 
 /**
- * P12 correctness patch applied to the monolithic validation shader before shaderc compilation.
+ * P12/P13 correctness patch applied to the monolithic validation shader before shaderc compilation.
  *
- * <p>The initial alpha.19 path accumulated the complete GI composite in the same temporal history.
- * That made sparse one-sample indirect estimates dominate the entire image in dark scenes. This
- * patch keeps the proven P9/P11 direct/local base outside GI history and accumulates only indirect
- * radiance. It uses two bounce samples per frame, progressive per-surface history and a conservative
- * firefly clamp. The transform is intentionally strict and fails fast if the expected P12 source
- * markers change.</p>
+ * <p>P12 keeps direct/local light outside the stochastic GI history and progressively accumulates
+ * only indirect radiance. P13 layers dimension-aware environment lighting on that stable path:
+ * Overworld gets a time-of-day sun/sky model, Nether and End get distinct ambient environments,
+ * primary sky misses expose environment radiance, and GI bounce misses can sample the environment.
+ * The transform is intentionally strict and fails fast if the expected source markers change.</p>
  */
 final class P12GiShaderPatch {
     static final int SAMPLES_PER_FRAME = 2;
@@ -23,10 +22,134 @@ final class P12GiShaderPatch {
     static String apply(String source) {
         String marker = "uint currentTemporalSampleColor(";
         if (!source.contains(marker)) {
-            throw new IllegalStateException("P12 GI shader patch marker missing: currentTemporalSampleColor");
+            throw new IllegalStateException("P12/P13 shader patch marker missing: currentTemporalSampleColor");
         }
 
         String helpers = """
+                uint p13EnvironmentCode() {
+                    return scene.data[41] >> 30u;
+                }
+
+                float p13DayPhase() {
+                    return float((scene.data[41] >> 16u) & 0x3FFFu) / 16384.0;
+                }
+
+                uint p13FrameSeed() {
+                    return scene.data[41] & 0xFFFFu;
+                }
+
+                vec3 p13SunDirection() {
+                    float angle = p13DayPhase() * 6.28318530718;
+                    return normalize(vec3(cos(angle) * 0.92, sin(angle), 0.32));
+                }
+
+                float p13SunStrength(vec3 sunDirection) {
+                    return smoothstep(0.0, 0.14, sunDirection.y);
+                }
+
+                vec3 p13SunColor(vec3 sunDirection) {
+                    float elevation = clamp(sunDirection.y, 0.0, 1.0);
+                    return mix(
+                        vec3(1.0, 0.47, 0.20),
+                        vec3(1.0, 0.95, 0.82),
+                        smoothstep(0.04, 0.45, elevation)
+                    );
+                }
+
+                vec3 p13SkyRadiance(vec3 direction) {
+                    uint environment = p13EnvironmentCode();
+                    vec3 dir = normalize(direction);
+                    float up = clamp(dir.y * 0.5 + 0.5, 0.0, 1.0);
+
+                    if (environment == 0u) {
+                        vec3 sunDirection = p13SunDirection();
+                        float daylight = smoothstep(-0.18, 0.08, sunDirection.y);
+                        vec3 dayHorizon = vec3(0.38, 0.46, 0.58);
+                        vec3 dayZenith = vec3(0.09, 0.30, 0.68);
+                        vec3 daySky = mix(dayHorizon, dayZenith, pow(up, 0.70));
+                        vec3 nightHorizon = vec3(0.010, 0.014, 0.028);
+                        vec3 nightZenith = vec3(0.004, 0.008, 0.026);
+                        vec3 nightSky = mix(nightHorizon, nightZenith, up);
+                        vec3 sky = mix(nightSky, daySky, daylight) * 0.58;
+
+                        float sunDot = max(dot(dir, sunDirection), 0.0);
+                        float sunDisk = pow(sunDot, 640.0) * p13SunStrength(sunDirection) * 2.0;
+                        return sky + p13SunColor(sunDirection) * sunDisk;
+                    }
+                    if (environment == 1u) {
+                        return vec3(0.105, 0.024, 0.010) * (0.82 + 0.18 * up);
+                    }
+                    if (environment == 2u) {
+                        return vec3(0.040, 0.024, 0.074) * (0.88 + 0.12 * up);
+                    }
+                    return vec3(0.032, 0.042, 0.060) * (0.82 + 0.18 * up);
+                }
+
+                vec3 p13EnvironmentSurfaceRadiance(
+                        HitResult hit,
+                        vec3 rayOrigin,
+                        vec3 rayDirection
+                ) {
+                    vec3 normal = resolvedSurfaceNormal(hit, rayDirection);
+                    vec3 albedo = materialColor(hit.materialId);
+                    vec4 emission = materialEmission(hit.materialId);
+                    vec3 emitted = emission.rgb * emission.a * 1.6;
+                    uint environment = p13EnvironmentCode();
+
+                    if (environment == 0u) {
+                        vec3 hitPoint = rayOrigin + rayDirection * hit.distance;
+                        vec3 sunDirection = p13SunDirection();
+                        float nDotL = max(dot(normal, sunDirection), 0.0);
+                        float sunStrength = p13SunStrength(sunDirection);
+                        float visibility = 0.0;
+                        if (nDotL > 0.0 && sunStrength > 0.0001) {
+                            vec3 shadowOrigin = hitPoint + normal * 0.025 + sunDirection * 0.01;
+                            HitResult blocker = traceRay(shadowOrigin, sunDirection);
+                            visibility = blocker.hit == 0u ? 1.0 : 0.0;
+                        }
+
+                        vec3 skyAmbient = p13SkyRadiance(normal) * 0.62;
+                        vec3 sun = p13SunColor(sunDirection)
+                                * (0.92 * nDotL * visibility * sunStrength);
+                        return albedo * (skyAmbient + sun) + emitted;
+                    }
+                    if (environment == 1u) {
+                        float facing = 0.70 + 0.30 * max(normal.y, 0.0);
+                        return albedo * vec3(0.145, 0.040, 0.018) * facing + emitted;
+                    }
+                    if (environment == 2u) {
+                        float facing = 0.76 + 0.24 * max(normal.y, 0.0);
+                        return albedo * vec3(0.070, 0.046, 0.115) * facing + emitted;
+                    }
+                    return albedo * vec3(0.060, 0.070, 0.090) + emitted;
+                }
+
+                vec3 p13OneBounceIndirectRgb(
+                        HitResult primaryHit,
+                        vec3 primaryOrigin,
+                        vec3 primaryDirection,
+                        uvec2 pixel,
+                        uint sampleIndex
+                ) {
+                    vec3 primaryNormal = resolvedSurfaceNormal(primaryHit, primaryDirection);
+                    vec3 primaryPoint = primaryOrigin + primaryDirection * primaryHit.distance;
+                    vec3 bounceDirection = cosineHemisphereDirection(primaryNormal, pixel, sampleIndex);
+                    vec3 bounceOrigin = primaryPoint + primaryNormal * 0.035 + bounceDirection * 0.01;
+                    HitResult bounceHit = traceRayLimited(bounceOrigin, bounceDirection, GI_MAX_DISTANCE);
+
+                    vec3 incomingRadiance;
+                    if (bounceHit.hit == 0u) {
+                        incomingRadiance = p13SkyRadiance(bounceDirection);
+                    } else {
+                        incomingRadiance = p13EnvironmentSurfaceRadiance(
+                            bounceHit,
+                            bounceOrigin,
+                            bounceDirection
+                        );
+                    }
+                    return materialColor(primaryHit.materialId) * incomingRadiance * GI_STRENGTH;
+                }
+
                 vec3 giIndirectCurrentRgb(
                         HitResult hit,
                         vec3 primaryOrigin,
@@ -36,7 +159,7 @@ final class P12GiShaderPatch {
                 ) {
                     vec3 sum = vec3(0.0);
                     for (uint sampleOffset = 0u; sampleOffset < 2u; sampleOffset++) {
-                        sum += oneBounceIndirectRgb(
+                        sum += p13OneBounceIndirectRgb(
                             hit,
                             primaryOrigin,
                             primaryDirection,
@@ -62,7 +185,7 @@ final class P12GiShaderPatch {
                         out uint outputSampleCount
                 ) {
                     uint currentColor = packRgba(
-                        giIndirectCurrentRgb(hit, primaryOrigin, primaryDirection, pixel, scene.data[41]),
+                        giIndirectCurrentRgb(hit, primaryOrigin, primaryDirection, pixel, p13FrameSeed()),
                         255u
                     );
                     outputSampleCount = 1u;
@@ -96,13 +219,17 @@ final class P12GiShaderPatch {
                         vec3 primaryDirection,
                         uint indirectColor
                 ) {
-                    vec3 direct = unpackRgb(softShadowColor(hit, primaryOrigin, primaryDirection));
+                    vec3 environmentDirect = p13EnvironmentSurfaceRadiance(
+                        hit,
+                        primaryOrigin,
+                        primaryDirection
+                    );
                     vec3 localWithBase = unpackRgb(localLightColor(hit, primaryOrigin, primaryDirection, true));
                     vec4 emission = materialEmission(hit.materialId);
                     vec3 emitted = emission.rgb * emission.a * 1.6;
                     vec3 localBase = materialColor(hit.materialId) * 0.045 + emitted;
                     vec3 localContribution = max(localWithBase - localBase, vec3(0.0));
-                    return packRgba(direct + localContribution + unpackRgb(indirectColor), 255u);
+                    return packRgba(environmentDirect + localContribution + unpackRgb(indirectColor), 255u);
                 }
 
                 """;
@@ -113,14 +240,18 @@ final class P12GiShaderPatch {
         int startIndex = source.indexOf(branchStart);
         int endIndex = source.indexOf(branchEnd, startIndex);
         if (startIndex < 0 || endIndex < 0 || endIndex <= startIndex) {
-            throw new IllegalStateException("P12 GI shader patch marker missing: temporal main branch");
+            throw new IllegalStateException("P12/P13 shader patch marker missing: temporal main branch");
         }
 
         String newMainBranch = """
                 if (mode == 10u || mode == 11u) {
                     uint giHistorySamples = 1u;
                     if (primaryHit.hit == 0u) {
-                        color = packRgba(vec3(0.03, 0.05, 0.08), 255u);
+                        if (mode == 10u) {
+                            color = packRgba(vec3(0.0), 255u);
+                        } else {
+                            color = packRgba(p13SkyRadiance(direction), 255u);
+                        }
                         writeHistory(pixel, width, primaryHit, packRgba(vec3(0.0), 255u), giHistorySamples);
                     } else {
                         uint indirectColor = giTemporalIndirectColor(
@@ -157,6 +288,9 @@ final class P12GiShaderPatch {
                 SAMPLES_PER_FRAME,
                 HISTORY_MAX_SAMPLES,
                 SAMPLE_PEAK_CLAMP
+        );
+        TotemLumenClient.LOGGER.info(
+                "P13 environment lighting patch active: dynamicOverworldSun=true, skyMissRadiance=true, dimensions=overworld+nether+end+fallback"
         );
         return source;
     }
