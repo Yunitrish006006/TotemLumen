@@ -1,6 +1,7 @@
 package dev.totem.lumen.vulkan;
 
 import com.mojang.blaze3d.vulkan.VulkanDevice;
+import dev.totem.lumen.TotemLumenClient;
 import dev.totem.lumen.vulkan.resource.VulkanOwnedBuffer;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.util.shaderc.Shaderc;
@@ -22,6 +23,8 @@ import java.nio.LongBuffer;
 
 /** Minimal single-storage-buffer Vulkan compute pipeline used by the P4 smoke test. */
 public final class VulkanComputeProgram implements AutoCloseable {
+    private static final String MAIN_GI_SHADER = "totem_lumen_p12_one_bounce_gi.comp";
+
     private final VulkanDevice device;
     private final long descriptorSetLayout;
     private final long pipelineLayout;
@@ -47,7 +50,7 @@ public final class VulkanComputeProgram implements AutoCloseable {
     }
 
     public static VulkanComputeProgram create(VulkanDevice device, String name, String glsl, VulkanOwnedBuffer storage) {
-        if ("totem_lumen_p12_one_bounce_gi.comp".equals(name)) {
+        if (MAIN_GI_SHADER.equals(name)) {
             glsl = P12GiShaderPatch.apply(glsl);
             glsl = P13EndBrightnessPatch.apply(glsl);
             glsl = P14GeometryShaderPatch.apply(glsl);
@@ -89,8 +92,14 @@ public final class VulkanComputeProgram implements AutoCloseable {
             VkComputePipelineCreateInfo.Buffer pipelineInfo = VkComputePipelineCreateInfo.calloc(1, stack);
             pipelineInfo.get(0).sType$Default().stage(stage).layout(pipelineLayout);
             LongBuffer pipelinePtr = stack.mallocLong(1);
+            if (MAIN_GI_SHADER.equals(name)) {
+                TotemLumenClient.LOGGER.info("P14B Vulkan pipeline creation START: shader={}", name);
+            }
             check(VK10.vkCreateComputePipelines(device.vkDevice(), 0L, pipelineInfo, null, pipelinePtr), "vkCreateComputePipelines");
             pipeline = pipelinePtr.get(0);
+            if (MAIN_GI_SHADER.equals(name)) {
+                TotemLumenClient.LOGGER.info("P14B Vulkan pipeline creation COMPLETE: shader={}", name);
+            }
 
             VkDescriptorPoolSize.Buffer poolSizes = VkDescriptorPoolSize.calloc(1, stack);
             poolSizes.get(0).type(VK10.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER).descriptorCount(1);
@@ -107,7 +116,7 @@ public final class VulkanComputeProgram implements AutoCloseable {
                     .descriptorPool(descriptorPool)
                     .pSetLayouts(stack.longs(descriptorSetLayout));
             LongBuffer setPtr = stack.mallocLong(1);
-            check(VK10.vkAllocateDescriptorSets(device.vkDevice(), allocateInfo, setPtr), "vkAllocateDescriptorSets");
+            check(VK10.vkAllocateDescriptorSets(device.vkDevice(), allocateInfo, null == null ? setPtr : setPtr), "vkAllocateDescriptorSets");
             long descriptorSet = setPtr.get(0);
 
             VkDescriptorBufferInfo.Buffer bufferInfo = VkDescriptorBufferInfo.calloc(1, stack);
@@ -144,14 +153,33 @@ public final class VulkanComputeProgram implements AutoCloseable {
         }
         try {
             Shaderc.shaderc_compile_options_set_target_env(options, 0, 4202496);
-            Shaderc.shaderc_compile_options_set_optimization_level(options, 2);
+            int optimizationLevel = MAIN_GI_SHADER.equals(name) ? 0 : 2;
+            Shaderc.shaderc_compile_options_set_optimization_level(options, optimizationLevel);
+            if (MAIN_GI_SHADER.equals(name)) {
+                TotemLumenClient.LOGGER.info(
+                        "P14B shaderc compile START: shader={}, sourceChars={}, optimization=O0",
+                        name,
+                        source.length()
+                );
+            }
             long result = Shaderc.shaderc_compile_into_spv(
                     compiler, source, Shaderc.shaderc_compute_shader, name, "main", options
             );
+            if (result == 0L) {
+                throw new IllegalStateException("shaderc returned a null compilation result for " + name);
+            }
             try {
                 if (Shaderc.shaderc_result_get_compilation_status(result) != 0) {
                     throw new IllegalStateException(
                             "Compute shader compilation failed: " + Shaderc.shaderc_result_get_error_message(result)
+                    );
+                }
+                if (MAIN_GI_SHADER.equals(name)) {
+                    TotemLumenClient.LOGGER.info(
+                            "P14B shaderc compile COMPLETE: shader={}, warnings={}, errors={}",
+                            name,
+                            Shaderc.shaderc_result_get_num_warnings(result),
+                            Shaderc.shaderc_result_get_num_errors(result)
                     );
                 }
                 ByteBuffer spirv = Shaderc.shaderc_result_get_bytes(result);
