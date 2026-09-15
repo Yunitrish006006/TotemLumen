@@ -128,6 +128,27 @@ public final class SceneExtractionBridge {
         );
     }
 
+    /**
+     * Re-extracts block-state model geometry after Minecraft swaps its baked model set (resource
+     * reload). Existing mesh ids stay valid while the same bounded snapshot queue refreshes sections.
+     */
+    public static void refreshModelGeometry() {
+        if (!sceneTrackingEnabled()) {
+            return;
+        }
+
+        int scheduled = 0;
+        for (SectionSnapshot snapshot : SCENE.sectionSnapshots()) {
+            scheduleBackgroundSnapshot(snapshot.key());
+            scheduled++;
+        }
+
+        TotemLumenClient.LOGGER.info(
+                "Queued {} populated section(s) for P14C block-model geometry refresh",
+                scheduled
+        );
+    }
+
     private static void onChunkLoaded(ClientLevel level, LevelChunk chunk) {
         if (!sceneTrackingEnabled()) {
             return;
@@ -165,9 +186,7 @@ public final class SceneExtractionBridge {
         ));
     }
 
-    /**
-     * Called from the LevelRenderer mixin. The position is copied immediately and never retained.
-     */
+    /** Called from the LevelRenderer mixin. The position is copied immediately and never retained. */
     public static void onBlockChanged(BlockPos pos, int updateFlags) {
         if (!sceneTrackingEnabled()) {
             return;
@@ -275,12 +294,20 @@ public final class SceneExtractionBridge {
         LevelChunkSection section = sections[sectionIndex];
         int[] materialIds = new int[SectionVoxelData.VOXEL_COUNT];
         if (!section.hasOnlyAir()) {
+            int baseX = key.x() << 4;
+            int baseY = key.y() << 4;
+            int baseZ = key.z() << 4;
             for (int localY = 0; localY < SectionVoxelData.SIZE; localY++) {
                 for (int localZ = 0; localZ < SectionVoxelData.SIZE; localZ++) {
                     for (int localX = 0; localX < SectionVoxelData.SIZE; localX++) {
                         var blockState = section.getBlockState(localX, localY, localZ);
                         int materialId = MATERIALS.idFor(MinecraftMaterialResolver.resolve(blockState));
-                        int geometryCode = MinecraftGeometryResolver.geometryCode(blockState);
+                        BlockPos worldPos = new BlockPos(baseX + localX, baseY + localY, baseZ + localZ);
+                        int geometryCode = MinecraftBlockModelMeshResolver.geometryCode(
+                                blockState,
+                                context.level(),
+                                worldPos
+                        );
                         materialIds[SectionVoxelData.index(localX, localY, localZ)] =
                                 SectionVoxelData.packVoxelWord(materialId, geometryCode);
                     }

@@ -2,6 +2,7 @@ package dev.totem.lumen;
 
 import com.mojang.blaze3d.platform.InputConstants;
 import dev.totem.lumen.integration.ClientLightingWorldRules;
+import dev.totem.lumen.integration.MinecraftBlockModelMeshResolver;
 import dev.totem.lumen.integration.P13EnvironmentCapture;
 import dev.totem.lumen.integration.SceneExtractionBridge;
 import dev.totem.lumen.network.LightingWorldRulesPayload;
@@ -73,6 +74,9 @@ public final class TotemLumenClient implements ClientModInitializer {
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             RendererBootstrap.tick();
+            // P14C watches Minecraft's model-set identity independently of block updates so a
+            // resource-pack reload schedules bounded section re-extraction even in a static world.
+            MinecraftBlockModelMeshResolver.checkModelSetReload();
             SceneExtractionBridge.tick();
             P5StableLookupRenderer.tickLifecycle(client);
 
