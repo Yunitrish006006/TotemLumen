@@ -19,18 +19,17 @@ The server gameplay subsystem never initializes or depends on Vulkan. A dedicate
 
 ## Current milestone
 
-`0.1.0-alpha.32` adds the first server-authoritative RGB gameplay-lighting baseline on top of the Alpha 31 data-pack lighting rules:
+`0.1.0-alpha.33` adds the P16 client reflection/roughness baseline:
 
-- packed RGB `0..15` section cache;
-- sparse emissive-source index;
-- bounded chunk scans and local relighting;
-- conservative dirty-region spawn safety;
-- hostile-mob spectral light sensitivity;
-- built-in Nether-mob red-light tolerance;
-- optional dimension environment-light rules;
-- performance counters and an explicit server tick budget.
+- one bounded secondary reflection ray in the GI composite path;
+- roughness-controlled deterministic reflection spread;
+- Schlick Fresnel response and metallic F0 tint;
+- built-in client surface profiles until resource-pack/LabPBR integration;
+- 4-bit roughness + 4-bit metallic packed into the existing 32-bit voxel word;
+- reflected rays reuse P14 geometry and P15 RGB filtered glass transmission;
+- no recursive specular transport or additional per-voxel GPU buffer.
 
-The existing Vulkan renderer remains isolated on the client and continues to own visual-quality lighting.
+Alpha 32's server-authoritative RGB gameplay-lighting baseline remains intact. Dedicated-server runtime/TPS stress validation is intentionally deferred while client renderer development continues.
 
 ## Runtime requirements
 
@@ -55,7 +54,7 @@ Minecraft client extraction
   -> Totem Lumen RayScene
   -> Vulkan GPU scene
   -> Vulkan compute voxel RT
-  -> lighting / temporal / denoise / GI
+  -> lighting / temporal / denoise / GI / reflection
   -> composition
 ```
 
@@ -74,6 +73,7 @@ CI installs Gradle 9.5.1 explicitly.
 
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — client/server layering and hard architectural boundaries.
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — renderer roadmap and completed milestones.
+- [`docs/P16_REFLECTION_ROUGHNESS.md`](docs/P16_REFLECTION_ROUGHNESS.md) — Alpha 33 reflection model, surface profiles, ABI choice, limitations and validation plan.
 - [`docs/SERVER_GAMEPLAY_LIGHTING.md`](docs/SERVER_GAMEPLAY_LIGHTING.md) — authoritative RGB gameplay-lighting design, resource estimates, budgets and validation plan.
 - [`docs/GAMEPLAY_LIGHTING_ROADMAP.md`](docs/GAMEPLAY_LIGHTING_ROADMAP.md) — implementation phases and follow-up work for the server subsystem.
 - [`docs/LIGHTING_WORLD_RULES.md`](docs/LIGHTING_WORLD_RULES.md) — data-pack block lighting rule format.
