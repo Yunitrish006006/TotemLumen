@@ -116,7 +116,7 @@ public final class VulkanComputeProgram implements AutoCloseable {
                     .descriptorPool(descriptorPool)
                     .pSetLayouts(stack.longs(descriptorSetLayout));
             LongBuffer setPtr = stack.mallocLong(1);
-            check(VK10.vkAllocateDescriptorSets(device.vkDevice(), allocateInfo, null == null ? setPtr : setPtr), "vkAllocateDescriptorSets");
+            check(VK10.vkAllocateDescriptorSets(device.vkDevice(), allocateInfo, setPtr), "vkAllocateDescriptorSets");
             long descriptorSet = setPtr.get(0);
 
             VkDescriptorBufferInfo.Buffer bufferInfo = VkDescriptorBufferInfo.calloc(1, stack);
