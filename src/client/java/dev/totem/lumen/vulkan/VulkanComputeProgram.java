@@ -4,6 +4,7 @@ import com.mojang.blaze3d.vulkan.VulkanDevice;
 import dev.totem.lumen.TotemLumenClient;
 import dev.totem.lumen.vulkan.resource.VulkanOwnedBuffer;
 import org.lwjgl.system.MemoryStack;
+import org.lwjgl.system.MemoryUtil;
 import org.lwjgl.util.shaderc.Shaderc;
 import org.lwjgl.vulkan.VK10;
 import org.lwjgl.vulkan.VkComputePipelineCreateInfo;
@@ -18,12 +19,18 @@ import org.lwjgl.vulkan.VkPipelineShaderStageCreateInfo;
 import org.lwjgl.vulkan.VkShaderModuleCreateInfo;
 import org.lwjgl.vulkan.VkWriteDescriptorSet;
 
+import java.lang.reflect.Field;
 import java.nio.ByteBuffer;
 import java.nio.LongBuffer;
 
-/** Minimal single-storage-buffer Vulkan compute pipeline used by the P4 smoke test. */
+/** Minimal single-storage-buffer Vulkan compute pipeline used by Totem Lumen compute passes. */
 public final class VulkanComputeProgram implements AutoCloseable {
     private static final String MAIN_GI_SHADER = "totem_lumen_p12_one_bounce_gi.comp";
+    private static final Object MAIN_GI_PREWARM_LOCK = new Object();
+
+    private static volatile boolean mainGiPrewarmStarted;
+    private static volatile byte[] mainGiPrecompiledSpirv;
+    private static volatile Throwable mainGiPrewarmFailure;
 
     private final VulkanDevice device;
     private final long descriptorSetLayout;
@@ -49,16 +56,80 @@ public final class VulkanComputeProgram implements AutoCloseable {
         this.descriptorSet = descriptorSet;
     }
 
-    public static VulkanComputeProgram create(VulkanDevice device, String name, String glsl, VulkanOwnedBuffer storage) {
-        if (MAIN_GI_SHADER.equals(name)) {
-            glsl = P12GiShaderPatch.apply(glsl);
-            glsl = P13EndBrightnessPatch.apply(glsl);
-            glsl = P14GeometryShaderPatch.apply(glsl);
-            glsl = P14CommonGeometryPatch.apply(glsl);
-            glsl = P14GeometryCorrectionPatch.apply(glsl);
-            glsl = P13SkyOcclusionPatch.apply(glsl);
+    /**
+     * Starts compilation of the large production GI shader without touching Minecraft's Vulkan
+     * device. shaderc only needs the GLSL source, so this expensive step can safely happen before a
+     * world is entered and away from the render thread.
+     */
+    public static void prewarmMainGiShader() {
+        synchronized (MAIN_GI_PREWARM_LOCK) {
+            if (mainGiPrewarmStarted) {
+                return;
+            }
+            mainGiPrewarmStarted = true;
         }
-        long shaderModule = compileShaderModule(device, name, glsl);
+
+        Thread worker = new Thread(() -> {
+            long startedAt = System.nanoTime();
+            try {
+                Field shaderField = P5StableLookupRenderer.class.getDeclaredField("SHADER");
+                shaderField.setAccessible(true);
+                String source = (String) shaderField.get(null);
+                source = transformMainGiShader(source);
+
+                TotemLumenClient.LOGGER.info(
+                        "Background shader prewarm START: shader={}, sourceChars={}, optimization=O0",
+                        MAIN_GI_SHADER,
+                        source.length()
+                );
+                byte[] spirv = compileShaderBytes(MAIN_GI_SHADER, source, 0);
+                mainGiPrecompiledSpirv = spirv;
+
+                long elapsedMs = (System.nanoTime() - startedAt) / 1_000_000L;
+                TotemLumenClient.LOGGER.info(
+                        "Background shader prewarm COMPLETE: shader={}, spirvBytes={}, elapsed={} ms",
+                        MAIN_GI_SHADER,
+                        spirv.length,
+                        elapsedMs
+                );
+            } catch (Throwable failure) {
+                mainGiPrewarmFailure = failure;
+                TotemLumenClient.LOGGER.error(
+                        "Background shader prewarm FAILED; Totem Lumen rendering will remain disabled while Minecraft continues",
+                        failure
+                );
+            }
+        }, "TotemLumen-ShaderPrewarm");
+        worker.setDaemon(true);
+        worker.start();
+    }
+
+    public static boolean mainGiShaderPrewarmReady() {
+        return mainGiPrecompiledSpirv != null;
+    }
+
+    public static Throwable mainGiShaderPrewarmFailure() {
+        return mainGiPrewarmFailure;
+    }
+
+    public static VulkanComputeProgram create(VulkanDevice device, String name, String glsl, VulkanOwnedBuffer storage) {
+        long shaderModule;
+        if (MAIN_GI_SHADER.equals(name)) {
+            byte[] precompiled = mainGiPrecompiledSpirv;
+            if (precompiled == null) {
+                Throwable failure = mainGiPrewarmFailure;
+                if (failure != null) {
+                    throw new IllegalStateException("Main GI shader background prewarm failed", failure);
+                }
+                throw new IllegalStateException(
+                        "Main GI shader was requested before background prewarm completed"
+                );
+            }
+            shaderModule = createShaderModule(device, precompiled);
+        } else {
+            shaderModule = compileShaderModule(device, name, glsl);
+        }
+
         long descriptorSetLayout = 0L;
         long pipelineLayout = 0L;
         long pipeline = 0L;
@@ -146,23 +217,32 @@ public final class VulkanComputeProgram implements AutoCloseable {
         }
     }
 
+    private static String transformMainGiShader(String source) {
+        source = P12GiShaderPatch.apply(source);
+        source = P13EndBrightnessPatch.apply(source);
+        source = P14GeometryShaderPatch.apply(source);
+        source = P14CommonGeometryPatch.apply(source);
+        source = P14GeometryCorrectionPatch.apply(source);
+        source = P13SkyOcclusionPatch.apply(source);
+        return source;
+    }
+
     private static long compileShaderModule(VulkanDevice device, String name, String source) {
+        byte[] spirv = compileShaderBytes(name, source, 2);
+        return createShaderModule(device, spirv);
+    }
+
+    private static byte[] compileShaderBytes(String name, String source, int optimizationLevel) {
         long compiler = Shaderc.shaderc_compiler_initialize();
         long options = Shaderc.shaderc_compile_options_initialize();
         if (compiler == 0L || options == 0L) {
+            if (options != 0L) Shaderc.shaderc_compile_options_release(options);
+            if (compiler != 0L) Shaderc.shaderc_compiler_release(compiler);
             throw new IllegalStateException("Failed to initialize shaderc");
         }
         try {
             Shaderc.shaderc_compile_options_set_target_env(options, 0, 4202496);
-            int optimizationLevel = MAIN_GI_SHADER.equals(name) ? 0 : 2;
             Shaderc.shaderc_compile_options_set_optimization_level(options, optimizationLevel);
-            if (MAIN_GI_SHADER.equals(name)) {
-                TotemLumenClient.LOGGER.info(
-                        "P14B shaderc compile START: shader={}, sourceChars={}, optimization=O0",
-                        name,
-                        source.length()
-                );
-            }
             long result = Shaderc.shaderc_compile_into_spv(
                     compiler, source, Shaderc.shaderc_compute_shader, name, "main", options
             );
@@ -175,29 +255,37 @@ public final class VulkanComputeProgram implements AutoCloseable {
                             "Compute shader compilation failed: " + Shaderc.shaderc_result_get_error_message(result)
                     );
                 }
-                if (MAIN_GI_SHADER.equals(name)) {
-                    TotemLumenClient.LOGGER.info(
-                            "P14B shaderc compile COMPLETE: shader={}, warnings={}, errors={}",
-                            name,
-                            Shaderc.shaderc_result_get_num_warnings(result),
-                            Shaderc.shaderc_result_get_num_errors(result)
-                    );
-                }
-                ByteBuffer spirv = Shaderc.shaderc_result_get_bytes(result);
-                try (MemoryStack stack = MemoryStack.stackPush()) {
-                    VkShaderModuleCreateInfo createInfo = VkShaderModuleCreateInfo.calloc(stack)
-                            .sType$Default()
-                            .pCode(spirv);
-                    LongBuffer modulePtr = stack.mallocLong(1);
-                    check(VK10.vkCreateShaderModule(device.vkDevice(), createInfo, null, modulePtr), "vkCreateShaderModule");
-                    return modulePtr.get(0);
-                }
+                ByteBuffer bytes = Shaderc.shaderc_result_get_bytes(result);
+                byte[] copy = new byte[bytes.remaining()];
+                bytes.get(copy);
+                return copy;
             } finally {
                 Shaderc.shaderc_result_release(result);
             }
         } finally {
             Shaderc.shaderc_compile_options_release(options);
             Shaderc.shaderc_compiler_release(compiler);
+        }
+    }
+
+    private static long createShaderModule(VulkanDevice device, byte[] spirvBytes) {
+        if (spirvBytes.length == 0 || (spirvBytes.length & 3) != 0) {
+            throw new IllegalArgumentException("Invalid SPIR-V byte length: " + spirvBytes.length);
+        }
+
+        ByteBuffer spirv = MemoryUtil.memAlloc(spirvBytes.length);
+        try {
+            spirv.put(spirvBytes).flip();
+            try (MemoryStack stack = MemoryStack.stackPush()) {
+                VkShaderModuleCreateInfo createInfo = VkShaderModuleCreateInfo.calloc(stack)
+                        .sType$Default()
+                        .pCode(spirv);
+                LongBuffer modulePtr = stack.mallocLong(1);
+                check(VK10.vkCreateShaderModule(device.vkDevice(), createInfo, null, modulePtr), "vkCreateShaderModule");
+                return modulePtr.get(0);
+            }
+        } finally {
+            MemoryUtil.memFree(spirv);
         }
     }
 
