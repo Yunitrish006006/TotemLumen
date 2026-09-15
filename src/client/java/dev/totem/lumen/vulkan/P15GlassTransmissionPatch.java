@@ -239,8 +239,8 @@ final class P15GlassTransmissionPatch {
 
         source = replaceRequiredOnce(
                 source,
-                "    HitResult primaryHit = traceRay(origin, direction);",
-                "    P15TraceResult p15PrimaryTrace = p15TraceFiltered(\n"
+                "HitResult primaryHit = traceRay(origin, direction);",
+                "P15TraceResult p15PrimaryTrace = p15TraceFiltered(\n"
                         + "        origin, direction, uintBitsToFloat(scene.data[7])\n"
                         + "    );\n"
                         + "    HitResult primaryHit = p15PrimaryTrace.hit;\n"
@@ -260,21 +260,7 @@ final class P15GlassTransmissionPatch {
                 "color = packRgba(unpackRgb(indirectColor) * 1.6 * p15PrimaryTransmission, 255u);",
                 "indirect debug transmission"
         );
-
-        String oldComposite = """
-                            color = giCompositeFromIndirect(
-                                primaryHit, origin, direction, indirectColor
-                            );
-                """;
-        String newComposite = """
-                            color = packRgba(
-                                unpackRgb(giCompositeFromIndirect(
-                                    primaryHit, origin, direction, indirectColor
-                                )) * p15PrimaryTransmission,
-                                255u
-                            );
-                """;
-        source = replaceRequiredOnce(source, oldComposite, newComposite, "GI composite transmission");
+        source = patchGiCompositeCall(source);
 
         TotemLumenClient.LOGGER.info(
                 "P15 glass transmission active: clearGlass=true, stainedGlassRgb=true, panes=true, maxTransparentLayers=8, sun+sky+local+GI=true, refraction=false"
@@ -300,23 +286,43 @@ final class P15GlassTransmissionPatch {
         );
         local = replaceRequiredOnce(
                 local,
-                "HitResult blocker = traceRayLimited(shadowOrigin, lightDirection, shadowMaxDistance);\n"
-                        + "                        visibility = blocker.hit == 0u ? 1.0 : 0.0;",
-                "lightTransmission = p15RayTransmission(\n"
-                        + "                            shadowOrigin,\n"
-                        + "                            lightDirection,\n"
-                        + "                            shadowMaxDistance\n"
-                        + "                        );",
-                "local light blocker"
+                "HitResult blocker = traceRayLimited(shadowOrigin, lightDirection, shadowMaxDistance);",
+                "lightTransmission = p15RayTransmission(shadowOrigin, lightDirection, shadowMaxDistance);",
+                "local light blocker trace"
+        );
+        local = replaceRequiredOnce(
+                local,
+                "visibility = blocker.hit == 0u ? 1.0 : 0.0;",
+                "// P15 RGB transmission already includes visibility and stained-glass tint.",
+                "local light blocker result"
         );
         local = replaceRequiredOnce(
                 local,
                 "lighting += lightColor * (2.4 * nDotL * attenuation * intensity * visibility);",
-                "lighting += lightColor * lightTransmission\n"
-                        + "                            * (2.4 * nDotL * attenuation * intensity);",
+                "lighting += lightColor * lightTransmission * (2.4 * nDotL * attenuation * intensity);",
                 "local light accumulation"
         );
         return source.substring(0, localStart) + local + source.substring(localEnd);
+    }
+
+    private static String patchGiCompositeCall(String source) {
+        String marker = "color = giCompositeFromIndirect(";
+        int start = source.indexOf(marker);
+        if (start < 0) {
+            throw new IllegalStateException("P15 glass patch marker missing: GI composite call");
+        }
+        int end = source.indexOf(");", start);
+        if (end < 0) {
+            throw new IllegalStateException("P15 glass patch marker missing: GI composite call end");
+        }
+        end += 2;
+        String call = source.substring(start, end);
+        if (!call.contains("primaryHit") || !call.contains("indirectColor")) {
+            throw new IllegalStateException("P15 glass patch GI composite call did not match expected arguments");
+        }
+        String replacement = "color = packRgba(unpackRgb(" + call.substring("color = ".length(), call.length() - 1)
+                + ") * p15PrimaryTransmission, 255u);";
+        return source.substring(0, start) + replacement + source.substring(end);
     }
 
     private static String replaceRequiredOnce(String source, String oldText, String newText, String label) {
