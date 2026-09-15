@@ -19,17 +19,17 @@ The server gameplay subsystem never initializes or depends on Vulkan. A dedicate
 
 ## Current milestone
 
-`0.1.0-alpha.37` adds the P14C static block-model geometry gate before P17 dynamic entities.
+`0.1.0-alpha.38` adds persistent Vulkan pipeline caching after Apple M4 + MoltenVK 1.4.2 runtime testing of Alpha 37 measured about 475.7 seconds for the P12-P15 base pipeline and 71.5 seconds for the split P16 reflection pipeline on a clean first compile.
 
-- ordinary chunk-rendered block states no longer rely on a short block-id shape table or default to full cubes;
-- Totem Lumen asks Minecraft/Fabric's resolved `BlockStateModel` to emit its real quad geometry and copies only immutable vertex positions into a deduplicated client mesh registry;
-- a new `MODEL_MESH` geometry family stores a 12-bit mesh id without widening the 32-bit per-voxel ABI;
-- canonical full cubes retain the established fast path, while arbitrary model quads use block-local triangle intersection after voxel DDA broad phase;
-- the same P14 trace functions are shared by primary rays, shadows, diffuse GI, environment visibility, P15 glass traversal and P16 reflection;
-- model meshes live in a shared scene-SSBO tail and are uploaded with static scene revisions rather than every camera frame;
-- resource-model reloads progressively refresh populated sections through the existing bounded background extraction queue.
+- Totem Lumen persists opaque `VkPipelineCache` data under the Minecraft game cache directory;
+- cache files are keyed by cache schema, Vulkan vendor/device, driver version and `pipelineCacheUUID`;
+- base and P16 pipeline builds share the same persisted driver cache blob;
+- each build uses a short-lived `VkPipelineCache`, writes updated cache data atomically, then destroys the cache handle before returning;
+- a missing cache remains a normal first-run `MISS` and compiles through the existing background pipeline workers;
+- incompatible/corrupt cache data is discarded and retried empty, while cache I/O failure falls back to normal no-cache pipeline creation;
+- pipeline-cache persistence is strictly an optimization and never a renderer correctness dependency.
 
-This milestone deliberately does **not** claim that every Minecraft renderer domain is now identical to vanilla. Special/block-entity renderers, exact fluid surfaces, texture-alpha cutout silhouettes and per-position/out-of-cell model transforms are separate geometry domains documented in `P14C_GENERIC_BLOCK_MODELS.md`. Those domains must receive explicit extraction/validation gates rather than silently falling back to cubes. P16 multi-pass reflection from Alpha 36 and Alpha 32's server-authoritative gameplay lighting remain intact. Dedicated-server runtime/TPS stress validation is still deferred while client renderer development continues.
+Alpha 37's P14C static block-model geometry remains the current geometry baseline: ordinary chunk-rendered block states use Minecraft/Fabric's emitted `BlockStateModel` quads instead of silently becoming full cubes, and the same P14 trace functions feed primary rays, shadows, GI, P15 transmission and P16 reflection. Special/block-entity renderers, exact fluid surfaces, texture-alpha cutout silhouettes and per-position/out-of-cell model transforms remain explicit later geometry domains. Dedicated-server runtime/TPS stress validation is still deferred while client renderer development continues.
 
 ## Runtime requirements
 
@@ -77,6 +77,7 @@ CI installs Gradle 9.5.1 explicitly.
 - [`docs/P16_REFLECTION_ROUGHNESS.md`](docs/P16_REFLECTION_ROUGHNESS.md) — reflection model, surface profiles, ABI choice, limitations and validation plan.
 - [`docs/P16_MOLTENVK_PIPELINE_STALL.md`](docs/P16_MOLTENVK_PIPELINE_STALL.md) — Alpha 34/35 MoltenVK pipeline findings and the Alpha 36 multi-pass resolution.
 - [`docs/P16_MULTIPASS_SPLIT.md`](docs/P16_MULTIPASS_SPLIT.md) — Alpha 36 pass boundaries, synchronization, fallback semantics and runtime validation.
+- [`docs/PERSISTENT_VULKAN_PIPELINE_CACHE.md`](docs/PERSISTENT_VULKAN_PIPELINE_CACHE.md) — Alpha 37 startup measurements, Alpha 38 cache persistence design, fallback semantics and validation gate.
 - [`docs/SERVER_GAMEPLAY_LIGHTING.md`](docs/SERVER_GAMEPLAY_LIGHTING.md) — authoritative RGB gameplay-lighting design, resource estimates, budgets and validation plan.
 - [`docs/GAMEPLAY_LIGHTING_ROADMAP.md`](docs/GAMEPLAY_LIGHTING_ROADMAP.md) — implementation phases and follow-up work for the server subsystem.
 - [`docs/LIGHTING_WORLD_RULES.md`](docs/LIGHTING_WORLD_RULES.md) — data-pack block lighting rule format.
