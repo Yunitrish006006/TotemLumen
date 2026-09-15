@@ -5,17 +5,17 @@ import dev.totem.lumen.TotemLumenClient;
 /**
  * P13 correctness follow-up: Overworld sky ambient must respect geometry occlusion.
  *
- * <p>The first environment-lighting baseline evaluated sky radiance directly from the surface
- * normal. That made fully enclosed rooms brighten and darken with the Overworld clock even though
- * the roof correctly blocked the directional sun. This patch adds a conservative world-up sky
- * visibility ray before applying Overworld sky ambient. P15 is deliberately chained after this
- * transform so that the same sky visibility path can become RGB-transmissive through glass.</p>
+ * <p>P14C is chained immediately before this stage so every later P13/P15/P16 visibility path sees
+ * the same generic block-model geometry. P15 is deliberately chained after the sky transform so
+ * the same visibility path can become RGB-transmissive through glass.</p>
  */
 final class P13SkyOcclusionPatch {
     private P13SkyOcclusionPatch() {
     }
 
     static String apply(String source) {
+        source = P14GenericModelMeshPatch.apply(source);
+
         String functionMarker = "vec3 p13EnvironmentSurfaceRadiance(\n";
         if (!source.contains(functionMarker)) {
             throw new IllegalStateException("P13 skylight occlusion patch marker missing: environment surface function");
