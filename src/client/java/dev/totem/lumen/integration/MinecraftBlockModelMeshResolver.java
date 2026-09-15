@@ -17,6 +17,7 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.level.block.RenderShape;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.Property;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.shapes.VoxelShape;
 import org.joml.Vector3f;
@@ -250,11 +251,24 @@ public final class MinecraftBlockModelMeshResolver {
 
     private static int connectionMask(BlockState state) {
         int mask = 0;
-        if (MinecraftGeometryResolver.booleanPropertyValue(state, "north")) mask |= BlockGeometryCode.CONNECT_NORTH;
-        if (MinecraftGeometryResolver.booleanPropertyValue(state, "east")) mask |= BlockGeometryCode.CONNECT_EAST;
-        if (MinecraftGeometryResolver.booleanPropertyValue(state, "south")) mask |= BlockGeometryCode.CONNECT_SOUTH;
-        if (MinecraftGeometryResolver.booleanPropertyValue(state, "west")) mask |= BlockGeometryCode.CONNECT_WEST;
+        if (booleanPropertyValue(state, "north")) mask |= BlockGeometryCode.CONNECT_NORTH;
+        if (booleanPropertyValue(state, "east")) mask |= BlockGeometryCode.CONNECT_EAST;
+        if (booleanPropertyValue(state, "south")) mask |= BlockGeometryCode.CONNECT_SOUTH;
+        if (booleanPropertyValue(state, "west")) mask |= BlockGeometryCode.CONNECT_WEST;
         return mask;
+    }
+
+    private static boolean booleanPropertyValue(BlockState state, String name) {
+        for (Property<?> property : state.getProperties()) {
+            if (property.getName().equals(name)) {
+                return "true".equals(propertyValue(state, property));
+            }
+        }
+        return false;
+    }
+
+    private static <T extends Comparable<T>> String propertyValue(BlockState state, Property<T> property) {
+        return property.getName(state.getValue(property));
     }
 
     private static int transmissionTint(String sourceId) {
