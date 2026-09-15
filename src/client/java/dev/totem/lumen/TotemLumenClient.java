@@ -1,6 +1,7 @@
 package dev.totem.lumen;
 
 import com.mojang.blaze3d.platform.InputConstants;
+import dev.totem.lumen.integration.P13EnvironmentCapture;
 import dev.totem.lumen.integration.SceneExtractionBridge;
 import dev.totem.lumen.render.RendererBootstrap;
 import dev.totem.lumen.vulkan.P4ComputeSmokeTest;
@@ -41,6 +42,9 @@ public final class TotemLumenClient implements ClientModInitializer {
     public void onInitializeClient() {
         LOGGER.info("Initializing Totem Lumen");
         RendererBootstrap.initialize();
+        // Register the environment capture first so its END_EXTRACTION callback runs before the
+        // scene bridge constructs the immutable FrameSnapshot for the same frame.
+        P13EnvironmentCapture.initialize();
         SceneExtractionBridge.initialize();
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
