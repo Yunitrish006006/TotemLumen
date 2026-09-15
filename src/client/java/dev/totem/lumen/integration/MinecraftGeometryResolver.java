@@ -11,9 +11,8 @@ import net.minecraft.world.level.block.state.properties.SlabType;
  * Minecraft-facing block-state classifier for Totem Lumen's compact block-local geometry ABI.
  *
  * <p>P14B keeps slabs on their proven dedicated codes and adds compact parameterized families for
- * stairs, fences, walls, panes/bars, doors, trapdoors and fence gates. Property names are read
- * generically so the renderer does not depend on individual vanilla block implementation classes
- * for every family.</p>
+ * stairs, fences, walls, panes/bars, doors, trapdoors and fence gates. P15 additionally stores a
+ * small glass transmission/tint code in spare geometry bits so the 32-bit voxel ABI does not grow.</p>
  */
 public final class MinecraftGeometryResolver {
     private MinecraftGeometryResolver() {
@@ -33,6 +32,12 @@ public final class MinecraftGeometryResolver {
         }
 
         String sourceId = BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
+        if (isTransmissiveGlassPane(sourceId)) {
+            return BlockGeometryCode.transmissivePane(connectionMask(state), transmissionTint(sourceId));
+        }
+        if (isTransmissiveGlassCube(sourceId)) {
+            return BlockGeometryCode.glassCube(transmissionTint(sourceId));
+        }
         if (sourceId.endsWith("_stairs")) {
             return BlockGeometryCode.stairs(
                     direction(propertyValue(state, "facing", "north")),
@@ -77,6 +82,37 @@ public final class MinecraftGeometryResolver {
             );
         }
         return BlockGeometryCode.FULL_CUBE;
+    }
+
+    private static boolean isTransmissiveGlassPane(String sourceId) {
+        return sourceId.equals("minecraft:glass_pane") || sourceId.endsWith("_stained_glass_pane");
+    }
+
+    private static boolean isTransmissiveGlassCube(String sourceId) {
+        if (sourceId.equals("minecraft:tinted_glass")) {
+            return false;
+        }
+        return sourceId.equals("minecraft:glass") || sourceId.endsWith("_stained_glass");
+    }
+
+    private static int transmissionTint(String sourceId) {
+        if (sourceId.startsWith("minecraft:white_")) return BlockGeometryCode.TINT_WHITE;
+        if (sourceId.startsWith("minecraft:orange_")) return BlockGeometryCode.TINT_ORANGE;
+        if (sourceId.startsWith("minecraft:magenta_")) return BlockGeometryCode.TINT_MAGENTA;
+        if (sourceId.startsWith("minecraft:light_blue_")) return BlockGeometryCode.TINT_LIGHT_BLUE;
+        if (sourceId.startsWith("minecraft:yellow_")) return BlockGeometryCode.TINT_YELLOW;
+        if (sourceId.startsWith("minecraft:lime_")) return BlockGeometryCode.TINT_LIME;
+        if (sourceId.startsWith("minecraft:pink_")) return BlockGeometryCode.TINT_PINK;
+        if (sourceId.startsWith("minecraft:light_gray_")) return BlockGeometryCode.TINT_LIGHT_GRAY;
+        if (sourceId.startsWith("minecraft:gray_")) return BlockGeometryCode.TINT_GRAY;
+        if (sourceId.startsWith("minecraft:cyan_")) return BlockGeometryCode.TINT_CYAN;
+        if (sourceId.startsWith("minecraft:purple_")) return BlockGeometryCode.TINT_PURPLE;
+        if (sourceId.startsWith("minecraft:blue_")) return BlockGeometryCode.TINT_BLUE;
+        if (sourceId.startsWith("minecraft:brown_")) return BlockGeometryCode.TINT_BROWN;
+        if (sourceId.startsWith("minecraft:green_")) return BlockGeometryCode.TINT_GREEN;
+        if (sourceId.startsWith("minecraft:red_")) return BlockGeometryCode.TINT_RED;
+        if (sourceId.startsWith("minecraft:black_")) return BlockGeometryCode.TINT_BLACK;
+        return BlockGeometryCode.TINT_CLEAR;
     }
 
     private static int connectionMask(BlockState state) {
