@@ -1,5 +1,7 @@
 package dev.totem.lumen.integration;
 
+import dev.totem.lumen.material.BaselineSurfaceProperties;
+import dev.totem.lumen.material.SurfaceProperties;
 import dev.totem.lumen.scene.BlockGeometryCode;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.block.SlabBlock;
@@ -12,7 +14,8 @@ import net.minecraft.world.level.block.state.properties.SlabType;
  *
  * <p>P14B keeps slabs on their proven dedicated codes and adds compact parameterized families for
  * stairs, fences, walls, panes/bars, doors, trapdoors and fence gates. P15 additionally stores a
- * small glass transmission/tint code in spare geometry bits so the 32-bit voxel ABI does not grow.</p>
+ * small glass transmission/tint code in spare geometry bits so the 32-bit voxel ABI does not grow.
+ * P16 encodes quantized roughness/metallic response for full cubes in a dedicated fast-path family.</p>
  */
 public final class MinecraftGeometryResolver {
     private MinecraftGeometryResolver() {
@@ -22,16 +25,19 @@ public final class MinecraftGeometryResolver {
         if (state.isAir()) {
             return BlockGeometryCode.FULL_CUBE;
         }
+
+        String sourceId = BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
+        SurfaceProperties surface = BaselineSurfaceProperties.forBlock(sourceId);
+
         if (state.getBlock() instanceof SlabBlock) {
             SlabType type = state.getValue(SlabBlock.TYPE);
             return switch (type) {
                 case BOTTOM -> BlockGeometryCode.SLAB_BOTTOM;
                 case TOP -> BlockGeometryCode.SLAB_TOP;
-                case DOUBLE -> BlockGeometryCode.FULL_CUBE;
+                case DOUBLE -> BlockGeometryCode.surfaceCube(surface.roughness(), surface.metallic());
             };
         }
 
-        String sourceId = BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
         if (isTransmissiveGlassPane(sourceId)) {
             return BlockGeometryCode.transmissivePane(connectionMask(state), transmissionTint(sourceId));
         }
@@ -81,7 +87,7 @@ public final class MinecraftGeometryResolver {
                     propertyValue(state, "hinge", "left").equals("right")
             );
         }
-        return BlockGeometryCode.FULL_CUBE;
+        return BlockGeometryCode.surfaceCube(surface.roughness(), surface.metallic());
     }
 
     private static boolean isTransmissiveGlassPane(String sourceId) {
