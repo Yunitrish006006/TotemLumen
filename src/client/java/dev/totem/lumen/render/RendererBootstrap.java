@@ -6,6 +6,7 @@ import dev.totem.lumen.vulkan.MinecraftVulkanBridge;
 import dev.totem.lumen.vulkan.VulkanBackendInfo;
 import dev.totem.lumen.vulkan.VulkanCapabilities;
 import dev.totem.lumen.vulkan.VulkanCapabilityProbe;
+import dev.totem.lumen.vulkan.VulkanComputeProgram;
 
 public final class RendererBootstrap {
     private static RendererState state = RendererState.NEW;
@@ -97,6 +98,10 @@ public final class RendererBootstrap {
             TotemLumenClient.LOGGER.info(
                     "Compute integration mode: Minecraft graphics submission (preferred portable path)"
             );
+            // Pipeline compilation can be very expensive on MoltenVK because it translates SPIR-V
+            // to MSL and invokes the Metal compiler. Start it as soon as the Vulkan device is known,
+            // while resource loading is still in progress, and never make world rendering wait.
+            VulkanComputeProgram.prewarmMainGiPipeline(vulkanDevice);
         } else {
             TotemLumenClient.LOGGER.warn(
                     "Graphics queue lacks compute support; a dedicated compute-queue synchronization path will be required on this device"
