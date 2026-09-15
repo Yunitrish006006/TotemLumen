@@ -18,11 +18,11 @@ import java.nio.ByteBuffer;
 import java.util.List;
 
 /**
- * P14C scene-tail upload hooks plus the optional P16 reflection dispatch.
+ * Shared P14C/P14D scene-tail upload hooks plus the optional P16 reflection dispatch.
  *
- * <p>The base renderer keeps its established static/history/pixel ABI. Generic model descriptors
- * and quad vertices are appended after the pixel words, copied only during full scene uploads, and
- * are visible to every compute pass through the same storage buffer.</p>
+ * <p>Static model descriptors are packed during ordinary full scene uploads. P14D mutable block-
+ * entity mesh revisions can additionally repack/copy only the model tail on a camera-only frame,
+ * avoiding a 64-section voxel repack for every animation pose.</p>
  */
 @Mixin(targets = "dev.totem.lumen.vulkan.P5StableLookupRenderer", remap = false)
 public abstract class P5StableLookupRendererMixin {
@@ -49,15 +49,13 @@ public abstract class P5StableLookupRendererMixin {
             long offset,
             long length
     ) {
+        boolean modelChanged = P14ModelMeshGpuUploader.packIfDirty(upload.mappedView());
         upload.flush(offset, length);
-        if (length <= CAMERA_UPLOAD_MAX_BYTES) {
-            return;
-        }
+        if (length <= CAMERA_UPLOAD_MAX_BYTES && !modelChanged) return;
+
         long modelOffset = P14ModelMeshGpuUploader.lastBaseByteOffset();
         long modelBytes = P14ModelMeshGpuUploader.lastCopyBytes();
-        if (modelOffset >= 0L && modelBytes > 0L) {
-            upload.flush(modelOffset, modelBytes);
-        }
+        if (modelOffset >= 0L && modelBytes > 0L) upload.flush(modelOffset, modelBytes);
     }
 
     @Redirect(
@@ -74,15 +72,11 @@ public abstract class P5StableLookupRendererMixin {
             VkBufferCopy.Buffer regions
     ) {
         VK10.vkCmdCopyBuffer(commandBuffer, sourceBuffer, destinationBuffer, regions);
-        if (regions.remaining() == 0 || regions.get(0).size() <= CAMERA_UPLOAD_MAX_BYTES) {
-            return;
-        }
+        if (!P14ModelMeshGpuUploader.consumeCopyPending()) return;
 
         long modelOffset = P14ModelMeshGpuUploader.lastBaseByteOffset();
         long modelBytes = P14ModelMeshGpuUploader.lastCopyBytes();
-        if (modelOffset < 0L || modelBytes <= 0L) {
-            return;
-        }
+        if (modelOffset < 0L || modelBytes <= 0L) return;
 
         try (MemoryStack stack = MemoryStack.stackPush()) {
             VkBufferCopy.Buffer modelCopy = VkBufferCopy.calloc(1, stack);

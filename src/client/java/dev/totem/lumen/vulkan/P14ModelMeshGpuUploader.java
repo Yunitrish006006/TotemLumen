@@ -5,17 +5,36 @@ import dev.totem.lumen.geometry.BlockModelMeshRegistry;
 
 import java.nio.ByteBuffer;
 
-/** Packs the deduplicated P14C model registry into the scene-buffer tail after the pixel target. */
+/** Packs the shared P14C/P14D model registry into the scene-buffer tail after the pixel target. */
 public final class P14ModelMeshGpuUploader {
     private static volatile long lastBaseByteOffset = -1L;
     private static volatile long lastCopyBytes;
+    private static long lastPackedRevision = Long.MIN_VALUE;
+    private static boolean copyPending;
     private static int lastLoggedMeshCount = -1;
+    private static int lastLoggedDynamicMeshCount = -1;
     private static int lastLoggedQuadCount = -1;
 
     private P14ModelMeshGpuUploader() {
     }
 
-    public static void pack(ByteBuffer buffer) {
+    /** Force-packs the current registry, used when the owning scene resources/static data rebuild. */
+    public static synchronized void pack(ByteBuffer buffer) {
+        packSnapshot(buffer, BlockModelMeshRegistry.snapshot());
+    }
+
+    /**
+     * Packs only when a static or mutable block-entity mesh changed. This allows animation to update
+     * the mesh tail without re-uploading all section voxels.
+     */
+    public static synchronized boolean packIfDirty(ByteBuffer buffer) {
+        BlockModelMeshRegistry.Snapshot snapshot = BlockModelMeshRegistry.snapshot();
+        if (snapshot.revision() == lastPackedRevision) return false;
+        packSnapshot(buffer, snapshot);
+        return true;
+    }
+
+    private static void packSnapshot(ByteBuffer buffer, BlockModelMeshRegistry.Snapshot snapshot) {
         int pixelBaseWord = buffer.getInt(3 * Integer.BYTES);
         int width = buffer.getInt(4 * Integer.BYTES);
         int height = buffer.getInt(5 * Integer.BYTES);
@@ -24,7 +43,6 @@ public final class P14ModelMeshGpuUploader {
         int descriptorBaseWord = modelBaseWord;
         int quadBaseWord = Math.addExact(descriptorBaseWord, P14ModelMeshGpuLayout.MESH_DESCRIPTOR_WORDS);
 
-        BlockModelMeshRegistry.Snapshot snapshot = BlockModelMeshRegistry.snapshot();
         int usedQuadWords = Math.multiplyExact(
                 snapshot.totalQuads(),
                 P14ModelMeshGpuLayout.QUAD_WORDS_PER_RECORD
@@ -33,14 +51,15 @@ public final class P14ModelMeshGpuUploader {
         long endBytes = (long) (modelBaseWord + usedWords) * Integer.BYTES;
         if (endBytes > buffer.capacity()) {
             throw new IllegalStateException(
-                    "P14C model storage exceeds scene upload buffer: required=" + endBytes
+                    "P14 model storage exceeds scene upload buffer: required=" + endBytes
                             + ", capacity=" + buffer.capacity()
             );
         }
 
-        // Mesh id zero is the explicit empty-model descriptor.
-        putWord(buffer, descriptorBaseWord, 0);
-        putWord(buffer, descriptorBaseWord + 1, 0);
+        // Every descriptor is cleared because released/reused P14D ids can leave holes.
+        for (int word = 0; word < P14ModelMeshGpuLayout.MESH_DESCRIPTOR_WORDS; word++) {
+            putWord(buffer, descriptorBaseWord + word, 0);
+        }
 
         for (BlockModelMeshRegistry.Mesh mesh : snapshot.meshes()) {
             int descriptor = descriptorBaseWord
@@ -50,21 +69,27 @@ public final class P14ModelMeshGpuUploader {
 
             int quadWord = quadBaseWord
                     + mesh.firstQuad() * P14ModelMeshGpuLayout.QUAD_WORDS_PER_RECORD;
-            float[] positions = mesh.positions();
-            for (float position : positions) {
+            for (float position : mesh.positions()) {
                 putWord(buffer, quadWord++, Float.floatToRawIntBits(position));
             }
         }
 
         lastBaseByteOffset = (long) modelBaseWord * Integer.BYTES;
         lastCopyBytes = (long) usedWords * Integer.BYTES;
+        lastPackedRevision = snapshot.revision();
+        copyPending = true;
 
-        if (lastLoggedMeshCount != snapshot.meshes().size() || lastLoggedQuadCount != snapshot.totalQuads()) {
+        int dynamicMeshes = BlockModelMeshRegistry.dynamicMeshCount();
+        if (lastLoggedMeshCount != snapshot.meshes().size()
+                || lastLoggedDynamicMeshCount != dynamicMeshes
+                || lastLoggedQuadCount != snapshot.totalQuads()) {
             lastLoggedMeshCount = snapshot.meshes().size();
+            lastLoggedDynamicMeshCount = dynamicMeshes;
             lastLoggedQuadCount = snapshot.totalQuads();
             TotemLumenClient.LOGGER.info(
-                    "P14C generic model GPU registry: meshes={}, quads={}, bytes={}, maxBytes={}",
+                    "P14 model GPU registry: meshes={}, dynamicMeshes={}, quads={}, bytes={}, maxBytes={}",
                     snapshot.meshes().size(),
+                    dynamicMeshes,
                     snapshot.totalQuads(),
                     lastCopyBytes,
                     P14ModelMeshGpuLayout.MAX_STORAGE_BYTES
@@ -78,6 +103,12 @@ public final class P14ModelMeshGpuUploader {
 
     public static long lastCopyBytes() {
         return lastCopyBytes;
+    }
+
+    public static synchronized boolean consumeCopyPending() {
+        boolean pending = copyPending;
+        copyPending = false;
+        return pending;
     }
 
     private static void putWord(ByteBuffer buffer, int wordIndex, int value) {

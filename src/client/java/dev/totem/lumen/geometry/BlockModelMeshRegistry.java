@@ -7,13 +7,17 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.NavigableSet;
+import java.util.TreeSet;
+import java.util.function.Predicate;
 
 /**
- * Client-owned immutable block-model geometry registry used by P14C.
+ * Client-owned model geometry registry shared by P14C static block models and P14D block-entity
+ * models.
  *
- * <p>Mesh id zero is reserved for an intentionally empty model. Non-zero ids fit in the low
- * 12 bits of {@code MODEL_MESH} geometry codes. Geometry is deduplicated from emitted quad vertex
- * positions so different block states/resource-pack models can share one GPU mesh.</p>
+ * <p>Mesh id zero is reserved for an intentionally empty model. Static meshes are deduplicated by
+ * immutable vertex positions. Block-entity meshes instead own stable mutable ids: animation updates
+ * replace the geometry behind an existing id rather than consuming a new 12-bit id every frame.</p>
  */
 public final class BlockModelMeshRegistry {
     public static final int MAX_MESH_ID = 0x0FFF;
@@ -21,82 +25,213 @@ public final class BlockModelMeshRegistry {
     public static final int MAX_QUADS_PER_MESH = 512;
     public static final int FLOATS_PER_QUAD = 12;
 
-    private static final Map<MeshKey, Integer> IDS = new HashMap<>();
-    private static final List<Mesh> MESHES = new ArrayList<>();
+    private static final Map<MeshKey, Integer> STATIC_IDS = new HashMap<>();
+    private static final Map<DynamicMeshKey, Integer> DYNAMIC_IDS = new HashMap<>();
+    private static final Map<Integer, StoredMesh> MESHES = new HashMap<>();
+    private static final NavigableSet<Integer> REUSABLE_IDS = new TreeSet<>();
 
+    private static int nextId = 1;
     private static int totalQuads;
+    private static long revision;
     private static boolean capacityWarningLogged;
     private static boolean perMeshWarningLogged;
 
     private BlockModelMeshRegistry() {
     }
 
-    /**
-     * Registers local-space quads and returns a 12-bit mesh id. Zero represents no geometry;
-     * negative one means the registry cannot represent this mesh and the caller should use a
-     * conservative fallback.
-     */
     public static synchronized int register(float[] quadPositions) {
-        if (quadPositions.length == 0) {
-            return 0;
-        }
-        if (quadPositions.length % FLOATS_PER_QUAD != 0) {
-            throw new IllegalArgumentException("Quad position array must contain 12 floats per quad");
-        }
-
-        int quadCount = quadPositions.length / FLOATS_PER_QUAD;
+        int quadCount = validatePositions(quadPositions);
+        if (quadCount == 0) return 0;
         if (quadCount > MAX_QUADS_PER_MESH) {
-            if (!perMeshWarningLogged) {
-                perMeshWarningLogged = true;
-                TotemLumenClient.LOGGER.warn(
-                        "P14C model mesh exceeds per-mesh quad cap: quads={}, cap={}; using conservative fallback",
-                        quadCount,
-                        MAX_QUADS_PER_MESH
-                );
-            }
+            logPerMeshCapacity(quadCount);
             return -1;
         }
 
         MeshKey key = MeshKey.of(quadPositions);
-        Integer existing = IDS.get(key);
-        if (existing != null) {
-            return existing;
-        }
-
-        int nextId = MESHES.size() + 1;
-        if (nextId > MAX_MESH_ID || totalQuads + quadCount > MAX_QUADS) {
-            if (!capacityWarningLogged) {
-                capacityWarningLogged = true;
-                TotemLumenClient.LOGGER.warn(
-                        "P14C model mesh registry capacity reached: meshes={}/{}, quads={}/{}; new meshes use conservative fallback",
-                        MESHES.size(), MAX_MESH_ID, totalQuads, MAX_QUADS
-                );
-            }
+        Integer existing = STATIC_IDS.get(key);
+        if (existing != null) return existing;
+        if (!hasQuadCapacity(0, quadCount)) {
+            logGlobalCapacity();
             return -1;
         }
 
-        float[] owned = quadPositions.clone();
-        Mesh mesh = new Mesh(nextId, totalQuads, quadCount, owned);
-        MESHES.add(mesh);
-        IDS.put(key, nextId);
+        int id = allocateId();
+        if (id < 0) {
+            logGlobalCapacity();
+            return -1;
+        }
+
+        MESHES.put(id, new StoredMesh(id, quadPositions.clone(), false));
+        STATIC_IDS.put(key, id);
         totalQuads += quadCount;
-        return nextId;
+        revision++;
+        return id;
+    }
+
+    public static synchronized DynamicUpsertResult upsertDynamic(
+            DynamicMeshKey key,
+            float[] quadPositions
+    ) {
+        if (key == null) throw new IllegalArgumentException("dynamic mesh key cannot be null");
+        int quadCount = validatePositions(quadPositions);
+        if (quadCount <= 0 || quadCount > MAX_QUADS_PER_MESH) {
+            if (quadCount > MAX_QUADS_PER_MESH) logPerMeshCapacity(quadCount);
+            Integer existing = DYNAMIC_IDS.get(key);
+            return new DynamicUpsertResult(existing == null ? -1 : existing, false, false, false);
+        }
+
+        Integer existingId = DYNAMIC_IDS.get(key);
+        if (existingId != null) {
+            StoredMesh existing = MESHES.get(existingId);
+            if (existing == null || !existing.dynamic) {
+                throw new IllegalStateException("dynamic mesh id is not backed by a dynamic entry: " + existingId);
+            }
+            if (MeshKey.of(existing.positions).equals(MeshKey.of(quadPositions))) {
+                return new DynamicUpsertResult(existingId, false, false, true);
+            }
+            int oldQuadCount = existing.positions.length / FLOATS_PER_QUAD;
+            if (!hasQuadCapacity(oldQuadCount, quadCount)) {
+                logGlobalCapacity();
+                return new DynamicUpsertResult(existingId, false, false, false);
+            }
+            MESHES.put(existingId, new StoredMesh(existingId, quadPositions.clone(), true));
+            totalQuads += quadCount - oldQuadCount;
+            revision++;
+            return new DynamicUpsertResult(existingId, false, true, true);
+        }
+
+        if (!hasQuadCapacity(0, quadCount)) {
+            logGlobalCapacity();
+            return new DynamicUpsertResult(-1, false, false, false);
+        }
+        int id = allocateId();
+        if (id < 0) {
+            logGlobalCapacity();
+            return new DynamicUpsertResult(-1, false, false, false);
+        }
+
+        DYNAMIC_IDS.put(key, id);
+        MESHES.put(id, new StoredMesh(id, quadPositions.clone(), true));
+        totalQuads += quadCount;
+        revision++;
+        return new DynamicUpsertResult(id, true, true, true);
+    }
+
+    public static synchronized boolean releaseDynamic(DynamicMeshKey key) {
+        Integer id = DYNAMIC_IDS.remove(key);
+        if (id == null) return false;
+        StoredMesh removed = MESHES.remove(id);
+        if (removed != null) totalQuads -= removed.positions.length / FLOATS_PER_QUAD;
+        REUSABLE_IDS.add(id);
+        revision++;
+        return true;
+    }
+
+    public static synchronized int releaseDynamicIf(Predicate<DynamicMeshKey> predicate) {
+        List<DynamicMeshKey> keys = new ArrayList<>();
+        for (DynamicMeshKey key : DYNAMIC_IDS.keySet()) {
+            if (predicate.test(key)) keys.add(key);
+        }
+        for (DynamicMeshKey key : keys) releaseDynamic(key);
+        return keys.size();
+    }
+
+    public static synchronized void clearDynamic() {
+        releaseDynamicIf(key -> true);
     }
 
     public static synchronized Snapshot snapshot() {
-        List<Mesh> meshes = new ArrayList<>(MESHES.size());
-        for (Mesh mesh : MESHES) {
-            meshes.add(new Mesh(mesh.id(), mesh.firstQuad(), mesh.quadCount(), mesh.positions().clone()));
+        List<Integer> ids = new ArrayList<>(MESHES.keySet());
+        ids.sort(Integer::compareTo);
+        List<Mesh> meshes = new ArrayList<>(ids.size());
+        int firstQuad = 0;
+        for (int id : ids) {
+            StoredMesh stored = MESHES.get(id);
+            float[] owned = stored.positions.clone();
+            int quadCount = owned.length / FLOATS_PER_QUAD;
+            meshes.add(new Mesh(id, firstQuad, quadCount, owned));
+            firstQuad += quadCount;
         }
-        return new Snapshot(List.copyOf(meshes), totalQuads);
+        return new Snapshot(List.copyOf(meshes), firstQuad, revision);
+    }
+
+    /** Returns a defensive copy of one currently-live mesh payload, or an empty array for id zero. */
+    public static synchronized float[] positionsForMesh(int meshId) {
+        if (meshId == 0) return new float[0];
+        StoredMesh mesh = MESHES.get(meshId);
+        return mesh == null ? null : mesh.positions.clone();
     }
 
     public static synchronized int meshCount() {
         return MESHES.size();
     }
 
+    public static synchronized int dynamicMeshCount() {
+        return DYNAMIC_IDS.size();
+    }
+
     public static synchronized int quadCount() {
         return totalQuads;
+    }
+
+    public static synchronized long revision() {
+        return revision;
+    }
+
+    private static int validatePositions(float[] positions) {
+        if (positions == null) throw new IllegalArgumentException("quad positions cannot be null");
+        if (positions.length % FLOATS_PER_QUAD != 0) {
+            throw new IllegalArgumentException("Quad position array must contain 12 floats per quad");
+        }
+        for (float value : positions) {
+            if (!Float.isFinite(value)) {
+                throw new IllegalArgumentException("model vertex coordinate must be finite");
+            }
+        }
+        return positions.length / FLOATS_PER_QUAD;
+    }
+
+    private static boolean hasQuadCapacity(int replacingQuads, int replacementQuads) {
+        return totalQuads - replacingQuads + replacementQuads <= MAX_QUADS;
+    }
+
+    private static int allocateId() {
+        Integer reusable = REUSABLE_IDS.pollFirst();
+        if (reusable != null) return reusable;
+        if (nextId > MAX_MESH_ID) return -1;
+        return nextId++;
+    }
+
+    private static void logPerMeshCapacity(int quadCount) {
+        if (!perMeshWarningLogged) {
+            perMeshWarningLogged = true;
+            TotemLumenClient.LOGGER.warn(
+                    "P14 model mesh exceeds per-mesh quad cap: quads={}, cap={}; using conservative fallback",
+                    quadCount,
+                    MAX_QUADS_PER_MESH
+            );
+        }
+    }
+
+    private static void logGlobalCapacity() {
+        if (!capacityWarningLogged) {
+            capacityWarningLogged = true;
+            TotemLumenClient.LOGGER.warn(
+                    "P14 model mesh registry capacity reached: meshes={}/{}, quads={}/{}; new meshes use conservative fallback",
+                    MESHES.size(), MAX_MESH_ID, totalQuads, MAX_QUADS
+            );
+        }
+    }
+
+    public record DynamicMeshKey(String dimensionId, int x, int y, int z) {
+        public DynamicMeshKey {
+            if (dimensionId == null || dimensionId.isBlank()) {
+                throw new IllegalArgumentException("dimension id cannot be blank");
+            }
+        }
+    }
+
+    public record DynamicUpsertResult(int meshId, boolean firstRegistration, boolean changed, boolean accepted) {
     }
 
     public record Mesh(int id, int firstQuad, int quadCount, float[] positions) {
@@ -110,13 +245,16 @@ public final class BlockModelMeshRegistry {
         }
     }
 
-    public record Snapshot(List<Mesh> meshes, int totalQuads) {
+    public record Snapshot(List<Mesh> meshes, int totalQuads, long revision) {
         public Snapshot {
             meshes = List.copyOf(meshes);
             if (totalQuads < 0 || totalQuads > MAX_QUADS) {
                 throw new IllegalArgumentException("invalid total quad count: " + totalQuads);
             }
         }
+    }
+
+    private record StoredMesh(int id, float[] positions, boolean dynamic) {
     }
 
     private static final class MeshKey {

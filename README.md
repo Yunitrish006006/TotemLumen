@@ -19,17 +19,19 @@ The server gameplay subsystem never initializes or depends on Vulkan. A dedicate
 
 ## Current milestone
 
-`0.1.0-alpha.38` adds persistent Vulkan pipeline caching after Apple M4 + MoltenVK 1.4.2 runtime testing of Alpha 37 measured about 475.7 seconds for the P12-P15 base pipeline and 71.5 seconds for the split P16 reflection pipeline on a clean first compile.
+`0.1.0-alpha.39` adds P14D block-entity geometry capture after Alpha 38 runtime validation confirmed the P14C static/chunk `BlockStateModel` gate and exposed the bell's renderer-owned hanging body as a separate geometry domain.
 
-- Totem Lumen persists opaque `VkPipelineCache` data under the Minecraft game cache directory;
-- cache files are keyed by cache schema, Vulkan vendor/device, driver version and `pipelineCacheUUID`;
-- base and P16 pipeline builds share the same persisted driver cache blob;
-- each build uses a short-lived `VkPipelineCache`, writes updated cache data atomically, then destroys the cache handle before returning;
-- a missing cache remains a normal first-run `MISS` and compiles through the existing background pipeline workers;
-- incompatible/corrupt cache data is discarded and retried empty, while cache I/O failure falls back to normal no-cache pipeline creation;
-- pipeline-cache persistence is strictly an optimization and never a renderer correctness dependency.
+- `BlockEntityRenderDispatcher` establishes a capture scope around each block-entity renderer submission;
+- renderer-resolved `Model` / `ModelPart` commands are copied into Totem Lumen-owned block-local quad arrays; mutable Minecraft model/render objects are not retained;
+- captured block-entity quads supplement the owning block's P14C geometry instead of replacing it;
+- each loaded block entity uses one stable mutable `MODEL_MESH` id keyed by dimension and block position, so animation updates replace mesh payloads without consuming a new 12-bit id every frame;
+- dynamic mesh ids are recycled on chunk unload and client-level changes;
+- mesh revisions can repack and copy only the shared scene-SSBO model tail, avoiding a full section-voxel repack for every animated pose;
+- camera, shadow, GI, environment, P15 transmission and P16 reflection rays continue to consume the same shared P14 mesh traversal.
 
-Alpha 37's P14C static block-model geometry remains the current geometry baseline: ordinary chunk-rendered block states use Minecraft/Fabric's emitted `BlockStateModel` quads instead of silently becoming full cubes, and the same P14 trace functions feed primary rays, shadows, GI, P15 transmission and P16 reflection. Special/block-entity renderers, exact fluid surfaces, texture-alpha cutout silhouettes and per-position/out-of-cell model transforms remain explicit later geometry domains. Dedicated-server runtime/TPS stress validation is still deferred while client renderer development continues.
+P14D's first runtime gate is the bell body that was missing in Alpha 38. CI verifies the stable mutable mesh-slot lifecycle, but Bell/chest/shulker animation correctness still requires in-game validation. Specialized block-entity renderer commands such as text/items/beams/portals/custom primitives are not silently claimed as covered; adapters are added by renderer command family. Exact flowing/sloped fluid surfaces remain the next pre-P17 geometry domain. Out-of-cell models still require a later instance-bounds/broad-phase extension.
+
+Alpha 38's persistent Vulkan pipeline cache remains enabled. Apple M4 + MoltenVK 1.4.2 runtime cache-hit measurements reduced P12-P15 pipeline creation from about 475.7 seconds to 49 ms and P16 from about 71.5 seconds to 73 ms. Pipeline caching remains an optimization, not a correctness dependency. Dedicated-server runtime/TPS stress validation is still deferred while client renderer development continues.
 
 ## Runtime requirements
 
@@ -51,7 +53,9 @@ Server world/data packs
   -> spawning / future gameplay queries
 
 Minecraft client extraction
-  -> static BlockStateModel quad extraction / immutable RayScene
+  -> static BlockStateModel quad extraction
+  -> block-entity renderer Model/ModelPart capture
+  -> immutable/copy-owned scene + shared mutable mesh slots
   -> Vulkan GPU scene + shared generic model mesh pool
   -> P12-P15 base compute pass
   -> P16 reflection compute pass
@@ -74,6 +78,7 @@ CI installs Gradle 9.5.1 explicitly.
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — client/server layering and hard architectural boundaries.
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — renderer roadmap and completed milestones.
 - [`docs/P14C_GENERIC_BLOCK_MODELS.md`](docs/P14C_GENERIC_BLOCK_MODELS.md) — generic static block-model extraction, GPU ABI, geometry-domain matrix, limits and validation plan.
+- [`docs/P14D_BLOCK_ENTITY_GEOMETRY.md`](docs/P14D_BLOCK_ENTITY_GEOMETRY.md) — block-entity renderer geometry capture, stable mutable mesh slots, lifecycle, limitations and runtime validation.
 - [`docs/P16_REFLECTION_ROUGHNESS.md`](docs/P16_REFLECTION_ROUGHNESS.md) — reflection model, surface profiles, ABI choice, limitations and validation plan.
 - [`docs/P16_MOLTENVK_PIPELINE_STALL.md`](docs/P16_MOLTENVK_PIPELINE_STALL.md) — Alpha 34/35 MoltenVK pipeline findings and the Alpha 36 multi-pass resolution.
 - [`docs/P16_MULTIPASS_SPLIT.md`](docs/P16_MULTIPASS_SPLIT.md) — Alpha 36 pass boundaries, synchronization, fallback semantics and runtime validation.

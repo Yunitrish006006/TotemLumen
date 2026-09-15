@@ -7,6 +7,7 @@ This file is the repository index for design plans and decision tables. Architec
 | Whole project architecture | [`ARCHITECTURE.md`](ARCHITECTURE.md) | Vulkan/client vs common/server boundaries, authority model, package direction |
 | Renderer phases | [`ROADMAP.md`](ROADMAP.md) | P0+ renderer milestones and runtime validation gates |
 | P14C generic block models | [`P14C_GENERIC_BLOCK_MODELS.md`](P14C_GENERIC_BLOCK_MODELS.md) | static BlockStateModel quad extraction, generic mesh ABI/GPU layout, geometry-domain completeness matrix and future-proofing rules |
+| P14D block-entity geometry | [`P14D_BLOCK_ENTITY_GEOMETRY.md`](P14D_BLOCK_ENTITY_GEOMETRY.md) | renderer submit capture, static+BE composition, stable mutable mesh ids, model-tail updates, lifecycle and runtime gates |
 | P16 reflection / roughness | [`P16_REFLECTION_ROUGHNESS.md`](P16_REFLECTION_ROUGHNESS.md) | surface fallback values, 32-bit voxel packing, Fresnel/reflection model, performance scope and runtime validation |
 | P16 MoltenVK startup stalls | [`P16_MOLTENVK_PIPELINE_STALL.md`](P16_MOLTENVK_PIPELINE_STALL.md) | Alpha 34/35 runtime stalls, non-blocking pipeline prewarm and why waiting/cache alone is insufficient |
 | P16 multi-pass split | [`P16_MULTIPASS_SPLIT.md`](P16_MULTIPASS_SPLIT.md) | Alpha 36 pass boundaries, shared-SSBO synchronization, independent reflection readiness, shader compile policy and fallback semantics |
@@ -25,10 +26,17 @@ This file is the repository index for design plans and decision tables. Architec
 | Full-cube performance | detect canonical unit cubes and keep the established full-cube fast path |
 | Generic geometry consumers | one shared P14 trace path for camera, shadows, GI, P13 sky, P15 transmission and P16 reflection |
 | Model reload policy | retain old mesh ids while populated sections are refreshed through the bounded background extraction queue |
-| Special/block-entity geometry | separate renderer domain; outline fallback is not considered full completion |
-| Fluid geometry | separate renderer domain; exact flowing/sloped surfaces remain pending |
+| P14C runtime gate | static/chunk `BlockStateModel` representative shapes passed Apple M4 runtime validation in Alpha 38; Bell exposed the separate block-entity renderer domain |
+| Block-entity geometry source | capture renderer-resolved `Model` / `ModelPart` submissions inside `BlockEntityRenderDispatcher`; never retain mutable Minecraft render/model objects |
+| Block-entity composition | renderer geometry supplements rather than replaces the owning block's P14C/static geometry |
+| Animated block-entity meshes | one stable mutable mesh id per loaded `(dimension, block position)`; animation replaces the payload behind that id rather than allocating new ids |
+| Block-entity GPU updates | registry revision may repack/copy only the shared scene-SSBO model tail; section voxel data stays unchanged after the initial geometry-code switch |
+| Block-entity lifecycle | recycle dynamic ids on chunk unload and client-level changes |
+| Specialized BE commands | Model/ModelPart is the generic P14D baseline; text/item/beam/portal/custom command families require explicit adapters rather than being claimed complete |
+| Out-of-cell BE geometry | requires a later instance-bounds/broad-phase extension; owner-voxel DDA is not sufficient for arbitrary protruding models |
+| Fluid geometry | separate renderer domain; exact flowing/sloped surfaces remain pending after P14D |
 | Alpha-cutout geometry | emitted planes are represented; texture-alpha silhouette testing remains pending material integration |
-| Out-of-cell / random-offset models | require instance/broad-phase follow-up; do not destroy mesh dedup by baking position into every mesh id |
+| Out-of-cell / random-offset static models | require instance/broad-phase follow-up; do not destroy mesh dedup by baking position into every mesh id |
 | Reflection baseline | one bounded secondary reflection ray in GI Composite |
 | Roughness | 4-bit full-cube fallback profile; deterministic rough reflection direction |
 | Metallic | 4-bit full-cube fallback profile; metallic F0 tint |
@@ -38,16 +46,16 @@ This file is the repository index for design plans and decision tables. Architec
 | Glass interface reflection | deferred until refraction/Fresnel interface transport |
 | Specular recursion | excluded from P16 |
 | Surface source of truth | built-in fallback now; resource-pack/LabPBR later |
-| Voxel memory growth | none for per-voxel records; P14C appends a shared scene mesh pool rather than widening voxels |
+| Voxel memory growth | none for per-voxel records; P14C/P14D share the scene mesh pool rather than widening voxels |
 | Base compute pipeline | P12-P15 only; renderer readiness must not depend on reflection compilation |
 | Reflection compute pipeline | independent P16 pass over the same scene SSBO, dispatched before the existing buffer-to-image copy |
 | Pass synchronization | compute shader-write -> shader-read/write SSBO barrier between base and reflection dispatches |
-| Base GLSL -> SPIR-V | background shaderc prewarm at O0; Alpha 36 CI baseline 157,952 bytes |
-| Reflection GLSL -> SPIR-V | dedicated worker at O0; Alpha 36 CI baseline 107,128 bytes |
+| Base GLSL -> SPIR-V | background shaderc prewarm at O0; current P14C production source is verified in CI |
+| Reflection GLSL -> SPIR-V | dedicated worker at O0; current P14C production source is verified in CI |
 | P16 shaderc performance optimization | rejected for current split source: produced 1,515,084-byte SPIR-V and about 20 s CI compile time |
 | SPIR-V -> driver pipeline | background Vulkan pipeline work; never block the Minecraft render thread |
 | Reflection failure policy | keep P12-P15 renderer active; disable only P16 reflection for that resource generation |
-| MoltenVK/Vulkan pipeline cache | Alpha 38 persists driver/device-keyed opaque `VkPipelineCache` data; cache remains an optimization, never a correctness dependency |
+| MoltenVK/Vulkan pipeline cache | Alpha 38 persists driver/device-keyed opaque `VkPipelineCache` data; Apple M4 cache-hit runtime measured base 49 ms and P16 73 ms; cache remains an optimization, never a correctness dependency |
 | Future shader growth | prefer bounded additional passes over rebuilding a P12+ monolithic mega-shader |
 | Optimization policy | measure Apple/MoltenVK runtime cost before changing ray count/sampling |
 
