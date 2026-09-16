@@ -50,7 +50,11 @@ public final class P14ShaderCompileVerifier {
         requireSourceMarker(source, "float p13MoonStrength(vec3 moonDirection)", "moon horizon gating");
         requireSourceMarker(source, "float p13MoonDisk(vec3 direction, vec3 moonDirection)", "moon disk");
         requireSourceMarker(source, "vec3 moon = p13MoonColor()", "moon surface lighting");
-        System.out.println("P13 moon shader verification PASS: disk=true, coldDirectionalLight=true, oppositeSun=true");
+        requireSourceMarker(source, "vec3 moonTransmission = vec3(0.0);", "P15 moon transmission");
+        System.out.println(
+                "P13 moon shader verification PASS: disk=true, coldDirectionalLight=true, "
+                        + "oppositeSun=true, p15Transmission=true"
+        );
     }
 
     private static void requireSourceMarker(String source, String marker, String label) {
