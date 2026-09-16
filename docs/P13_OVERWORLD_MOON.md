@@ -13,32 +13,39 @@ Alpha 40 adds a procedural moon to the existing P13 environment helpers rather t
 - `p13MoonDisk()` renders a bounded procedural disk. A small low-intensity halo avoids a one-pixel-looking celestial object at the current low render resolution.
 - Moon RGB is intentionally cool and substantially weaker than the sun.
 - `p13EnvironmentSurfaceRadiance()` traces moon visibility independently from sun visibility. A blocked moon ray contributes no direct moon term.
-- GI bounce misses continue to call `p13SkyRadiance()`, so the moon disk can appear in indirect environment samples.
+- GI bounce misses continue to call `p13SkyRadiance()`, so the moon can appear in indirect environment samples.
 - P16's split reflection shader imports the same P13 helper span, so reflections see the same moon/environment definition without a separate moon implementation.
+
+## Minecraft lunar phase integration
+
+Alpha 40 now carries Minecraft 26.2's resolved eight-step lunar phase all the way from extraction into the P13 shader.
+
+- `P13EnvironmentCapture` reads `EnvironmentAttributes.MOON_PHASE` from the client level's resolved dimension environment attributes and stores `MoonPhase.index()`.
+- The phase order matches Minecraft's `MoonPhase` enum: full moon, waning gibbous, third quarter, waning crescent, new moon, waxing crescent, first quarter, waxing gibbous.
+- The GPU-visible environment word remains 32 bits: 2 dimension bits, 11 time-of-day bits, 3 lunar-phase bits and the original 16-bit stochastic frame seed.
+- Reducing time-of-day from 14 to 11 bits gives 2,048 positions around the 24,000-tick day, or about 11.7 ticks per step. This is far below a visually meaningful celestial jump while preserving the full GI seed range.
+- `p13MoonPhaseMask()` projects the moon disk onto a procedural sphere and uses a curved terminator to produce crescent, quarter and gibbous silhouettes. New moon suppresses the visible disk; full moon leaves the complete disk visible.
+- `p13MoonPhaseBrightness()` uses the eight-step factors `1.0, 0.75, 0.5, 0.25, 0.0, 0.25, 0.5, 0.75` for halo and directional moonlight intensity. The visible lit portion of the disk keeps its local surface brightness rather than being dimmed twice.
+- The phase is visual/environment state only. The moon direction remains opposite the sun, matching the existing P13 celestial path rather than attempting a physically simulated Earth-Moon orbit.
 
 ## Performance scope
 
-At a given Overworld time, the sun and moon are opposite. The direct-light path therefore normally launches one celestial visibility ray: a sun ray in daytime or a moon ray at night. Near horizon transitions both strengths approach zero, so the guards suppress negligible rays.
+At a given Overworld time, the sun and moon are opposite. The direct-light path therefore normally launches one celestial visibility ray: a sun ray in daytime or a moon ray at night. Near horizon transitions both strengths approach zero, and at new moon the phase brightness is zero, so the existing guards suppress negligible moon rays.
 
-The moon change does not widen the voxel ABI, add a texture, allocate a new Vulkan resource, or create another compute pass.
-
-## Known limitation: lunar phases
-
-Alpha 40 deliberately renders a full moon disk whenever the moon is above the horizon. The current GPU-visible environment word stores dimension family, normalized time-of-day phase, and stochastic frame seed; it does not contain the Minecraft day index / 8-step lunar phase.
-
-A later lunar-phase follow-up should explicitly add phase state rather than stealing stochastic seed bits or pretending a brightness-only approximation is equivalent to Minecraft's phase texture.
+The lunar-phase change does not widen the voxel ABI, add a texture, allocate a new Vulkan resource, or create another compute pass. The phase mask is analytic shader math and the full 16-bit temporal/GI stochastic seed remains available.
 
 ## Runtime validation gate
 
-On an Overworld clear night in `GI Composite`:
+On the Overworld in `GI Composite`:
 
-1. the moon must be visible in the sky near midnight;
-2. its path must be opposite the daytime sun path;
-3. the moon must disappear below the horizon during daytime;
-4. exposed surfaces should receive a weak cool directional term at night, visibly much dimmer than daytime sun;
-5. roofs/walls should occlude the direct moon term without causing night-sky ambient to leak through sealed spaces;
-6. reflective surfaces should be able to pick up the moon/environment through the existing P16 reflection pass;
-7. no shaderc, Vulkan or MoltenVK errors should appear;
-8. daytime sun brightness and direction should remain unchanged from Alpha 39.
+1. verify eight consecutive Minecraft lunar phases produce distinct full/gibbous/quarter/crescent/new silhouettes in the expected order;
+2. verify full moon uses the existing Alpha 40 disk size and brightness while new moon has no visible bright disk;
+3. verify waning and waxing quarters illuminate opposite halves of the disk;
+4. compare exposed surfaces at full, quarter, crescent and new moon and confirm directional moonlight decreases with the phase factor and reaches zero at new moon;
+5. confirm the moon path remains opposite the daytime sun path and disappears below the horizon during daytime;
+6. confirm roofs/walls and P15 clear/stained glass still occlude/filter direct moonlight correctly at non-new phases;
+7. confirm reflective surfaces pick up the phase-shaped moon/environment through the existing P16 reflection pass;
+8. hold the camera still and confirm GI convergence remains stable, demonstrating that the full 16-bit stochastic seed path was preserved;
+9. confirm no shaderc, Vulkan or MoltenVK errors appear and daytime sun behavior remains visually unchanged.
 
-CI validates the P13 moon helper markers and compiles both production compute shaders. In-game visual correctness remains a runtime gate.
+CI validates the packed environment layout, P13 lunar-phase helper markers and production compute shader compilation. In-game silhouette orientation, transport and visual quality remain runtime gates.
