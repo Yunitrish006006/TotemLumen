@@ -74,7 +74,7 @@ public final class P14ShaderCompileVerifier {
             Shaderc.shaderc_compile_options_set_optimization_level(options, Shaderc.shaderc_optimization_level_zero);
             System.out.println(label + " verification START: chars=" + source.length() + ", optimization=O0");
 
-            long result = Shaderc.shaderc_compile_into_spv(
+            long result = ShadercNativeHeap.compileIntoSpv(
                     compiler,
                     source,
                     Shaderc.shaderc_compute_shader,
