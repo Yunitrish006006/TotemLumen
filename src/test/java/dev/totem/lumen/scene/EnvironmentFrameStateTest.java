@@ -18,39 +18,50 @@ class EnvironmentFrameStateTest {
     }
 
     @Test
-    void quantizesTheMinecraftDayCycleIntoFourteenBits() {
-        assertEquals(0, EnvironmentFrameState.dayPhase14(0));
-        assertEquals(4096, EnvironmentFrameState.dayPhase14(6000));
-        assertEquals(8192, EnvironmentFrameState.dayPhase14(12000));
-        assertEquals(12288, EnvironmentFrameState.dayPhase14(18000));
-        assertEquals(0, EnvironmentFrameState.dayPhase14(24000));
-        assertEquals(12288, EnvironmentFrameState.dayPhase14(-6000));
+    void quantizesTheMinecraftDayCycleIntoElevenBits() {
+        assertEquals(0, EnvironmentFrameState.dayPhase11(0));
+        assertEquals(512, EnvironmentFrameState.dayPhase11(6000));
+        assertEquals(1024, EnvironmentFrameState.dayPhase11(12000));
+        assertEquals(1536, EnvironmentFrameState.dayPhase11(18000));
+        assertEquals(0, EnvironmentFrameState.dayPhase11(24000));
+        assertEquals(1536, EnvironmentFrameState.dayPhase11(-6000));
     }
 
     @Test
-    void packsDimensionDayPhaseAndFrameSeedWithoutLosingCpuSequence() {
+    void packsDimensionDayPhaseMoonPhaseAndFullFrameSeedWithoutLosingCpuSequence() {
         long sequence = 0x1234_5678L;
-        EnvironmentFrameState.capture("minecraft:overworld", 6000L);
+        EnvironmentFrameState.capture("minecraft:overworld", 6000L, 6);
 
         long packed = EnvironmentFrameState.packFrameIndex(sequence, "minecraft:overworld");
 
         assertEquals(sequence, packed >>> 32);
         assertEquals(EnvironmentFrameState.DIMENSION_OVERWORLD,
                 EnvironmentFrameState.gpuDimensionCode(packed));
-        assertEquals(4096, EnvironmentFrameState.gpuDayPhase14(packed));
+        assertEquals(512, EnvironmentFrameState.gpuDayPhase11(packed));
+        assertEquals(6, EnvironmentFrameState.gpuMoonPhase(packed));
         assertEquals((int) sequence & 0xFFFF, EnvironmentFrameState.gpuFrameSeed(packed));
     }
 
     @Test
-    void doesNotReuseDayPhaseAcrossDimensionMismatch() {
+    void doesNotReuseEnvironmentStateAcrossDimensionMismatch() {
         long sequence = 17L;
-        EnvironmentFrameState.capture("minecraft:overworld", 6000L);
+        EnvironmentFrameState.capture("minecraft:overworld", 6000L, 7);
 
         long packed = EnvironmentFrameState.packFrameIndex(sequence, "minecraft:the_nether");
 
         assertEquals(EnvironmentFrameState.DIMENSION_NETHER,
                 EnvironmentFrameState.gpuDimensionCode(packed));
-        assertEquals(0, EnvironmentFrameState.gpuDayPhase14(packed));
+        assertEquals(0, EnvironmentFrameState.gpuDayPhase11(packed));
+        assertEquals(0, EnvironmentFrameState.gpuMoonPhase(packed));
         assertEquals(17, EnvironmentFrameState.gpuFrameSeed(packed));
+    }
+
+    @Test
+    void masksMoonPhaseToThreeBits() {
+        EnvironmentFrameState.capture("minecraft:overworld", 0L, 13);
+
+        long packed = EnvironmentFrameState.packFrameIndex(1L, "minecraft:overworld");
+
+        assertEquals(5, EnvironmentFrameState.gpuMoonPhase(packed));
     }
 }
