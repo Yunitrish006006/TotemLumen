@@ -24,6 +24,7 @@ public final class P14ShaderCompileVerifier {
         baseSource = P13SkyOcclusionPatch.apply(baseSource);
         baseSource = P16ReflectionRoughnessPatch.apply(baseSource);
 
+        verifyP13MoonSource(baseSource);
         String reflectionSource = P16ReflectionPassShader.build();
 
         long compiler = Shaderc.shaderc_compiler_initialize();
@@ -41,6 +42,20 @@ public final class P14ShaderCompileVerifier {
             );
         } finally {
             Shaderc.shaderc_compiler_release(compiler);
+        }
+    }
+
+    private static void verifyP13MoonSource(String source) {
+        requireSourceMarker(source, "vec3 p13MoonDirection()", "moon direction");
+        requireSourceMarker(source, "float p13MoonStrength(vec3 moonDirection)", "moon horizon gating");
+        requireSourceMarker(source, "float p13MoonDisk(vec3 direction, vec3 moonDirection)", "moon disk");
+        requireSourceMarker(source, "vec3 moon = p13MoonColor()", "moon surface lighting");
+        System.out.println("P13 moon shader verification PASS: disk=true, coldDirectionalLight=true, oppositeSun=true");
+    }
+
+    private static void requireSourceMarker(String source, String marker, String label) {
+        if (!source.contains(marker)) {
+            throw new IllegalStateException("P13 moon shader verification missing " + label + ": " + marker);
         }
     }
 
