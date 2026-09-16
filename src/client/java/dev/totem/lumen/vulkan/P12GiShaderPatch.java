@@ -7,9 +7,10 @@ import dev.totem.lumen.TotemLumenClient;
  *
  * <p>P12 keeps direct/local light outside the stochastic GI history and progressively accumulates
  * only indirect radiance. P13 layers dimension-aware environment lighting on that stable path:
- * Overworld gets a time-of-day sun/sky model, Nether and End get distinct ambient environments,
- * primary sky misses expose environment radiance, and GI bounce misses can sample the environment.
- * The transform is intentionally strict and fails fast if the expected source markers change.</p>
+ * Overworld gets a time-of-day sun/moon/sky model, Nether and End get distinct ambient
+ * environments, primary sky misses expose environment radiance, and GI bounce misses can sample
+ * the environment. The transform is intentionally strict and fails fast if the expected source
+ * markers change.</p>
  */
 final class P12GiShaderPatch {
     static final int SAMPLES_PER_FRAME = 2;
@@ -56,6 +57,24 @@ final class P12GiShaderPatch {
                     );
                 }
 
+                vec3 p13MoonDirection() {
+                    return -p13SunDirection();
+                }
+
+                float p13MoonStrength(vec3 moonDirection) {
+                    return smoothstep(0.0, 0.12, moonDirection.y);
+                }
+
+                vec3 p13MoonColor() {
+                    return vec3(0.58, 0.70, 1.0);
+                }
+
+                float p13MoonDisk(vec3 direction, vec3 moonDirection) {
+                    float moonDot = max(dot(normalize(direction), moonDirection), 0.0);
+                    float disk = smoothstep(0.9955, 0.9985, moonDot);
+                    return disk * p13MoonStrength(moonDirection);
+                }
+
                 vec3 p13SkyRadiance(vec3 direction) {
                     uint environment = p13EnvironmentCode();
                     vec3 dir = normalize(direction);
@@ -63,6 +82,7 @@ final class P12GiShaderPatch {
 
                     if (environment == 0u) {
                         vec3 sunDirection = p13SunDirection();
+                        vec3 moonDirection = p13MoonDirection();
                         float daylight = smoothstep(-0.18, 0.08, sunDirection.y);
                         vec3 dayHorizon = vec3(0.38, 0.46, 0.58);
                         vec3 dayZenith = vec3(0.09, 0.30, 0.68);
@@ -74,7 +94,12 @@ final class P12GiShaderPatch {
 
                         float sunDot = max(dot(dir, sunDirection), 0.0);
                         float sunDisk = pow(sunDot, 640.0) * p13SunStrength(sunDirection) * 2.0;
-                        return sky + p13SunColor(sunDirection) * sunDisk;
+                        float moonDisk = p13MoonDisk(dir, moonDirection);
+                        float moonGlow = pow(max(dot(dir, moonDirection), 0.0), 96.0)
+                                * p13MoonStrength(moonDirection) * 0.045;
+                        return sky
+                                + p13SunColor(sunDirection) * sunDisk
+                                + p13MoonColor() * (moonDisk * 0.72 + moonGlow);
                     }
                     if (environment == 1u) {
                         return vec3(0.105, 0.024, 0.010) * (0.82 + 0.18 * up);
@@ -108,10 +133,22 @@ final class P12GiShaderPatch {
                             visibility = blocker.hit == 0u ? 1.0 : 0.0;
                         }
 
+                        vec3 moonDirection = p13MoonDirection();
+                        float moonNDotL = max(dot(normal, moonDirection), 0.0);
+                        float moonStrength = p13MoonStrength(moonDirection);
+                        float moonVisibility = 0.0;
+                        if (moonNDotL > 0.0 && moonStrength > 0.0001) {
+                            vec3 moonShadowOrigin = hitPoint + normal * 0.025 + moonDirection * 0.01;
+                            HitResult moonBlocker = traceRay(moonShadowOrigin, moonDirection);
+                            moonVisibility = moonBlocker.hit == 0u ? 1.0 : 0.0;
+                        }
+
                         vec3 skyAmbient = p13SkyRadiance(normal) * 0.62;
                         vec3 sun = p13SunColor(sunDirection)
                                 * (0.92 * nDotL * visibility * sunStrength);
-                        return albedo * (skyAmbient + sun) + emitted;
+                        vec3 moon = p13MoonColor()
+                                * (0.08 * moonNDotL * moonVisibility * moonStrength);
+                        return albedo * (skyAmbient + sun + moon) + emitted;
                     }
                     if (environment == 1u) {
                         float facing = 0.70 + 0.30 * max(normal.y, 0.0);
@@ -290,7 +327,7 @@ final class P12GiShaderPatch {
                 SAMPLE_PEAK_CLAMP
         );
         TotemLumenClient.LOGGER.info(
-                "P13 environment lighting patch active: dynamicOverworldSun=true, skyMissRadiance=true, dimensions=overworld+nether+end+fallback"
+                "P13 environment lighting patch active: dynamicOverworldSun=true, dynamicOverworldMoon=true, moonPhase=false, skyMissRadiance=true, dimensions=overworld+nether+end+fallback"
         );
         return source;
     }

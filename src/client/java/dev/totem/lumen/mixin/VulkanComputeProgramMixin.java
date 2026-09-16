@@ -2,6 +2,7 @@ package dev.totem.lumen.mixin;
 
 import com.mojang.blaze3d.vulkan.VulkanDevice;
 import dev.totem.lumen.vulkan.P16MultipassReflection;
+import dev.totem.lumen.vulkan.ShadercNativeHeap;
 import dev.totem.lumen.vulkan.VulkanComputeProgram;
 import dev.totem.lumen.vulkan.resource.VulkanOwnedBuffer;
 import org.lwjgl.util.shaderc.Shaderc;
@@ -11,7 +12,10 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
-/** Starts the independent P16 pipeline and keeps its split shader on the proven O0 shaderc path. */
+/**
+ * Starts the independent P16 pipeline, keeps its split shader on the proven O0 shaderc path, and
+ * keeps large transformed GLSL source strings off LWJGL's bounded MemoryStack.
+ */
 @Mixin(value = VulkanComputeProgram.class, remap = false)
 public abstract class VulkanComputeProgramMixin {
     private static final String MAIN_GI_SHADER = "totem_lumen_p12_one_bounce_gi.comp";
@@ -42,5 +46,30 @@ public abstract class VulkanComputeProgramMixin {
                 ? Shaderc.shaderc_optimization_level_zero
                 : requestedLevel;
         Shaderc.shaderc_compile_options_set_optimization_level(options, effectiveLevel);
+    }
+
+    @Redirect(
+            method = "compileShaderBytes",
+            at = @At(
+                    value = "INVOKE",
+                    target = "Lorg/lwjgl/util/shaderc/Shaderc;shaderc_compile_into_spv(JLjava/lang/CharSequence;ILjava/lang/CharSequence;Ljava/lang/CharSequence;J)J"
+            )
+    )
+    private static long totemLumen$compileLargeSourceOffStack(
+            long compiler,
+            CharSequence sourceText,
+            int shaderKind,
+            CharSequence inputFileName,
+            CharSequence entryPointName,
+            long options
+    ) {
+        return ShadercNativeHeap.compileIntoSpv(
+                compiler,
+                sourceText,
+                shaderKind,
+                inputFileName,
+                entryPointName,
+                options
+        );
     }
 }

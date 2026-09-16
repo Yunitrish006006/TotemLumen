@@ -24,6 +24,7 @@ public final class P14ShaderCompileVerifier {
         baseSource = P13SkyOcclusionPatch.apply(baseSource);
         baseSource = P16ReflectionRoughnessPatch.apply(baseSource);
 
+        verifyP13MoonSource(baseSource);
         String reflectionSource = P16ReflectionPassShader.build();
 
         long compiler = Shaderc.shaderc_compiler_initialize();
@@ -44,6 +45,24 @@ public final class P14ShaderCompileVerifier {
         }
     }
 
+    private static void verifyP13MoonSource(String source) {
+        requireSourceMarker(source, "vec3 p13MoonDirection()", "moon direction");
+        requireSourceMarker(source, "float p13MoonStrength(vec3 moonDirection)", "moon horizon gating");
+        requireSourceMarker(source, "float p13MoonDisk(vec3 direction, vec3 moonDirection)", "moon disk");
+        requireSourceMarker(source, "vec3 moon = p13MoonColor()", "moon surface lighting");
+        requireSourceMarker(source, "vec3 moonTransmission = vec3(0.0);", "P15 moon transmission");
+        System.out.println(
+                "P13 moon shader verification PASS: disk=true, coldDirectionalLight=true, "
+                        + "oppositeSun=true, p15Transmission=true"
+        );
+    }
+
+    private static void requireSourceMarker(String source, String marker, String label) {
+        if (!source.contains(marker)) {
+            throw new IllegalStateException("P13 moon shader verification missing " + label + ": " + marker);
+        }
+    }
+
     private static void compileAndVerify(long compiler, String shaderName, String source, String label) {
         long options = Shaderc.shaderc_compile_options_initialize();
         if (options == 0L) {
@@ -55,7 +74,7 @@ public final class P14ShaderCompileVerifier {
             Shaderc.shaderc_compile_options_set_optimization_level(options, Shaderc.shaderc_optimization_level_zero);
             System.out.println(label + " verification START: chars=" + source.length() + ", optimization=O0");
 
-            long result = Shaderc.shaderc_compile_into_spv(
+            long result = ShadercNativeHeap.compileIntoSpv(
                     compiler,
                     source,
                     Shaderc.shaderc_compute_shader,

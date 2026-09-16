@@ -6,8 +6,8 @@ import dev.totem.lumen.TotemLumenClient;
  * P15A glass transmission baseline layered after P13/P14 correctness patches.
  *
  * <p>Clear/stained glass metadata is encoded in spare geometry bits. This patch filters camera,
- * sun, sky, local-light and GI rays through up to eight transmissive voxels, accumulating RGB tint
- * and attenuation without growing the 32-bit voxel ABI. Refraction/Fresnel remain future work.</p>
+ * sun, moon, sky, local-light and GI rays through up to eight transmissive voxels, accumulating RGB
+ * tint and attenuation without growing the 32-bit voxel ABI. Refraction/Fresnel remain future work.</p>
  */
 final class P15GlassTransmissionPatch {
     private P15GlassTransmissionPatch() {
@@ -170,7 +170,7 @@ final class P15GlassTransmissionPatch {
                 """;
         source = replaceRequiredOnce(source, oldSkyVisibility, newSkyVisibility, "colored sky transmission");
 
-        String oldSunVisibility = """
+        String oldCelestialVisibility = """
                         float visibility = 0.0;
                         if (nDotL > 0.0 && sunStrength > 0.0001) {
                             vec3 shadowOrigin = hitPoint + normal * 0.025 + sunDirection * 0.01;
@@ -178,11 +178,23 @@ final class P15GlassTransmissionPatch {
                             visibility = blocker.hit == 0u ? 1.0 : 0.0;
                         }
 
+                        vec3 moonDirection = p13MoonDirection();
+                        float moonNDotL = max(dot(normal, moonDirection), 0.0);
+                        float moonStrength = p13MoonStrength(moonDirection);
+                        float moonVisibility = 0.0;
+                        if (moonNDotL > 0.0 && moonStrength > 0.0001) {
+                            vec3 moonShadowOrigin = hitPoint + normal * 0.025 + moonDirection * 0.01;
+                            HitResult moonBlocker = traceRay(moonShadowOrigin, moonDirection);
+                            moonVisibility = moonBlocker.hit == 0u ? 1.0 : 0.0;
+                        }
+
                         vec3 skyAmbient = p13SkyRadiance(normal) * (0.62 * p13SkyVisibility(hitPoint, normal));
                         vec3 sun = p13SunColor(sunDirection)
                                 * (0.92 * nDotL * visibility * sunStrength);
+                        vec3 moon = p13MoonColor()
+                                * (0.08 * moonNDotL * moonVisibility * moonStrength);
                 """;
-        String newSunVisibility = """
+        String newCelestialVisibility = """
                         vec3 sunTransmission = vec3(0.0);
                         if (nDotL > 0.0 && sunStrength > 0.0001) {
                             vec3 shadowOrigin = hitPoint + normal * 0.025 + sunDirection * 0.01;
@@ -193,12 +205,33 @@ final class P15GlassTransmissionPatch {
                             );
                         }
 
+                        vec3 moonDirection = p13MoonDirection();
+                        float moonNDotL = max(dot(normal, moonDirection), 0.0);
+                        float moonStrength = p13MoonStrength(moonDirection);
+                        vec3 moonTransmission = vec3(0.0);
+                        if (moonNDotL > 0.0 && moonStrength > 0.0001) {
+                            vec3 moonShadowOrigin = hitPoint + normal * 0.025 + moonDirection * 0.01;
+                            moonTransmission = p15RayTransmission(
+                                moonShadowOrigin,
+                                moonDirection,
+                                uintBitsToFloat(scene.data[7])
+                            );
+                        }
+
                         vec3 skyAmbient = p13SkyRadiance(normal) * (0.62 * p13SkyVisibility(hitPoint, normal));
                         vec3 sun = p13SunColor(sunDirection)
                                 * sunTransmission
                                 * (0.92 * nDotL * sunStrength);
+                        vec3 moon = p13MoonColor()
+                                * moonTransmission
+                                * (0.08 * moonNDotL * moonStrength);
                 """;
-        source = replaceRequiredOnce(source, oldSunVisibility, newSunVisibility, "sun transmission");
+        source = replaceRequiredOnce(
+                source,
+                oldCelestialVisibility,
+                newCelestialVisibility,
+                "sun/moon transmission"
+        );
 
         String oldBounce = """
                     HitResult bounceHit = traceRayLimited(bounceOrigin, bounceDirection, GI_MAX_DISTANCE);
@@ -263,7 +296,7 @@ final class P15GlassTransmissionPatch {
         source = patchGiCompositeCall(source);
 
         TotemLumenClient.LOGGER.info(
-                "P15 glass transmission active: clearGlass=true, stainedGlassRgb=true, panes=true, maxTransparentLayers=8, sun+sky+local+GI=true, refraction=false"
+                "P15 glass transmission active: clearGlass=true, stainedGlassRgb=true, panes=true, maxTransparentLayers=8, sun+moon+sky+local+GI=true, refraction=false"
         );
         return source;
     }
