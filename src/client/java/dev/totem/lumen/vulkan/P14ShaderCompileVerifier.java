@@ -46,14 +46,18 @@ public final class P14ShaderCompileVerifier {
     }
 
     private static void verifyP13MoonSource(String source) {
+        requireSourceMarker(source, "uint p13MoonPhase()", "packed moon phase");
+        requireSourceMarker(source, "float p13MoonPhaseBrightness()", "phase-weighted moonlight");
+        requireSourceMarker(source, "float p13MoonPhaseMask(vec3 direction, vec3 moonDirection)", "phase silhouette");
         requireSourceMarker(source, "vec3 p13MoonDirection()", "moon direction");
-        requireSourceMarker(source, "float p13MoonStrength(vec3 moonDirection)", "moon horizon gating");
+        requireSourceMarker(source, "float p13MoonStrength(vec3 moonDirection)", "moon horizon/phase gating");
         requireSourceMarker(source, "float p13MoonDisk(vec3 direction, vec3 moonDirection)", "moon disk");
         requireSourceMarker(source, "vec3 moon = p13MoonColor()", "moon surface lighting");
         requireSourceMarker(source, "vec3 moonTransmission = vec3(0.0);", "P15 moon transmission");
+        requireSourceMarker(source, "return scene.data[41] & 0xFFFFu;", "full stochastic frame seed");
         System.out.println(
-                "P13 moon shader verification PASS: disk=true, coldDirectionalLight=true, "
-                        + "oppositeSun=true, p15Transmission=true"
+                "P13 moon shader verification PASS: disk=true, phaseSteps=8, coldDirectionalLight=true, "
+                        + "oppositeSun=true, fullFrameSeed=true, p15Transmission=true"
         );
     }
 
