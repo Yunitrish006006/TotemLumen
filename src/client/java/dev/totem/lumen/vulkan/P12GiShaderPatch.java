@@ -32,7 +32,11 @@ final class P12GiShaderPatch {
                 }
 
                 float p13DayPhase() {
-                    return float((scene.data[41] >> 16u) & 0x3FFFu) / 16384.0;
+                    return float((scene.data[41] >> 19u) & 0x07FFu) / 2048.0;
+                }
+
+                uint p13MoonPhase() {
+                    return (scene.data[41] >> 16u) & 0x7u;
                 }
 
                 uint p13FrameSeed() {
@@ -61,18 +65,51 @@ final class P12GiShaderPatch {
                     return -p13SunDirection();
                 }
 
-                float p13MoonStrength(vec3 moonDirection) {
+                float p13MoonPhaseBrightness() {
+                    uint phase = p13MoonPhase();
+                    uint distanceFromFull = min(phase, 8u - phase);
+                    return 1.0 - float(distanceFromFull) * 0.25;
+                }
+
+                float p13MoonHorizonStrength(vec3 moonDirection) {
                     return smoothstep(0.0, 0.12, moonDirection.y);
+                }
+
+                float p13MoonStrength(vec3 moonDirection) {
+                    return p13MoonHorizonStrength(moonDirection) * p13MoonPhaseBrightness();
                 }
 
                 vec3 p13MoonColor() {
                     return vec3(0.58, 0.70, 1.0);
                 }
 
+                float p13MoonPhaseMask(vec3 direction, vec3 moonDirection) {
+                    uint phase = p13MoonPhase();
+                    if (phase == 0u) return 1.0;
+                    if (phase == 4u) return 0.0;
+
+                    vec3 dir = normalize(direction);
+                    vec3 moonRight = normalize(cross(vec3(0.0, 0.0, 1.0), moonDirection));
+                    vec3 moonUp = normalize(cross(moonDirection, moonRight));
+                    const float diskEdgeDot = 0.9955;
+                    float diskRadius = sqrt(max(1.0 - diskEdgeDot * diskEdgeDot, 0.000001));
+                    float x = clamp(dot(dir, moonRight) / diskRadius, -1.0, 1.0);
+                    float y = clamp(dot(dir, moonUp) / diskRadius, -1.0, 1.0);
+                    float radiusSquared = x * x + y * y;
+                    if (radiusSquared > 1.0) return 0.0;
+
+                    float sphereZ = sqrt(max(1.0 - radiusSquared, 0.0));
+                    float phaseAngle = float(phase) * 0.78539816339;
+                    float illumination = sphereZ * cos(phaseAngle) - x * sin(phaseAngle);
+                    return smoothstep(-0.025, 0.025, illumination);
+                }
+
                 float p13MoonDisk(vec3 direction, vec3 moonDirection) {
                     float moonDot = max(dot(normalize(direction), moonDirection), 0.0);
                     float disk = smoothstep(0.9955, 0.9985, moonDot);
-                    return disk * p13MoonStrength(moonDirection);
+                    return disk
+                            * p13MoonPhaseMask(direction, moonDirection)
+                            * p13MoonHorizonStrength(moonDirection);
                 }
 
                 vec3 p13SkyRadiance(vec3 direction) {
@@ -327,7 +364,7 @@ final class P12GiShaderPatch {
                 SAMPLE_PEAK_CLAMP
         );
         TotemLumenClient.LOGGER.info(
-                "P13 environment lighting patch active: dynamicOverworldSun=true, dynamicOverworldMoon=true, moonPhase=false, skyMissRadiance=true, dimensions=overworld+nether+end+fallback"
+                "P13 environment lighting patch active: dynamicOverworldSun=true, dynamicOverworldMoon=true, moonPhase=true, moonPhaseSteps=8, skyMissRadiance=true, dimensions=overworld+nether+end+fallback"
         );
         return source;
     }
