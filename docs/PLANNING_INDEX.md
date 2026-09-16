@@ -6,6 +6,7 @@ This file is the repository index for design plans and decision tables. Architec
 | --- | --- | --- |
 | Whole project architecture | [`ARCHITECTURE.md`](ARCHITECTURE.md) | Vulkan/client vs common/server boundaries, authority model, package direction |
 | Renderer phases | [`ROADMAP.md`](ROADMAP.md) | P0+ renderer milestones and runtime validation gates |
+| P13 Overworld moon | [`P13_OVERWORLD_MOON.md`](P13_OVERWORLD_MOON.md) | moon disk, opposite-sun celestial direction, moonlight visibility, phase limitation and runtime gate |
 | P14C generic block models | [`P14C_GENERIC_BLOCK_MODELS.md`](P14C_GENERIC_BLOCK_MODELS.md) | static BlockStateModel quad extraction, generic mesh ABI/GPU layout, geometry-domain completeness matrix and future-proofing rules |
 | P14D block-entity geometry | [`P14D_BLOCK_ENTITY_GEOMETRY.md`](P14D_BLOCK_ENTITY_GEOMETRY.md) | renderer submit capture, static+BE composition, stable mutable mesh ids, model-tail updates, lifecycle and runtime gates |
 | P16 reflection / roughness | [`P16_REFLECTION_ROUGHNESS.md`](P16_REFLECTION_ROUGHNESS.md) | surface fallback values, 32-bit voxel packing, Fresnel/reflection model, performance scope and runtime validation |
@@ -21,6 +22,11 @@ This file is the repository index for design plans and decision tables. Architec
 
 | Topic | Accepted direction |
 | --- | --- |
+| Overworld sun source | captured Overworld clock drives one procedural sun direction and sun disk in P13 |
+| Overworld moon source | moon direction is exactly the celestial opposite of the P13 sun direction and is horizon-gated independently |
+| Moon sky appearance | procedural full disk plus low-intensity halo in Alpha 40; no separate sky texture/resource/pass |
+| Moon surface lighting | weak cool directional term with the same ray-traced visibility semantics as sun lighting |
+| Lunar phase | explicitly deferred; current packed environment state has no day index / 8-step phase and stochastic seed bits are not repurposed |
 | Static block geometry source | resolved Minecraft/Fabric `BlockStateModel` emitted quads; block-id shape tables are not the general source of truth |
 | Generic static geometry ABI | `MODEL_MESH (0xA000)` with 12-bit deduplicated mesh id in the existing 32-bit voxel word |
 | Full-cube performance | detect canonical unit cubes and keep the established full-cube fast path |
@@ -50,8 +56,8 @@ This file is the repository index for design plans and decision tables. Architec
 | Base compute pipeline | P12-P15 only; renderer readiness must not depend on reflection compilation |
 | Reflection compute pipeline | independent P16 pass over the same scene SSBO, dispatched before the existing buffer-to-image copy |
 | Pass synchronization | compute shader-write -> shader-read/write SSBO barrier between base and reflection dispatches |
-| Base GLSL -> SPIR-V | background shaderc prewarm at O0; current P14C production source is verified in CI |
-| Reflection GLSL -> SPIR-V | dedicated worker at O0; current P14C production source is verified in CI |
+| Base GLSL -> SPIR-V | background shaderc prewarm at O0; current production source is verified in CI |
+| Reflection GLSL -> SPIR-V | dedicated worker at O0; current production source is verified in CI |
 | P16 shaderc performance optimization | rejected for current split source: produced 1,515,084-byte SPIR-V and about 20 s CI compile time |
 | SPIR-V -> driver pipeline | background Vulkan pipeline work; never block the Minecraft render thread |
 | Reflection failure policy | keep P12-P15 renderer active; disable only P16 reflection for that resource generation |
