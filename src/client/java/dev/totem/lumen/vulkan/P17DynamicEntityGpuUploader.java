@@ -8,6 +8,12 @@ import java.nio.ByteBuffer;
 
 /** Packs/copies the P17 dynamic-entity scene tail independently from static voxel payloads. */
 public final class P17DynamicEntityGpuUploader {
+    // P5 header words: 24=history read base, 26=previous-frame-valid flag. Entity movement/pose
+    // currently invalidates temporal reuse conservatively until P17 hit metadata is part of the
+    // per-pixel history validation contract.
+    private static final int HISTORY_READ_BASE_WORD = 24;
+    private static final int PREVIOUS_FRAME_VALID_WORD = 26;
+
     private static volatile long lastBaseByteOffset = -1L;
     private static volatile long lastCopyBytes;
     private static long lastPackedRevision = Long.MIN_VALUE;
@@ -30,6 +36,7 @@ public final class P17DynamicEntityGpuUploader {
         EntityRenderGeometryCache.SceneState state = EntityRenderGeometryCache.sceneState();
         if (state.revision() == lastPackedRevision) return false;
         packState(buffer, state);
+        invalidateHistoryRead(buffer);
         return true;
     }
 
@@ -78,6 +85,11 @@ public final class P17DynamicEntityGpuUploader {
                     GpuDynamicEntityScene.MAX_ENTITIES_PER_SECTION
             );
         }
+    }
+
+    private static void invalidateHistoryRead(ByteBuffer buffer) {
+        buffer.putInt(HISTORY_READ_BASE_WORD * Integer.BYTES, 0);
+        buffer.putInt(PREVIOUS_FRAME_VALID_WORD * Integer.BYTES, 0);
     }
 
     public static long lastBaseByteOffset() {
