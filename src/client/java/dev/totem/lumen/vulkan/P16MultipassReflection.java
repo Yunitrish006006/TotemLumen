@@ -46,11 +46,9 @@ public final class P16MultipassReflection {
         VulkanComputeProgram created = null;
         long startedAt = System.nanoTime();
         try {
-            String source = P17ShaderIntegration.apply(
-                    P14EFluidOpticsPatch.apply(
-                            P14EFluidShaderPatch.apply(P16ReflectionPassShader.build())
-                    )
-            );
+            String geometrySource = P14EFluidShaderPatch.apply(P16ReflectionPassShader.build());
+            String entitySource = P17ShaderIntegration.apply(geometrySource);
+            String source = P14EFluidOpticsPatch.apply(entitySource);
             TotemLumenClient.LOGGER.info(
                     "P16 split pipeline creation START: shader={}, sourceChars={}",
                     P16ReflectionPassShader.SHADER_NAME,
