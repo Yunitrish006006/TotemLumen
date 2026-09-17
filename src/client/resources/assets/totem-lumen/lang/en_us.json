@@ -1,4 +1,24 @@
 {
   "key.category.totem-lumen.debug": "Totem Lumen Debug",
-  "key.totem-lumen.cycle_debug_mode": "Cycle Debug Visualization"
+  "key.totem-lumen.cycle_debug_mode": "Cycle Debug Visualization",
+  "message.totem-lumen.compile.backend": "[Totem Lumen] Waiting for Minecraft's Vulkan backend...",
+  "message.totem-lumen.compile.backend_wait": "[Totem Lumen] Still waiting for Vulkan backend access (%s).",
+  "message.totem-lumen.compile.bootstrap": "[Totem Lumen] [1/4] Building the Vulkan bootstrap pipeline...",
+  "message.totem-lumen.compile.bootstrap_wait": "[Totem Lumen] [1/4] Vulkan bootstrap is still compiling (%s). Vanilla rendering remains active.",
+  "message.totem-lumen.compile.bootstrap_ready": "[Totem Lumen] [1/4] Vulkan bootstrap ready. Totem Lumen rendering is now available.",
+  "message.totem-lumen.compile.full": "[Totem Lumen] [2/4] Compiling full lighting (GI, environment, geometry and transmission) in the background...",
+  "message.totem-lumen.compile.full_wait": "[Totem Lumen] [2/4] Full lighting is still compiling (%s). You can keep playing with the bootstrap renderer.",
+  "message.totem-lumen.compile.full_ready": "[Totem Lumen] [2/4] Full P12-P15 lighting pipeline ready.",
+  "message.totem-lumen.compile.advanced": "[Totem Lumen] [3/4 + 4/4] Compiling dynamic-entity ray tracing and reflections in the background...",
+  "message.totem-lumen.compile.advanced_wait": "[Totem Lumen] [3/4 + 4/4] Advanced pipelines are still compiling (%s). Available stages remain active.",
+  "message.totem-lumen.compile.p17_ready": "[Totem Lumen] [3/4] Dynamic-entity ray tracing ready.",
+  "message.totem-lumen.compile.p16_ready": "[Totem Lumen] [4/4] Reflection pipeline ready.",
+  "message.totem-lumen.compile.complete": "[Totem Lumen] [4/4] All Alpha 42 renderer pipelines are ready.",
+  "message.totem-lumen.compile.full_failed": "[Totem Lumen] Full lighting pipeline failed to compile. Continuing with the bootstrap renderer; see latest.log for details.",
+  "message.totem-lumen.compile.p17_failed": "[Totem Lumen] Dynamic-entity ray tracing failed to compile. Static-world rendering remains available; see latest.log for details.",
+  "message.totem-lumen.compile.p16_failed": "[Totem Lumen] Reflection pipeline failed to compile. Base rendering remains available; see latest.log for details.",
+  "message.totem-lumen.compile.complete_degraded": "[Totem Lumen] Renderer initialization finished with one or more optional stages disabled. See latest.log for details.",
+  "message.totem-lumen.compile.disabled_non_vulkan": "[Totem Lumen] Renderer disabled: Minecraft is not running on Vulkan.",
+  "message.totem-lumen.compile.disabled_unsupported": "[Totem Lumen] Renderer disabled: this Vulkan device does not meet the required compute capabilities.",
+  "message.totem-lumen.compile.bootstrap_failed": "[Totem Lumen] Vulkan bootstrap pipeline failed. Totem Lumen rendering is disabled for this session; see latest.log for details."
 }
