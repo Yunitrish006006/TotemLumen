@@ -1,5 +1,14 @@
 # P17 Dynamic Entities — Alpha 42
 
+## Status
+
+- **P17A capture + CPU broad phase: IMPLEMENTED / CI PASS**
+- **P17B bounded Vulkan scene ABI + independent tail upload: IMPLEMENTED / CI PASS**
+- **P17C shared nearest-hit shader integration: IN PROGRESS**
+- **P17D material fidelity: PENDING**
+
+Alpha 42 does not yet claim visually complete entity ray tracing until P17C is integrated and the runtime gate passes.
+
 ## Goal
 
 Alpha 42 makes players and ordinary living entities first-class geometry in Totem Lumen's ray-traced scene instead of leaving them as a vanilla-only layer over a ray-traced world.
@@ -39,9 +48,7 @@ The immutable snapshot separately stores the entity render state's absolute worl
 worldBound = entityWorldPosition + capturedEntityLocalVertex
 ```
 
-Absolute world positions and AABBs remain double precision on the CPU. A future GPU ABI should convert them to section-relative values rather than prematurely storing large world coordinates in float precision.
-
-This separation is required so future GPU upload can update an instance transform independently of shared/static mesh data when possible.
+Absolute world positions and AABBs remain double precision on the CPU. The P17B GPU ABI converts them to integer section origins plus section-local float coordinates, avoiding premature far-world precision loss.
 
 ## Immutable snapshot
 
@@ -92,7 +99,7 @@ This proves Minecraft's live entity submit path reached the generic capture laye
 
 ## Build-time Minecraft ABI gate
 
-The existing mixin descriptor verifier now checks all P17 Minecraft-facing methods against the actual Minecraft 26.2 client runtime classes:
+The existing mixin descriptor verifier checks all P17 Minecraft-facing methods against the actual Minecraft 26.2 client runtime classes:
 
 - `EntityRenderer.createRenderState(Entity, float) -> EntityRenderState`;
 - `EntityRenderDispatcher.submit(EntityRenderState, CameraRenderState, double, double, double, PoseStack, SubmitNodeCollector)`;
@@ -100,33 +107,56 @@ The existing mixin descriptor verifier now checks all P17 Minecraft-facing metho
 
 These are required mixins. A descriptor drift must fail CI instead of being discovered as an `InvalidInjectionException` at player startup.
 
-## GPU integration plan
+## GPU integration
 
 Alpha 42 is developed in explicit gates.
 
 ### P17A — capture + CPU broad phase
+
+Status: **IMPLEMENTED / CI PASS**
 
 - Player/general LivingEntity model submissions captured.
 - Stable source entity identity survives temporary per-frame render states.
 - Immutable scene snapshots produced.
 - Section-binned broad phase implemented and unit tested.
 - Minecraft-facing mixin descriptors verified against 26.2 during CI.
-- No change to final ray result yet.
 
-### P17B — Vulkan scene ABI
+### P17B — Vulkan scene ABI + upload
 
-Add bounded dynamic-entity regions to the shared scene SSBO:
+Status: **IMPLEMENTED / CI PASS**
 
-- entity descriptor table;
-- world AABB / instance transform data;
-- per-section entity candidate lists;
-- dynamic quad/triangle pool.
+`GpuDynamicEntityScene` adds a separate bounded tail after the existing pixel target and P14 model-mesh tail. It does not widen the 32-bit voxel record.
 
-Do not widen the existing 32-bit voxel record.
+Baseline capacities:
 
-Dynamic entity uploads must be isolated from static section voxel uploads so animation does not force voxel repacks.
+- 256 dynamic entity descriptors;
+- 65,536 entity quads;
+- 512 open-addressed section-candidate buckets;
+- 32 entity candidates per section.
+
+Each entity descriptor stores:
+
+- stable 64-bit Totem Lumen instance id;
+- integer origin-section coordinates;
+- section-local entity origin;
+- section-local world AABB;
+- first-quad offset and quad count.
+
+The section-candidate table reuses the same section hash semantics used by the static voxel lookup. Candidate overflow and maximum probe length are explicit diagnostics.
+
+`P17DynamicEntityGpuUploader` tracks the entity-cache revision and can repack/flush/copy only the P17 tail on camera-only/static-world frames. Entity animation therefore does not force a full section-voxel repack.
+
+The upload path logs:
+
+```text
+P17 entity GPU scene: entities=<n>, quads=<n>, sectionBuckets=<n>, overflow=<n>, maxProbe=<n>, ...
+```
+
+When the entity scene changes, Alpha 42 conservatively disables temporal-history reads for that frame. This prevents moving entities from leaving stale P10/P11/P12 history trails before P17-specific hit identity is incorporated into per-pixel history validation.
 
 ### P17C — trace integration
+
+Status: **IN PROGRESS**
 
 Extend the shared trace path so dynamic entity triangles compete with voxel/static-model hits for nearest distance. The same dynamic-geometry hit result must be visible to:
 
@@ -140,7 +170,11 @@ Extend the shared trace path so dynamic entity triangles compete with voxel/stat
 
 No separate reflection-only or shadow-only entity geometry implementation is allowed.
 
+The first P17C material result may use a conservative entity surface identity/color, but the hit must carry enough identity to avoid confusing moving entities with static voxel history.
+
 ### P17D — material baseline
+
+Status: **PENDING**
 
 The first accepted visual baseline may use a conservative entity material/color until texture sampling is connected, but entity geometry must not be presented as feature-complete material support.
 
@@ -155,12 +189,12 @@ Alpha 42 is accepted only when all of the following are demonstrated in-world:
 3. walking, turning, crouching and limb animation update geometry without stale trails;
 4. no `temporary instance id` fallback warning appears during the normal Player/LivingEntity validation path;
 5. despawn/chunk movement/world rejoin does not retain stale entities;
-6. entity geometry appears in the Totem Lumen primary ray image;
-7. entities cast directional/local-light shadows;
-8. entities appear in P16 reflections;
-9. existing P12-P16 static-world rendering remains functional;
-10. no unbounded per-frame mesh-id/resource growth occurs;
-11. section candidate overflow is zero in the validation scene or is reported explicitly if the stress case exceeds the configured capacity.
+6. `P17 entity GPU scene` reports nonzero entity/quad counts with no unexpected candidate overflow;
+7. entity geometry appears in the Totem Lumen primary ray image;
+8. entities cast directional/local-light shadows;
+9. entities appear in P16 reflections;
+10. existing P12-P16 static-world rendering remains functional;
+11. no unbounded per-frame mesh-id/resource growth occurs.
 
 ## Explicit follow-ups
 
