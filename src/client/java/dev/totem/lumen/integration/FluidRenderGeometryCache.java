@@ -37,21 +37,20 @@ public final class FluidRenderGeometryCache {
         return activeDimensionId;
     }
 
-    static void store(FluidGeometrySnapshot snapshot) {
+    static synchronized void store(FluidGeometrySnapshot snapshot) {
         if (snapshot == null || !snapshot.dimensionId().equals(activeDimensionId)) return;
         long key = BlockPos.asLong(snapshot.blockX(), snapshot.blockY(), snapshot.blockZ());
-        SNAPSHOTS.compute(key, (ignored, previous) -> {
-            if (previous != null && previous.geometryEquals(snapshot)) return previous;
-            REVISION.incrementAndGet();
-            return snapshot;
-        });
+        FluidGeometrySnapshot previous = SNAPSHOTS.get(key);
+        if (previous != null && previous.geometryEquals(snapshot)) return;
+        SNAPSHOTS.put(key, snapshot);
+        REVISION.incrementAndGet();
     }
 
     /**
      * Fluid corner heights and side visibility depend on neighbors, so a block update invalidates
      * a bounded 3x3x3 neighborhood until Minecraft re-tessellates the affected section(s).
      */
-    public static void invalidateNeighborhood(BlockPos center) {
+    public static synchronized void invalidateNeighborhood(BlockPos center) {
         boolean changed = false;
         for (int dx = -1; dx <= 1; dx++) {
             for (int dy = -1; dy <= 1; dy++) {
@@ -68,11 +67,11 @@ public final class FluidRenderGeometryCache {
         if (changed) REVISION.incrementAndGet();
     }
 
-    public static List<FluidGeometrySnapshot> snapshots() {
+    public static synchronized List<FluidGeometrySnapshot> snapshots() {
         return copySnapshots();
     }
 
-    /** Returns revision and immutable snapshot list from one synchronized cache observation. */
+    /** Returns revision and immutable snapshot list from one cache observation. */
     public static synchronized SceneState sceneState() {
         return new SceneState(REVISION.get(), copySnapshots());
     }
@@ -81,13 +80,11 @@ public final class FluidRenderGeometryCache {
         return REVISION.get();
     }
 
-    public static void clear() {
-        synchronized (FluidRenderGeometryCache.class) {
-            if (!SNAPSHOTS.isEmpty() || activeDimensionId != null) {
-                SNAPSHOTS.clear();
-                activeDimensionId = null;
-                REVISION.incrementAndGet();
-            }
+    public static synchronized void clear() {
+        if (!SNAPSHOTS.isEmpty() || activeDimensionId != null) {
+            SNAPSHOTS.clear();
+            activeDimensionId = null;
+            REVISION.incrementAndGet();
         }
     }
 
