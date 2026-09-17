@@ -117,7 +117,8 @@ public final class P12FullBasePipeline {
                     String.class
             );
             transform.setAccessible(true);
-            return (String) transform.invoke(null, source);
+            String transformed = (String) transform.invoke(null, source);
+            return P14EFluidShaderPatch.apply(transformed);
         } catch (ReflectiveOperationException failure) {
             throw new IllegalStateException("Failed to build full P12-P15 production shader", failure);
         }
