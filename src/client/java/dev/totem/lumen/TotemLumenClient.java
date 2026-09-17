@@ -8,6 +8,7 @@ import dev.totem.lumen.integration.P13EnvironmentCapture;
 import dev.totem.lumen.integration.SceneExtractionBridge;
 import dev.totem.lumen.network.LightingWorldRulesPayload;
 import dev.totem.lumen.render.RendererBootstrap;
+import dev.totem.lumen.render.RendererCompileProgressNotifier;
 import dev.totem.lumen.vulkan.P5StableLookupRenderer;
 import dev.totem.lumen.vulkan.P5WorldDebugComposite;
 import dev.totem.lumen.vulkan.VulkanComputeProgram;
@@ -50,6 +51,7 @@ public final class TotemLumenClient implements ClientModInitializer {
                 LOGGER.info("Cleared server-authoritative lighting world rules after disconnect");
             }
             EntityRenderGeometryCache.clear();
+            RendererCompileProgressNotifier.reset();
         });
 
         // GLSL -> SPIR-V starts before the Vulkan device exists. Once RendererBootstrap sees the
@@ -87,6 +89,7 @@ public final class TotemLumenClient implements ClientModInitializer {
             MinecraftBlockModelMeshResolver.checkModelSetReload();
             SceneExtractionBridge.tick();
             P5StableLookupRenderer.tickLifecycle(client);
+            RendererCompileProgressNotifier.tick(client);
 
             while (cycleDebugMode.consumeClick()) {
                 P5StableLookupRenderer.DebugMode mode = P5StableLookupRenderer.cycleMode();
@@ -129,6 +132,7 @@ public final class TotemLumenClient implements ClientModInitializer {
         );
 
         ClientLifecycleEvents.CLIENT_STOPPING.register(client -> {
+            RendererCompileProgressNotifier.reset();
             EntityRenderGeometryCache.clear();
             P5StableLookupRenderer.shutdown();
         });
