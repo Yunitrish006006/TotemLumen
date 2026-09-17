@@ -1,13 +1,18 @@
 package dev.totem.lumen.geometry;
 
 import com.mojang.blaze3d.vertex.PoseStack;
+import dev.totem.lumen.mixin.EntityRenderDispatcherMixin;
 import dev.totem.lumen.mixin.SubmitNodeCollectionBlockEntityMixin;
 import dev.totem.lumen.mixin.SubmitNodeStorageBlockEntityMixin;
 import net.minecraft.client.model.Model;
 import net.minecraft.client.renderer.SubmitNodeCollection;
+import net.minecraft.client.renderer.SubmitNodeCollector;
 import net.minecraft.client.renderer.SubmitNodeStorage;
+import net.minecraft.client.renderer.entity.EntityRenderDispatcher;
+import net.minecraft.client.renderer.entity.state.EntityRenderState;
 import net.minecraft.client.renderer.feature.ModelFeatureRenderer;
 import net.minecraft.client.renderer.rendertype.RenderType;
+import net.minecraft.client.renderer.state.level.CameraRenderState;
 import net.minecraft.client.renderer.texture.TextureAtlasSprite;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
@@ -15,7 +20,7 @@ import java.lang.reflect.Method;
 import java.util.Arrays;
 
 /**
- * Build-time regression gate for P14D's Minecraft-facing model submission mixins.
+ * Build-time regression gate for Minecraft-facing render-submission mixins used by P14D/P17.
  *
  * <p>These signatures are intentionally checked against the actual Minecraft 26.2 classes on the
  * client runtime classpath. A source-compatible mixin can still fail at game startup when its
@@ -36,6 +41,16 @@ public final class P14DMixinDescriptorVerifier {
             ModelFeatureRenderer.CrumblingOverlay.class
     };
 
+    private static final Class<?>[] ENTITY_SUBMIT_26_2 = {
+            EntityRenderState.class,
+            CameraRenderState.class,
+            double.class,
+            double.class,
+            double.class,
+            PoseStack.class,
+            SubmitNodeCollector.class
+    };
+
     private P14DMixinDescriptorVerifier() {
     }
 
@@ -48,9 +63,11 @@ public final class P14DMixinDescriptorVerifier {
                 SubmitNodeCollection.class,
                 SubmitNodeCollectionBlockEntityMixin.class
         );
+        verifyEntitySubmit();
         System.out.println(
-                "P14D mixin descriptor verification PASS: minecraft=26.2, "
-                        + "submitModel=Model+Object+PoseStack+RenderType+III+TextureAtlasSprite+I+CrumblingOverlay"
+                "P14D/P17 mixin descriptor verification PASS: minecraft=26.2, "
+                        + "submitModel=Model+Object+PoseStack+RenderType+III+TextureAtlasSprite+I+CrumblingOverlay, "
+                        + "entitySubmit=EntityRenderState+CameraRenderState+DDD+PoseStack+SubmitNodeCollector"
         );
     }
 
@@ -64,7 +81,7 @@ public final class P14DMixinDescriptorVerifier {
                 .filter(method -> method.getName().equals("totemLumen$captureModelWithSprite"))
                 .findFirst()
                 .orElseThrow(() -> new IllegalStateException(
-                        "Missing P14D submitModel callback in " + mixinClass.getName()
+                        "Missing P14D/P17 submitModel callback in " + mixinClass.getName()
                 ));
 
         Class<?>[] callback = handler.getParameterTypes();
@@ -93,6 +110,43 @@ public final class P14DMixinDescriptorVerifier {
             throw new IllegalStateException(
                     mixinClass.getName() + " still contains the incompatible legacy submitModel callback"
             );
+        }
+    }
+
+    private static void verifyEntitySubmit() throws Exception {
+        Method target = EntityRenderDispatcher.class.getDeclaredMethod("submit", ENTITY_SUBMIT_26_2);
+        if (target.getReturnType() != void.class) {
+            throw new IllegalStateException("EntityRenderDispatcher.submit must return void");
+        }
+
+        verifyEntityCallback("totemLumen$beginEntityCapture");
+        verifyEntityCallback("totemLumen$endEntityCapture");
+    }
+
+    private static void verifyEntityCallback(String methodName) {
+        Method handler = Arrays.stream(EntityRenderDispatcherMixin.class.getDeclaredMethods())
+                .filter(method -> method.getName().equals(methodName))
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException(
+                        "Missing P17 entity submit callback " + methodName
+                ));
+
+        Class<?>[] callback = handler.getParameterTypes();
+        if (callback.length != ENTITY_SUBMIT_26_2.length + 1) {
+            throw new IllegalStateException(
+                    methodName + " callback parameter count mismatch: " + callback.length
+            );
+        }
+        for (int i = 0; i < ENTITY_SUBMIT_26_2.length; i++) {
+            if (callback[i] != ENTITY_SUBMIT_26_2[i]) {
+                throw new IllegalStateException(
+                        methodName + " callback parameter " + i + " mismatch: expected "
+                                + ENTITY_SUBMIT_26_2[i].getName() + " but found " + callback[i].getName()
+                );
+            }
+        }
+        if (callback[callback.length - 1] != CallbackInfo.class) {
+            throw new IllegalStateException(methodName + " callback must end with CallbackInfo");
         }
     }
 }
