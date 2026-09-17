@@ -1,5 +1,6 @@
 package dev.totem.lumen.mixin;
 
+import dev.totem.lumen.integration.FluidRenderGeometryCache;
 import dev.totem.lumen.integration.SceneExtractionBridge;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
@@ -11,11 +12,12 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
  * Mirrors Minecraft 26.2's client-world block update into Totem Lumen's high-priority
- * section snapshot queue.
+ * section snapshot queue and invalidates exact fluid geometry that depends on the changed cell.
  *
  * <p>ClientLevel.sendBlockUpdated is the canonical client-side bridge that forwards a block
- * state change to LevelRenderer. Hooking here avoids depending on renderer-internal method
- * signatures while still observing the same update before the renderer marks its section dirty.</p>
+ * state change to LevelRenderer. Fluid corner heights and side visibility depend on neighboring
+ * cells, so P14E removes a bounded 3x3x3 capture neighborhood until Minecraft's section mesher
+ * emits the replacement fluid faces.</p>
  */
 @Mixin(ClientLevel.class)
 abstract class ClientLevelBlockUpdateMixin {
@@ -27,6 +29,7 @@ abstract class ClientLevelBlockUpdateMixin {
             int updateFlags,
             CallbackInfo ci
     ) {
+        FluidRenderGeometryCache.invalidateNeighborhood(pos);
         SceneExtractionBridge.onBlockChanged(pos, updateFlags);
     }
 }
