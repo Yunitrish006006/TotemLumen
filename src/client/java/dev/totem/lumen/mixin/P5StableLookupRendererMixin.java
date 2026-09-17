@@ -1,6 +1,7 @@
 package dev.totem.lumen.mixin;
 
 import dev.totem.lumen.scene.SectionSnapshot;
+import dev.totem.lumen.vulkan.P12FullBasePipeline;
 import dev.totem.lumen.vulkan.P14ModelMeshGpuUploader;
 import dev.totem.lumen.vulkan.P16MultipassReflection;
 import dev.totem.lumen.vulkan.P17DynamicEntityGpuUploader;
@@ -130,8 +131,8 @@ public abstract class P5StableLookupRendererMixin {
     }
 
     @Inject(method = "shutdown", at = @At("HEAD"))
-    private static void totemLumen$shutdownReflection(CallbackInfo ci) {
-        P16MultipassReflection.shutdown();
+    private static void totemLumen$shutdownStagedPipelines(CallbackInfo ci) {
+        P12FullBasePipeline.shutdown();
     }
 
     private static void flushTail(VulkanOwnedBuffer upload, long offset, long bytes) {
