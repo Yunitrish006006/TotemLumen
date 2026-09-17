@@ -47,7 +47,9 @@ public final class P16MultipassReflection {
         long startedAt = System.nanoTime();
         try {
             String source = P17ShaderIntegration.apply(
-                    P14EFluidShaderPatch.apply(P16ReflectionPassShader.build())
+                    P14EFluidOpticsPatch.apply(
+                            P14EFluidShaderPatch.apply(P16ReflectionPassShader.build())
+                    )
             );
             TotemLumenClient.LOGGER.info(
                     "P16 split pipeline creation START: shader={}, sourceChars={}",
