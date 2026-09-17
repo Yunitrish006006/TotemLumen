@@ -102,11 +102,15 @@ Texture-alpha silhouette testing is still a material-domain follow-up. P14D curr
 
 ### Out-of-cell geometry
 
-The existing P14 broad phase is voxel DDA: a `MODEL_MESH` is tested when the ray enters its owning block cell. A block-entity model whose rendered geometry protrudes materially outside that 1x1x1 cell can therefore be missed before the ray enters the owner cell. Correct arbitrary out-of-cell block-entity geometry requires an instance-bounds/broad-phase extension rather than silently widening every voxel test. This remains an explicit follow-up.
+The existing P14 broad phase is voxel DDA: a `MODEL_MESH` is tested when the ray enters its owning block cell. A block-entity model whose rendered geometry protrudes materially outside that 1x1x1 cell can therefore be missed before the ray enters the owner cell. Correct arbitrary out-of-cell block-entity geometry requires an instance-bounds/broad-phase extension rather than silently widening every voxel test.
+
+Alpha 42/P17 introduces section-binned dynamic instance AABBs for entities. That infrastructure is the preferred reusable basis for a later out-of-cell block-entity extension instead of inventing a second broad phase.
 
 ### Fluids
 
-Flowing/sloped water and lava surfaces are produced by a separate fluid rendering domain. P14D does not treat those as block entities and does not change their geometry. Exact fluid-surface extraction remains the next pre-P17 geometry gate.
+Flowing/sloped water and lava surfaces are produced by a separate fluid rendering domain. P14D does not treat those as block entities and does not change their geometry.
+
+Exact fluid-surface extraction remains required, but the milestone order changed after Alpha 41: missing Player/LivingEntity geometry is the larger scene-completeness gap, so Alpha 42 advances P17 Dynamic Entities first. Exact fluids are now planned immediately afterwards as **Alpha 43 / P14E Exact Fluid Geometry**.
 
 ## Architectural invariant
 
