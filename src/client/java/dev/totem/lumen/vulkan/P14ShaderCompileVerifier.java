@@ -4,7 +4,7 @@ import org.lwjgl.util.shaderc.Shaderc;
 
 import java.lang.reflect.Field;
 
-/** Build-time verifier for the production base pass and split P16 reflection pass. */
+/** Build-time verifier for base readiness, optional P17 enhancement and split P16 reflection. */
 public final class P14ShaderCompileVerifier {
     private static final String BASE_SHADER_NAME = "totem_lumen_p12_one_bounce_gi.comp";
 
@@ -23,10 +23,12 @@ public final class P14ShaderCompileVerifier {
         baseSource = P14GeometryCorrectionPatch.apply(baseSource);
         baseSource = P13SkyOcclusionPatch.apply(baseSource);
         baseSource = P16ReflectionRoughnessPatch.apply(baseSource);
-        baseSource = P17ShaderIntegration.apply(baseSource);
 
         verifyP13NightSkySource(baseSource);
-        verifyP17DynamicEntitySource(baseSource, "base pass");
+        verifyBaseReadinessSource(baseSource);
+
+        String p17Source = P17ShaderIntegration.apply(baseSource);
+        verifyP17DynamicEntitySource(p17Source, "enhanced base pass");
 
         String reflectionSource = P17ShaderIntegration.apply(P16ReflectionPassShader.build());
         verifyP13NightSkySource(reflectionSource);
@@ -38,7 +40,13 @@ public final class P14ShaderCompileVerifier {
         }
 
         try {
-            compileAndVerify(compiler, BASE_SHADER_NAME, baseSource, "P12-P15+P17 base pass");
+            compileAndVerify(compiler, BASE_SHADER_NAME, baseSource, "P12-P15 readiness base pass");
+            compileAndVerify(
+                    compiler,
+                    P17EnhancedBasePipeline.SHADER_NAME,
+                    p17Source,
+                    "P17 enhanced base pass"
+            );
             compileAndVerify(
                     compiler,
                     P16ReflectionPassShader.SHADER_NAME,
@@ -67,6 +75,18 @@ public final class P14ShaderCompileVerifier {
         System.out.println(
                 "P13 night-sky shader verification PASS: moon=true, phaseSteps=8, stars=true, "
                         + "deterministicStars=true, rotatingStarDome=true, fullFrameSeed=true, p15Transmission=true"
+        );
+    }
+
+    private static void verifyBaseReadinessSource(String source) {
+        if (source.contains("P17_ENTITY_MATERIAL_ID")) {
+            throw new IllegalStateException(
+                    "P17 must not participate in the renderer-readiness base pipeline"
+            );
+        }
+        System.out.println(
+                "P17 readiness isolation verification PASS: basePipelineContainsP17=false, "
+                        + "dynamicEntityCompileCannotBlockRendererReady=true"
         );
     }
 
