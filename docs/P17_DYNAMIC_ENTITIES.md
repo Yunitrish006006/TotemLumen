@@ -4,10 +4,10 @@
 
 - **P17A capture + CPU broad phase: IMPLEMENTED / CI PASS**
 - **P17B bounded Vulkan scene ABI + independent tail upload: IMPLEMENTED / CI PASS**
-- **P17C shared nearest-hit shader integration: IN PROGRESS**
+- **P17C shared nearest-hit shader integration: IMPLEMENTED / CI PASS, RUNTIME VALIDATION ACTIVE**
 - **P17D material fidelity: PENDING**
 
-Alpha 42 does not yet claim visually complete entity ray tracing until P17C is integrated and the runtime gate passes.
+Alpha 42 does not yet claim visually complete entity ray tracing until the runtime gate passes.
 
 ## Goal
 
@@ -156,9 +156,9 @@ When the entity scene changes, Alpha 42 conservatively disables temporal-history
 
 ### P17C — trace integration
 
-Status: **IN PROGRESS**
+Status: **IMPLEMENTED / CI PASS, RUNTIME VALIDATION ACTIVE**
 
-Extend the shared trace path so dynamic entity triangles compete with voxel/static-model hits for nearest distance. The same dynamic-geometry hit result must be visible to:
+Dynamic entity triangles compete with voxel/static-model hits for nearest distance. The same dynamic-geometry hit result is visible to:
 
 - camera rays;
 - sun/moon visibility;
@@ -168,9 +168,52 @@ Extend the shared trace path so dynamic entity triangles compete with voxel/stat
 - P15 transmission where the entity material permits it;
 - P16 reflection.
 
-No separate reflection-only or shadow-only entity geometry implementation is allowed.
+No separate reflection-only or shadow-only entity geometry implementation is used.
 
-The first P17C material result may use a conservative entity surface identity/color, but the hit must carry enough identity to avoid confusing moving entities with static voxel history.
+The first P17C material result uses a conservative opaque entity surface identity. P17D will replace that baseline with texture/material fidelity.
+
+### Apple M4 / MoltenVK readiness regression and accepted split
+
+The first P17C runtime build incorrectly injected P17 directly into the renderer-readiness main compute shader. On Apple M4 + MoltenVK 1.4.2, runtime logging showed:
+
+```text
+Renderer state: WAITING_FOR_PIPELINE
+Background Vulkan pipeline creation START: shader=totem_lumen_p12_one_bounce_gi.comp
+Vulkan pipeline cache HIT: ...
+```
+
+with no matching `Background Vulkan pipeline creation COMPLETE` before the test session ended. The same run successfully captured a zombie with 54 quads, proving the entity capture path was alive while the renderer itself remained blocked on driver pipeline creation.
+
+This reproduced the architectural class of the earlier Alpha 35 P16 MoltenVK stall. A cache-file `HIT` only means a compatible Vulkan pipeline-cache blob was loaded; it does not mean the exact changed shader pipeline already exists in that blob.
+
+Alpha 42 therefore adopts the same invariant that fixed P16:
+
+> Dynamic-entity pipeline compilation must never block Totem Lumen renderer readiness.
+
+The accepted P17 split is:
+
+1. the proven P12-P15 base shader remains the only readiness-gating compute pipeline;
+2. P17 is compiled as `totem_lumen_p17_dynamic_entities.comp` on `TotemLumen-P17Pipeline`;
+3. the base renderer continues dispatching while P17 compiles;
+4. once the complete P17 `VulkanComputeProgram` is ready, command recording atomically selects it for all pipeline/layout/descriptor reads in that frame;
+5. a slow or failed P17 compile leaves P12-P15 rendering active rather than returning the client to vanilla-only output;
+6. P16 remains an optional split reflection pass and can also include P17 tracing without becoming a renderer-readiness dependency.
+
+CI enforces the split. The readiness base must contain no `P17_ENTITY_MATERIAL_ID` marker and all three production variants are shaderc-compiled at O0:
+
+```text
+P12-P15 readiness base: 69,638 chars / 178,544-byte SPIR-V
+P17 enhanced base:       81,241 chars / 205,576-byte SPIR-V
+P16+P17 reflection:      61,332 chars / 154,780-byte SPIR-V
+```
+
+The critical invariant is:
+
+```text
+P17 readiness isolation verification PASS:
+basePipelineContainsP17=false,
+dynamicEntityCompileCannotBlockRendererReady=true
+```
 
 ### P17D — material baseline
 
@@ -190,11 +233,28 @@ Alpha 42 is accepted only when all of the following are demonstrated in-world:
 4. no `temporary instance id` fallback warning appears during the normal Player/LivingEntity validation path;
 5. despawn/chunk movement/world rejoin does not retain stale entities;
 6. `P17 entity GPU scene` reports nonzero entity/quad counts with no unexpected candidate overflow;
-7. entity geometry appears in the Totem Lumen primary ray image;
-8. entities cast directional/local-light shadows;
-9. entities appear in P16 reflections;
-10. existing P12-P16 static-world rendering remains functional;
-11. no unbounded per-frame mesh-id/resource growth occurs.
+7. the base renderer reaches READY independently of P17 enhanced-pipeline readiness;
+8. entity geometry appears in the Totem Lumen primary ray image after P17 enhanced-pipeline readiness;
+9. entities cast directional/local-light shadows;
+10. entities appear in P16 reflections;
+11. existing P12-P16 static-world rendering remains functional;
+12. no unbounded per-frame mesh-id/resource growth occurs.
+
+Expected readiness diagnostics after the split are:
+
+```text
+Background Vulkan pipeline creation COMPLETE: shader=totem_lumen_p12_one_bounce_gi.comp
+Renderer state: READY_FOR_SCENE_EXTRACTION
+P5 stable GPU lookup READY: ...
+P17 enhanced pipeline creation START: shader=totem_lumen_p17_dynamic_entities.comp ...
+```
+
+The P17 enhanced pipeline may complete later:
+
+```text
+P17 enhanced pipeline creation COMPLETE: ...
+P17 dynamic entity tracing READY: enhanced base pipeline selected for frame dispatch
+```
 
 ## Explicit follow-ups
 
@@ -225,7 +285,3 @@ Alpha 41 runtime readiness
   -> Alpha 43 / P14E Exact Fluid Geometry
   -> P18 Resource Pack / LabPBR integration
 ```
-
-## Architectural invariant
-
-Entity rendering must consume Minecraft's renderer-resolved geometry and produce Totem Lumen-owned immutable scene data. Do not retain live entity/model objects in Vulkan code, do not create a table of hand-authored mob geometry, and do not make dynamic entity support depend on optional Vulkan hardware ray-tracing extensions.
