@@ -2,10 +2,12 @@
 
 ## Status
 
-- **P14E-A renderer-source fluid capture: IMPLEMENTED / CI ABI PASS; runtime validation pending**
-- **P14E-B bounded GPU fluid scene ABI + independent upload: IMPLEMENTED; current-head CI pending**
-- **P14E-C shared nearest-hit integration: IMPLEMENTED; current-head shader CI/runtime validation pending**
-- **P14E-D P15/P16 fluid optical semantics: NEXT**
+- **P14E-A renderer-source fluid capture: IMPLEMENTED / CI PASS; Apple M4 runtime validation pending**
+- **P14E-B bounded GPU fluid scene ABI + independent upload: IMPLEMENTED / CI PASS; runtime validation pending**
+- **P14E-C shared nearest-hit integration: IMPLEMENTED / SHADER CI PASS; runtime visual validation pending**
+- **P14E-D P15/P16 fluid optical semantics: IMPLEMENTED / SHADER CI PASS; runtime visual validation pending**
+
+Alpha 43 has passed its implementation/build gate. It does **not** claim complete fluid rendering until the runtime gate below is validated in-world.
 
 ## Goal
 
@@ -45,24 +47,30 @@ Minecraft section compilation can run on worker threads, so the capture scope is
 - fluid registry id;
 - integer section coordinates;
 - section-local 4-vertex quad positions;
-- resolved per-quad ARGB tint;
 - resolved per-vertex UV coordinates;
+- the emitted per-face ARGB color after Minecraft's cardinal face-lighting multiplication;
+- the separate unlit `FluidModel`/world tint captured from `BlockTintSource.colorInWorld(...)` before face lighting;
 - whether Minecraft emitted the face as double-sided;
 - whether the cell is a pure `LiquidBlock` or fluid coexisting with block geometry (waterlogged/custom cell).
 
-The last flag is a correctness requirement: waterlogged stairs/fences can contain both block geometry and an exact fluid surface in the same voxel. Fluid presence must not erase the block geometry.
+Separating unlit fluid tint from emitted face color is required for correct optics: using the already-lit face color for water transmission would multiply directional lighting into the optical tint a second time.
 
-Absolute coordinates remain integer section origin + local float geometry, preserving far-world precision.
+The `fluidOnlyCell` flag is also a correctness requirement: waterlogged stairs/fences can contain both block geometry and an exact fluid surface in the same voxel. Fluid presence must not erase the block geometry.
+
+Absolute coordinates remain integer section origin + local float geometry, preserving far-world precision. Minecraft 26.2's `FluidRenderer` itself emits section-local coordinates using `pos & 15`, so P14E stores the renderer's native coordinate domain instead of converting through a large world-space float.
 
 ### Cache and invalidation
 
-The capture cache is scoped to the active dimension and uses a concurrent block-position map because section tessellation may run off-thread. A dimension change/disconnect/shutdown clears it.
+The capture cache is scoped to the active dimension and uses a concurrent block-position map because section tessellation may run off-thread. Revision + immutable scene snapshot observation is synchronized so the GPU uploader cannot pair a new revision with an older weakly-consistent map iteration.
+
+The active dimension is established on client world join and rechecked during client ticks. Dimension change/disconnect/shutdown clears the cache.
 
 A client block update invalidates a 3x3x3 neighborhood around the changed block. This is deliberately broader than the source block because fluid corner heights and visible side faces depend on neighboring fluid/block states. Minecraft's normal section rebuild later repopulates the exact resolved faces.
 
 The Minecraft-facing ABI is checked in CI against the actual 26.2 client classes:
 
 - `FluidRenderer.tesselate(BlockAndTintGetter, BlockPos, Output, BlockState, FluidState)`;
+- `BlockTintSource.colorInWorld(BlockState, BlockAndTintGetter, BlockPos) -> int`;
 - private `FluidRenderer.addFace(VertexConsumer, 20 floats, int color, int lightCoords, boolean addBackFace)`;
 - `FluidRenderer.Output.getBuilder(ChunkSectionLayer) -> VertexConsumer`.
 
@@ -78,15 +86,16 @@ Baseline capacity:
 
 Unlike P17's moving-entity section candidate lists, fluid geometry has a unique source block coordinate. The GPU scene therefore hashes exact `(blockX, blockY, blockZ)` directly to one fluid descriptor. A ray entering a voxel only tests the resolved quads owned by that fluid cell.
 
-Each descriptor stores:
+Fluid ABI v2 stores per descriptor:
 
 - world block coordinates;
 - fluid kind (`water`, `lava`, or other);
 - stable fluid registry-id hash;
 - first-quad offset and quad count;
-- flags, including `FLUID_ONLY` for pure `LiquidBlock` cells.
+- flags, including `FLUID_ONLY` for pure `LiquidBlock` cells;
+- unlit fluid tint ARGB.
 
-Each GPU quad stores four section-local positions, the resolved ARGB tint and the captured double-sided flag. UVs remain in the immutable CPU snapshot for later P18 material/resource-pack integration rather than expanding the Alpha 43 tracing record.
+Each GPU quad stores four section-local positions, the emitted/lit ARGB face color and the captured double-sided flag. UVs remain in the immutable CPU snapshot for later P18 material/resource-pack integration rather than expanding the Alpha 43 tracing record.
 
 `P14EFluidGpuUploader` tracks fluid-cache revision independently. Fluid-only changes can repack/flush/copy the fluid tail without re-uploading static section voxels, P14 meshes, or P17 entity meshes. A changed fluid scene conservatively invalidates temporal-history reads for that frame so flowing water cannot leave stale geometry trails.
 
@@ -119,9 +128,20 @@ The same fluid-aware `traceRayLimited(...)` is compiled into:
 - P17 enhanced dynamic-entity rendering;
 - split P16 reflection.
 
+Shader transform ordering is explicitly preserved as:
+
+```text
+P12-P15/P13/P14 baseline
+  -> P14E exact fluid geometry
+  -> P17 dynamic entities (where applicable)
+  -> P14E fluid optical rewrites
+```
+
+P14E optics intentionally runs after P17 because P17's P15 integration depends on the pre-optics P15 marker structure.
+
 The tiny startup bootstrap intentionally remains fluid-free so Alpha 43 cannot reintroduce the Apple/MoltenVK cold-start regression fixed in Alpha 42.
 
-Synthetic trace identities are reserved for the first geometry gate:
+Synthetic exact-fluid trace identities are:
 
 ```text
 water = 0xFFFC
@@ -129,7 +149,7 @@ lava  = 0xFFFB
 other = 0xFFFA
 ```
 
-They do not claim final material semantics. P14E-D replaces the temporary opaque/material baseline with water transmission and lava emission rules.
+They are internal trace identities, not Minecraft material IDs.
 
 ## Shared tracing invariant
 
@@ -147,14 +167,38 @@ No reflection-only water plane, shadow-only fluid proxy, or shader-side fluid-le
 
 ## P14E-D — optical semantics
 
-Next implementation gate:
+The first Alpha 43 optical baseline is implemented:
 
-- water uses the exact P14E surface as a transmissive interface rather than an opaque synthetic material;
-- lava uses the exact P14E surface with emissive/opaque baseline semantics;
-- P15 layered transmission understands the water trace identity instead of resolving it through static voxel material lookup;
-- P16 reflection uses the exact sloped triangle normal already produced by P14E-C;
-- underwater rays cross the same captured surface used by above-water camera rays;
+- water uses the exact P14E surface as a transmissive P15 interface instead of an opaque synthetic material;
+- water transmission tint uses the separately captured unlit Minecraft fluid tint, not the already-lit face color;
+- the P15 water interface advances only past the exact triangle rather than jumping to the voxel exit, so waterlogged block geometry in the same cell remains discoverable;
+- lava uses the exact P14E surface with an emissive/opaque baseline;
+- P16 keeps the first raw exact-water hit as the reflection surface even when P15 transmission continues to the scene below it;
+- water uses a low-roughness reflection baseline (`0.025`) on the exact captured triangle normal;
+- P16 reflection and the transmitted base therefore coexist on the same water surface;
 - resource-pack/LabPBR semantics remain P18 and must layer on top of, not replace, exact geometry.
+
+Intentional Alpha 43 optical limitations:
+
+- refraction is not implemented yet;
+- volumetric/Beer-Lambert water absorption is not implemented yet;
+- the baseline applies interface tint/attenuation per crossed water surface;
+- arbitrary Fabric custom fluid render handlers that bypass vanilla `FluidRenderer.addFace(...)` are not yet claimed as supported.
+
+## CI build gate
+
+The accepted Alpha 43 head compiles/tests all Java scene/ABI code, verifies Minecraft 26.2 mixin descriptors, and shaderc-compiles all staged production variants at O0.
+
+Latest verified shader results:
+
+| Stage | GLSL chars | SPIR-V bytes | Result |
+| --- | ---: | ---: | --- |
+| Vulkan bootstrap readiness | 6,815 | 19,308 | PASS |
+| P12-P15 + P14E full base | 78,028 | 194,676 | PASS |
+| P14E + P17 enhanced base | 89,631 | 221,636 | PASS |
+| P14E + P16 + P17 reflection | 70,282 | 172,564 | PASS |
+
+All four compile with 0 shader errors; P14E geometry/optics markers and P17 integration markers pass. Bootstrap verification confirms `p14e=false` so exact-fluid work cannot block initial renderer readiness.
 
 ## Runtime gate
 
@@ -170,8 +214,10 @@ Alpha 43 is accepted only when all of the following are demonstrated in-world:
 8. underwater camera transitions do not leave stale or duplicate surfaces;
 9. the GPU fluid scene reports bounded nonzero geometry with no unexpected lookup/capacity failure;
 10. camera/shadow/GI/P15/P16 all use the same exact fluid triangles;
-11. the tiny bootstrap still reaches renderer readiness independently of the larger fluid-aware pipelines;
-12. Alpha 42 dynamic-entity rendering remains functional.
+11. water visibly transmits the scene behind it while retaining a P16 reflection on the exact surface;
+12. lava remains emissive on its exact surface geometry;
+13. the tiny bootstrap still reaches renderer readiness independently of the larger fluid-aware pipelines;
+14. Alpha 42 dynamic-entity rendering remains functional.
 
 ## Follow-up order
 
