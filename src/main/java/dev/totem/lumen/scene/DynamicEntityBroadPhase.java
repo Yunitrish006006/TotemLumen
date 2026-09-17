@@ -110,8 +110,12 @@ public final class DynamicEntityBroadPhase {
         return Collections.unmodifiableMap(copy);
     }
 
-    private static int worldToSection(float coordinate) {
-        int block = (int) Math.floor(coordinate);
-        return Math.floorDiv(block, SECTION_SIZE);
+    private static int worldToSection(double coordinate) {
+        long block = (long) Math.floor(coordinate);
+        long section = Math.floorDiv(block, SECTION_SIZE);
+        if (section < Integer.MIN_VALUE || section > Integer.MAX_VALUE) {
+            throw new IllegalArgumentException("entity section coordinate exceeds integer range");
+        }
+        return (int) section;
     }
 }
