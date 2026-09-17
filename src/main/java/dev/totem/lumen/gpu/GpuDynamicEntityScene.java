@@ -61,7 +61,7 @@ public final class GpuDynamicEntityScene {
             );
         }
 
-        long maxEndBytes = (long) (baseWord + MAX_STORAGE_WORDS) * Integer.BYTES;
+        long maxEndBytes = ((long) baseWord + MAX_STORAGE_WORDS) * Integer.BYTES;
         if (maxEndBytes > buffer.capacity()) {
             throw new IllegalStateException(
                     "P17 entity storage exceeds scene buffer: requiredCapacity=" + maxEndBytes
