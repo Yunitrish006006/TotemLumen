@@ -12,11 +12,11 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 /** Binds Minecraft's per-frame render-state object to the stable world entity identity. */
 @Mixin(EntityRenderer.class)
 public abstract class EntityRendererStateMixin {
-    private static final String GET_AND_UPDATE_RENDER_STATE_26_2 =
-            "getAndUpdateRenderState(Lnet/minecraft/world/entity/Entity;F)"
+    private static final String CREATE_RENDER_STATE_26_2 =
+            "createRenderState(Lnet/minecraft/world/entity/Entity;F)"
                     + "Lnet/minecraft/client/renderer/entity/state/EntityRenderState;";
 
-    @Inject(method = GET_AND_UPDATE_RENDER_STATE_26_2, at = @At("RETURN"), require = 1)
+    @Inject(method = CREATE_RENDER_STATE_26_2, at = @At("RETURN"), require = 1)
     private <T extends Entity> void totemLumen$bindEntityRenderState(
             T entity,
             float partialTick,
