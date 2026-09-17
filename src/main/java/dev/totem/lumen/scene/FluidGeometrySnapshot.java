@@ -13,6 +13,7 @@ public final class FluidGeometrySnapshot {
     private final int sectionX;
     private final int sectionY;
     private final int sectionZ;
+    private final boolean fluidOnlyCell;
     private final float[] quadPositions;
     private final float[] quadUvs;
     private final int[] quadColors;
@@ -24,6 +25,7 @@ public final class FluidGeometrySnapshot {
             int blockX,
             int blockY,
             int blockZ,
+            boolean fluidOnlyCell,
             float[] quadPositions,
             float[] quadUvs,
             int[] quadColors,
@@ -37,6 +39,7 @@ public final class FluidGeometrySnapshot {
         this.sectionX = Math.floorDiv(blockX, 16);
         this.sectionY = Math.floorDiv(blockY, 16);
         this.sectionZ = Math.floorDiv(blockZ, 16);
+        this.fluidOnlyCell = fluidOnlyCell;
 
         Objects.requireNonNull(quadPositions, "quadPositions");
         Objects.requireNonNull(quadUvs, "quadUvs");
@@ -96,6 +99,11 @@ public final class FluidGeometrySnapshot {
         return sectionZ;
     }
 
+    /** True for a LiquidBlock cell; false when fluid coexists with waterlogged/custom block geometry. */
+    public boolean fluidOnlyCell() {
+        return fluidOnlyCell;
+    }
+
     public int quadCount() {
         return quadColors.length;
     }
@@ -136,6 +144,7 @@ public final class FluidGeometrySnapshot {
                 && blockX == other.blockX
                 && blockY == other.blockY
                 && blockZ == other.blockZ
+                && fluidOnlyCell == other.fluidOnlyCell
                 && Arrays.equals(quadPositions, other.quadPositions)
                 && Arrays.equals(quadUvs, other.quadUvs)
                 && Arrays.equals(quadColors, other.quadColors)
