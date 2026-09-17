@@ -23,6 +23,7 @@ final class FluidGeometrySnapshotTest {
                 66,
                 33,
                 true,
+                0xFF3F76E4,
                 positions,
                 new float[]{0, 0, 1, 0, 1, 1, 0, 1},
                 new int[]{0xCC3366FF},
@@ -33,6 +34,7 @@ final class FluidGeometrySnapshotTest {
         assertEquals(4, snapshot.sectionY());
         assertEquals(2, snapshot.sectionZ());
         assertTrue(snapshot.fluidOnlyCell());
+        assertEquals(0xFF3F76E4, snapshot.tintArgb());
         assertEquals(-1.0, snapshot.worldVertexX(0, 0));
         assertEquals(66.75, snapshot.worldVertexY(0, 0));
         assertEquals(33.0, snapshot.worldVertexZ(0, 0));
@@ -43,10 +45,11 @@ final class FluidGeometrySnapshotTest {
     void defensivelyCopiesAllGeometryArrays() {
         float[] positions = {0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0};
         float[] uvs = {0, 0, 1, 0, 1, 1, 0, 1};
-        int[] colors = {0xFFFFFFFF};
+        int[] colors = {0xFF2A5EB8};
         boolean[] doubleSided = {true};
         FluidGeometrySnapshot snapshot = new FluidGeometrySnapshot(
                 "minecraft:overworld", "minecraft:water", 0, 0, 0, false,
+                0xFF3F76E4,
                 positions, uvs, colors, doubleSided
         );
 
@@ -57,7 +60,8 @@ final class FluidGeometrySnapshotTest {
 
         assertEquals(0.0F, snapshot.copyQuadPositions()[0]);
         assertEquals(0.0F, snapshot.copyQuadUvs()[0]);
-        assertEquals(0xFFFFFFFF, snapshot.copyQuadColors()[0]);
+        assertEquals(0xFF2A5EB8, snapshot.copyQuadColors()[0]);
+        assertEquals(0xFF3F76E4, snapshot.tintArgb());
         assertTrue(snapshot.copyDoubleSided()[0]);
         assertNotSame(snapshot.copyQuadPositions(), snapshot.copyQuadPositions());
     }
@@ -65,12 +69,12 @@ final class FluidGeometrySnapshotTest {
     @Test
     void rejectsMalformedOrNonFiniteGeometry() {
         assertThrows(IllegalArgumentException.class, () -> new FluidGeometrySnapshot(
-                "minecraft:overworld", "minecraft:water", 0, 0, 0, true,
+                "minecraft:overworld", "minecraft:water", 0, 0, 0, true, 0xFFFFFFFF,
                 new float[11], new float[8], new int[]{1}, new boolean[]{false}
         ));
         float[] positions = {0, 0, 0, 1, 0, 0, 1, Float.NaN, 0, 0, 1, 0};
         assertThrows(IllegalArgumentException.class, () -> new FluidGeometrySnapshot(
-                "minecraft:overworld", "minecraft:water", 0, 0, 0, true,
+                "minecraft:overworld", "minecraft:water", 0, 0, 0, true, 0xFFFFFFFF,
                 positions, new float[8], new int[]{1}, new boolean[]{false}
         ));
     }
