@@ -21,7 +21,7 @@ final class P14EFluidShaderPatch {
         }
 
         String helpers = ("""
-                const uint P14E_FLUID_ABI_VERSION = 1u;
+                const uint P14E_FLUID_ABI_VERSION = %du;
                 const uint P14E_MAX_FLUID_CELLS = %du;
                 const uint P14E_LOOKUP_CAPACITY = %du;
                 const uint P14E_LOOKUP_MASK = %du;
@@ -186,6 +186,7 @@ final class P14EFluidShaderPatch {
                 }
 
                 """).formatted(
+                GpuFluidScene.ABI_VERSION,
                 GpuFluidScene.MAX_FLUID_CELLS,
                 GpuFluidScene.LOOKUP_CAPACITY,
                 GpuFluidScene.LOOKUP_CAPACITY - 1,
@@ -287,7 +288,8 @@ final class P14EFluidShaderPatch {
                 + source.substring(traversalStart);
 
         TotemLumenClient.LOGGER.info(
-                "P14E exact fluid tracing active: blockLookup={}, maxCells={}, maxQuads={}, waterloggedCoexistence=true, sharedDda=true",
+                "P14E exact fluid tracing active: abi={}, blockLookup={}, maxCells={}, maxQuads={}, waterloggedCoexistence=true, sharedDda=true",
+                GpuFluidScene.ABI_VERSION,
                 GpuFluidScene.LOOKUP_CAPACITY,
                 GpuFluidScene.MAX_FLUID_CELLS,
                 GpuFluidScene.MAX_FLUID_QUADS
