@@ -54,7 +54,7 @@ public final class P16MultipassReflection {
         VulkanComputeProgram created = null;
         long startedAt = System.nanoTime();
         try {
-            String source = P16ReflectionPassShader.build();
+            String source = P17ShaderIntegration.apply(P16ReflectionPassShader.build());
             TotemLumenClient.LOGGER.info(
                     "P16 split pipeline creation START: shader={}, sourceChars={}",
                     P16ReflectionPassShader.SHADER_NAME,
@@ -150,7 +150,7 @@ public final class P16MultipassReflection {
         if (!firstDispatchLogged) {
             firstDispatchLogged = true;
             TotemLumenClient.LOGGER.info(
-                    "P16 multipass reflection READY: base=P12-P15, reflection=separate-compute-pass, secondaryRays=1, maxDistance=64"
+                    "P16 multipass reflection READY: base=P12-P15+P17, reflection=separate-compute-pass+P17, secondaryRays=1, maxDistance=64"
             );
         }
     }

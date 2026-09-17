@@ -215,13 +215,69 @@ Runtime gate:
 
 Target for first meaningful public alpha.
 
-## P13-P18 - Scene quality
-- Sun/sky/dimension environment lighting.
-- Reflection/roughness.
-- Glass/water transmission.
-- Hybrid geometry for slabs/stairs/cutouts.
-- Dynamic entities.
-- Resource pack / LabPBR integration.
+## P13-P16 - Scene quality baseline
+Status: **implemented through Alpha 41; remaining runtime validation is milestone-specific**
+
+Implemented baseline:
+- P13 sun/sky/dimension environment lighting, including Alpha 40's procedural moon, resolved eight-step lunar phase and deterministic star field.
+- P14 hybrid block geometry: compact primitives, generic `BlockStateModel` meshes and P14D block-entity `Model` / `ModelPart` capture.
+- P15 clear/stained glass transmission reused by sun/moon/sky/local/GI paths.
+- P16 bounded rough/metallic reflection in a split compute pass with independent failure semantics.
+- Alpha 38 persistent driver/device-keyed Vulkan pipeline cache.
+- Alpha 41 explicit Vulkan device/interop/pipeline readiness state machine; no false-ready renderer state.
+
+Known geometry/material gaps after Alpha 41 include dynamic world entities, exact flowing/sloped fluid surfaces, texture-alpha silhouettes, specialized renderer command families and resource-pack/PBR material data.
+
+## P17 - Dynamic entities (`0.1.0-alpha.42`)
+Status: **ACTIVE MILESTONE**
+
+P17A — capture + CPU broad phase: **IMPLEMENTED / CI PASS**
+- Player/general `LivingEntity` scopes capture renderer-resolved Minecraft `Model` geometry.
+- Temporary render states bind to stable `(dimension, Entity.getId())` identities.
+- Retained snapshots are immutable/Minecraft-object-free and preserve absolute CPU world coordinates at double precision.
+- Entity AABBs are binned into overlapping 16x16x16 sections with bounded candidate lists and explicit overflow diagnostics.
+- Minecraft 26.2 entity/mixin descriptors are verified against the actual client runtime classes in CI.
+
+P17B — bounded Vulkan scene ABI + upload: **IMPLEMENTED / CI PASS**
+- 256 dynamic entity descriptors, 65,536 entity quads, 512 section-candidate hash buckets and 32 candidates/section form the first measured-capacity baseline.
+- GPU descriptors use integer section origins plus section-local floats to preserve far-world precision.
+- Entity data occupies a separate scene tail after the existing pixel/P14 regions; the 32-bit voxel record is unchanged.
+- Entity pose/movement/lifecycle revisions repack and copy only the P17 tail instead of re-uploading static section voxels.
+- Entity-scene changes conservatively disable temporal-history reads for that frame until P17 hit identity is integrated into history validation.
+
+P17C — shared nearest-hit integration: **IN PROGRESS**
+- Dynamic entity triangles must compete with static voxel/model geometry for nearest ray distance.
+- The same hit path must serve primary visibility, sun/moon and local-light shadows, diffuse GI, environment visibility and P16 reflection.
+- Alpha 42 is not visually complete until this path is runtime-validated.
+
+P17D — entity material fidelity: **PENDING**
+- A conservative initial entity surface identity/color is acceptable for the first geometry gate.
+- Skin/texture alpha, armor/equipment, emissive entity layers and resource-pack/PBR semantics remain later material work.
+
+Canonical P17 design/runtime gate: [`P17_DYNAMIC_ENTITIES.md`](P17_DYNAMIC_ENTITIES.md).
+
+## P14E - Exact fluid geometry (`0.1.0-alpha.43`, planned)
+Status: **PLANNED AFTER P17**
+
+- Capture Minecraft's renderer-resolved flowing/sloped water and lava surfaces rather than treating every fluid cell as a full/flat voxel approximation.
+- Support fluid level slopes, corner heights, side faces/waterfalls, lava and live fluid updates.
+- Feed the same exact surface into primary rays, shadows, GI, P15 transmission and P16 reflection.
+- Reuse existing scene invalidation and shared geometry principles; do not create block-id-specific hand-authored fluid geometry tables.
+
+## P18 - Resource pack / LabPBR integration
+Status: **PLANNED AFTER EXACT FLUID GEOMETRY**
+
+- Move surface source-of-truth from built-in fallback roughness/metallic values toward resource-pack/LabPBR data.
+- Integrate texture alpha/material semantics without splitting ray geometry consumers into separate implementations.
+
+## Current scene-quality execution order
+
+```text
+Alpha 41 runtime readiness
+  -> Alpha 42 / P17 Dynamic Entities
+  -> Alpha 43 / P14E Exact Fluid Geometry
+  -> P18 Resource Pack / LabPBR integration
+```
 
 ## P19+ - Optional hardware RT and advanced sampling
 - Feature-detected Vulkan acceleration structures and RT pipeline.

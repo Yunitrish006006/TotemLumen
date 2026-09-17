@@ -6,13 +6,14 @@ This file is the repository index for design plans and decision tables. Architec
 | --- | --- | --- |
 | Whole project architecture | [`ARCHITECTURE.md`](ARCHITECTURE.md) | Vulkan/client vs common/server boundaries, authority model, package direction |
 | Renderer phases | [`ROADMAP.md`](ROADMAP.md) | P0+ renderer milestones and runtime validation gates |
-| P13 Overworld moon | [`P13_OVERWORLD_MOON.md`](P13_OVERWORLD_MOON.md) | moon disk, opposite-sun celestial direction, moonlight visibility, phase limitation and runtime gate |
+| P13 Overworld moon | [`P13_OVERWORLD_MOON.md`](P13_OVERWORLD_MOON.md) | moon disk, opposite-sun celestial direction, eight-step lunar phase, moonlight visibility and runtime gate |
 | P14C generic block models | [`P14C_GENERIC_BLOCK_MODELS.md`](P14C_GENERIC_BLOCK_MODELS.md) | static BlockStateModel quad extraction, generic mesh ABI/GPU layout, geometry-domain completeness matrix and future-proofing rules |
 | P14D block-entity geometry | [`P14D_BLOCK_ENTITY_GEOMETRY.md`](P14D_BLOCK_ENTITY_GEOMETRY.md) | renderer submit capture, static+BE composition, stable mutable mesh ids, model-tail updates, lifecycle and runtime gates |
 | P16 reflection / roughness | [`P16_REFLECTION_ROUGHNESS.md`](P16_REFLECTION_ROUGHNESS.md) | surface fallback values, 32-bit voxel packing, Fresnel/reflection model, performance scope and runtime validation |
 | P16 MoltenVK startup stalls | [`P16_MOLTENVK_PIPELINE_STALL.md`](P16_MOLTENVK_PIPELINE_STALL.md) | Alpha 34/35 runtime stalls, non-blocking pipeline prewarm and why waiting/cache alone is insufficient |
 | P16 multi-pass split | [`P16_MULTIPASS_SPLIT.md`](P16_MULTIPASS_SPLIT.md) | Alpha 36 pass boundaries, shared-SSBO synchronization, independent reflection readiness, shader compile policy and fallback semantics |
 | Persistent Vulkan pipeline cache | [`PERSISTENT_VULKAN_PIPELINE_CACHE.md`](PERSISTENT_VULKAN_PIPELINE_CACHE.md) | Alpha 37 startup measurements, Alpha 38 VkPipelineCache persistence, cache identity/fallback rules and runtime validation |
+| P17 dynamic entities | [`P17_DYNAMIC_ENTITIES.md`](P17_DYNAMIC_ENTITIES.md) | Player/LivingEntity renderer capture, immutable dynamic snapshots, section broad phase, Vulkan integration gates and runtime validation |
 | Server gameplay-light phases | [`GAMEPLAY_LIGHTING_ROADMAP.md`](GAMEPLAY_LIGHTING_ROADMAP.md) | GL0–GL5 implementation/validation roadmap |
 | Authoritative gameplay-light design | [`SERVER_GAMEPLAY_LIGHTING.md`](SERVER_GAMEPLAY_LIGHTING.md) | storage, propagation, spawn policy, sky/environment, budgets, resource estimates, validation matrix |
 | Data-pack block lighting | [`LIGHTING_WORLD_RULES.md`](LIGHTING_WORLD_RULES.md) | `emission_color`, `gameplay_strength`, reload/sync semantics |
@@ -24,9 +25,9 @@ This file is the repository index for design plans and decision tables. Architec
 | --- | --- |
 | Overworld sun source | captured Overworld clock drives one procedural sun direction and sun disk in P13 |
 | Overworld moon source | moon direction is exactly the celestial opposite of the P13 sun direction and is horizon-gated independently |
-| Moon sky appearance | procedural full disk plus low-intensity halo in Alpha 40; no separate sky texture/resource/pass |
+| Moon sky appearance | procedural disk plus low-intensity halo; no separate sky texture/resource/pass |
 | Moon surface lighting | weak cool directional term with the same ray-traced visibility semantics as sun lighting |
-| Lunar phase | explicitly deferred; current packed environment state has no day index / 8-step phase and stochastic seed bits are not repurposed |
+| Lunar phase | Alpha 40 captures Minecraft 26.2's resolved eight-step `MOON_PHASE`; 3 packed environment bits drive moon silhouette, halo and directional moonlight strength while preserving the 16-bit stochastic seed |
 | Static block geometry source | resolved Minecraft/Fabric `BlockStateModel` emitted quads; block-id shape tables are not the general source of truth |
 | Generic static geometry ABI | `MODEL_MESH (0xA000)` with 12-bit deduplicated mesh id in the existing 32-bit voxel word |
 | Full-cube performance | detect canonical unit cubes and keep the established full-cube fast path |
@@ -39,10 +40,19 @@ This file is the repository index for design plans and decision tables. Architec
 | Block-entity GPU updates | registry revision may repack/copy only the shared scene-SSBO model tail; section voxel data stays unchanged after the initial geometry-code switch |
 | Block-entity lifecycle | recycle dynamic ids on chunk unload and client-level changes |
 | Specialized BE commands | Model/ModelPart is the generic P14D baseline; text/item/beam/portal/custom command families require explicit adapters rather than being claimed complete |
-| Out-of-cell BE geometry | requires a later instance-bounds/broad-phase extension; owner-voxel DDA is not sufficient for arbitrary protruding models |
-| Fluid geometry | separate renderer domain; exact flowing/sloped surfaces remain pending after P14D |
+| Out-of-cell BE geometry | P17's instance-AABB / section-broad-phase work is the preferred reusable basis for a later out-of-cell block-entity extension; owner-voxel DDA alone is insufficient |
+| Fluid geometry | separate renderer domain; exact flowing/sloped surfaces remain pending and are planned after P17 as Alpha 43 / P14E |
 | Alpha-cutout geometry | emitted planes are represented; texture-alpha silhouette testing remains pending material integration |
 | Out-of-cell / random-offset static models | require instance/broad-phase follow-up; do not destroy mesh dedup by baking position into every mesh id |
+| Dynamic entity source | capture renderer-resolved Minecraft 26.2 `Model` submissions inside an `EntityRenderDispatcher.submit(...)` scope; do not maintain mob-specific ray-geometry tables |
+| Alpha 42 entity scope | Player and ordinary `LivingEntity` renderers first; items, vehicles, projectiles, text/display and custom command families require explicit follow-up adapters |
+| Dynamic entity ownership | retained scene data is immutable/copy-owned: entity-local quad positions + absolute world position + world AABB; no live `Entity`, render-state, `Model`, `ModelPart` or `PoseStack` enters Vulkan code |
+| Dynamic entity precision | absolute CPU world position/AABB remains double precision; the future GPU ABI should encode section-relative values rather than prematurely converting far-world coordinates to float |
+| Dynamic entity broad phase | bin each world AABB into overlapping 16x16x16 sections; rays query bounded section candidates instead of linearly scanning every entity |
+| Dynamic entity overflow | per-section candidate capacity is bounded and overflow is counted/reported explicitly; capacity changes require runtime measurements |
+| Dynamic entity GPU updates | entity descriptors/mesh data must be isolated from static voxel uploads so animation does not force section voxel repacks |
+| Dynamic entity consumers | one shared nearest-hit path must feed camera rays, sun/moon and local-light visibility, diffuse GI, sky/environment visibility, P15 transmission where applicable and P16 reflection |
+| Scene-quality milestone order | Alpha 42 / P17 Dynamic Entities -> Alpha 43 / P14E Exact Fluid Geometry -> P18 Resource Pack / LabPBR integration |
 | Reflection baseline | one bounded secondary reflection ray in GI Composite |
 | Roughness | 4-bit full-cube fallback profile; deterministic rough reflection direction |
 | Metallic | 4-bit full-cube fallback profile; metallic F0 tint |
@@ -52,7 +62,7 @@ This file is the repository index for design plans and decision tables. Architec
 | Glass interface reflection | deferred until refraction/Fresnel interface transport |
 | Specular recursion | excluded from P16 |
 | Surface source of truth | built-in fallback now; resource-pack/LabPBR later |
-| Voxel memory growth | none for per-voxel records; P14C/P14D share the scene mesh pool rather than widening voxels |
+| Voxel memory growth | none for per-voxel records; P14C/P14D share the scene mesh pool and P17 dynamic entities use a separate bounded scene region rather than widening voxels |
 | Base compute pipeline | P12-P15 only; renderer readiness must not depend on reflection compilation |
 | Reflection compute pipeline | independent P16 pass over the same scene SSBO, dispatched before the existing buffer-to-image copy |
 | Pass synchronization | compute shader-write -> shader-read/write SSBO barrier between base and reflection dispatches |

@@ -2,6 +2,7 @@ package dev.totem.lumen.mixin;
 
 import com.mojang.blaze3d.vertex.PoseStack;
 import dev.totem.lumen.integration.BlockEntityRenderGeometryCapture;
+import dev.totem.lumen.integration.EntityRenderGeometryCapture;
 import net.minecraft.client.model.Model;
 import net.minecraft.client.renderer.SubmitNodeStorage;
 import net.minecraft.client.renderer.feature.ModelFeatureRenderer;
@@ -12,7 +13,7 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
-/** Captures model commands only while a BlockEntityRenderDispatcher P14D scope is active. */
+/** Captures model commands for the active P14D block-entity or P17 entity scope. */
 @Mixin(SubmitNodeStorage.class)
 public abstract class SubmitNodeStorageBlockEntityMixin {
     private static final String SUBMIT_MODEL_26_2 =
@@ -37,5 +38,6 @@ public abstract class SubmitNodeStorageBlockEntityMixin {
             CallbackInfo ci
     ) {
         BlockEntityRenderGeometryCapture.captureModel(model, state, poseStack);
+        EntityRenderGeometryCapture.captureModel(model, state, poseStack);
     }
 }

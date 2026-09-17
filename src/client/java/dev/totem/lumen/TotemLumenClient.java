@@ -2,11 +2,13 @@ package dev.totem.lumen;
 
 import com.mojang.blaze3d.platform.InputConstants;
 import dev.totem.lumen.integration.ClientLightingWorldRules;
+import dev.totem.lumen.integration.EntityRenderGeometryCache;
 import dev.totem.lumen.integration.MinecraftBlockModelMeshResolver;
 import dev.totem.lumen.integration.P13EnvironmentCapture;
 import dev.totem.lumen.integration.SceneExtractionBridge;
 import dev.totem.lumen.network.LightingWorldRulesPayload;
 import dev.totem.lumen.render.RendererBootstrap;
+import dev.totem.lumen.render.RendererCompileProgressNotifier;
 import dev.totem.lumen.vulkan.P5StableLookupRenderer;
 import dev.totem.lumen.vulkan.P5WorldDebugComposite;
 import dev.totem.lumen.vulkan.VulkanComputeProgram;
@@ -48,6 +50,8 @@ public final class TotemLumenClient implements ClientModInitializer {
             if (ClientLightingWorldRules.reset()) {
                 LOGGER.info("Cleared server-authoritative lighting world rules after disconnect");
             }
+            EntityRenderGeometryCache.clear();
+            RendererCompileProgressNotifier.reset();
         });
 
         // GLSL -> SPIR-V starts before the Vulkan device exists. Once RendererBootstrap sees the
@@ -74,11 +78,18 @@ public final class TotemLumenClient implements ClientModInitializer {
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             RendererBootstrap.tick();
+            if (client.level != null) {
+                EntityRenderGeometryCache.prune(
+                        client.level.dimension().identifier().toString(),
+                        client.level.getGameTime()
+                );
+            }
             // P14C watches Minecraft's model-set identity independently of block updates so a
             // resource-pack reload schedules bounded section re-extraction even in a static world.
             MinecraftBlockModelMeshResolver.checkModelSetReload();
             SceneExtractionBridge.tick();
             P5StableLookupRenderer.tickLifecycle(client);
+            RendererCompileProgressNotifier.tick(client);
 
             while (cycleDebugMode.consumeClick()) {
                 P5StableLookupRenderer.DebugMode mode = P5StableLookupRenderer.cycleMode();
@@ -120,6 +131,10 @@ public final class TotemLumenClient implements ClientModInitializer {
                 (graphics, deltaTracker) -> P5StableLookupRenderer.drawHud(graphics)
         );
 
-        ClientLifecycleEvents.CLIENT_STOPPING.register(client -> P5StableLookupRenderer.shutdown());
+        ClientLifecycleEvents.CLIENT_STOPPING.register(client -> {
+            RendererCompileProgressNotifier.reset();
+            EntityRenderGeometryCache.clear();
+            P5StableLookupRenderer.shutdown();
+        });
     }
 }
