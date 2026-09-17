@@ -1,5 +1,6 @@
 package dev.totem.lumen.mixin;
 
+import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import dev.totem.lumen.integration.FluidRenderGeometryCapture;
 import net.minecraft.client.renderer.block.BlockAndTintGetter;
@@ -25,6 +26,18 @@ public abstract class FluidRendererCaptureMixin {
             CallbackInfo ci
     ) {
         FluidRenderGeometryCapture.begin(pos, blockState, fluidState);
+    }
+
+    @ModifyExpressionValue(
+            method = "tesselate",
+            at = @At(
+                    value = "INVOKE",
+                    target = "Lnet/minecraft/client/color/block/BlockTintSource;colorInWorld(Lnet/minecraft/world/level/block/state/BlockState;Lnet/minecraft/client/renderer/block/BlockAndTintGetter;Lnet/minecraft/core/BlockPos;)I"
+            )
+    )
+    private int totemLumen$captureFluidTint(int original) {
+        FluidRenderGeometryCapture.tint(original);
+        return original;
     }
 
     @Inject(method = "addFace", at = @At("HEAD"))
