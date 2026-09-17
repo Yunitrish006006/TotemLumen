@@ -24,8 +24,9 @@ public final class P14ShaderCompileVerifier {
         baseSource = P13SkyOcclusionPatch.apply(baseSource);
         baseSource = P16ReflectionRoughnessPatch.apply(baseSource);
 
-        verifyP13MoonSource(baseSource);
+        verifyP13NightSkySource(baseSource);
         String reflectionSource = P16ReflectionPassShader.build();
+        verifyP13NightSkySource(reflectionSource);
 
         long compiler = Shaderc.shaderc_compiler_initialize();
         if (compiler == 0L) {
@@ -45,21 +46,29 @@ public final class P14ShaderCompileVerifier {
         }
     }
 
-    private static void verifyP13MoonSource(String source) {
+    private static void verifyP13NightSkySource(String source) {
+        requireSourceMarker(source, "uint p13MoonPhase()", "packed moon phase");
+        requireSourceMarker(source, "float p13MoonPhaseBrightness()", "phase-weighted moonlight");
+        requireSourceMarker(source, "float p13MoonPhaseMask(vec3 direction, vec3 moonDirection)", "phase silhouette");
         requireSourceMarker(source, "vec3 p13MoonDirection()", "moon direction");
-        requireSourceMarker(source, "float p13MoonStrength(vec3 moonDirection)", "moon horizon gating");
+        requireSourceMarker(source, "float p13MoonStrength(vec3 moonDirection)", "moon horizon/phase gating");
         requireSourceMarker(source, "float p13MoonDisk(vec3 direction, vec3 moonDirection)", "moon disk");
         requireSourceMarker(source, "vec3 moon = p13MoonColor()", "moon surface lighting");
         requireSourceMarker(source, "vec3 moonTransmission = vec3(0.0);", "P15 moon transmission");
+        requireSourceMarker(source, "uint p13StarHash(uvec2 cell)", "procedural star hash");
+        requireSourceMarker(source, "vec2 p13StarSkyUv(vec3 direction)", "rotating star dome");
+        requireSourceMarker(source, "vec3 p13StarRadiance(vec3 direction, vec3 sunDirection)", "star radiance");
+        requireSourceMarker(source, "vec3 stars = p13StarRadiance(dir, sunDirection);", "star sky composition");
+        requireSourceMarker(source, "return scene.data[41] & 0xFFFFu;", "full stochastic frame seed");
         System.out.println(
-                "P13 moon shader verification PASS: disk=true, coldDirectionalLight=true, "
-                        + "oppositeSun=true, p15Transmission=true"
+                "P13 night-sky shader verification PASS: moon=true, phaseSteps=8, stars=true, "
+                        + "deterministicStars=true, rotatingStarDome=true, fullFrameSeed=true, p15Transmission=true"
         );
     }
 
     private static void requireSourceMarker(String source, String marker, String label) {
         if (!source.contains(marker)) {
-            throw new IllegalStateException("P13 moon shader verification missing " + label + ": " + marker);
+            throw new IllegalStateException("P13 night-sky shader verification missing " + label + ": " + marker);
         }
     }
 

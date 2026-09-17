@@ -19,14 +19,19 @@ The server gameplay subsystem never initializes or depends on Vulkan. A dedicate
 
 ## Current milestone
 
-`0.1.0-alpha.40` fixes the P13 Overworld night environment so the custom sky no longer loses the moon when Totem Lumen owns the GI Composite output.
+`0.1.0-alpha.40` rebuilds the P13 Overworld night sky inside Totem Lumen's shared environment-lighting path: procedural moon, Minecraft's resolved eight-step lunar phase, and a deterministic procedural star field now remain present when Totem Lumen owns the GI Composite output.
 
 - the moon direction is the exact celestial opposite of the existing time-of-day sun direction;
-- a procedural moon disk plus low-intensity halo is rendered only while the moon is above the horizon;
-- Overworld surfaces receive a separate weak cool moon directional term with the same ray-traced visibility semantics used by the sun;
-- moonlight therefore participates in environment surface radiance, GI bounce evaluation and the split P16 reflection pass through the existing shared P13 helpers;
-- daylight/sun behavior remains unchanged, and the moon does not add light while below the horizon;
-- current Alpha 40 intentionally uses a full disk because the packed frame environment state does not yet carry Minecraft's 8-step lunar phase/day index. Lunar phases are a follow-up rather than being silently approximated as complete.
+- `P13EnvironmentCapture` reads Minecraft 26.2's resolved `EnvironmentAttributes.MOON_PHASE`, preserving the vanilla full/waning/quarter/crescent/new/waxing phase order;
+- a procedural moon disk uses a curved terminator to render distinct full, gibbous, quarter, crescent and new-moon silhouettes without adding a texture or render pass;
+- moon halo and directional moonlight strength track the eight phase factors `1.0 / 0.75 / 0.5 / 0.25 / 0.0 / 0.25 / 0.5 / 0.75`;
+- the 32-bit frame environment word uses 2 dimension bits + 11 day-phase bits + 3 lunar-phase bits + the original 16-bit stochastic seed, so temporal/GI seed range is preserved;
+- `P13StarfieldPatch` adds sparse deterministic stars that fade in at night, fade near the horizon and rotate with the captured day phase without per-frame twinkle;
+- star brightness, size and warm/cool tint vary per deterministic sky cell, while exact world-up ambient sampling is guarded so visible stars do not become fake point lights on ordinary block tops;
+- Overworld surfaces receive a separate weak cool moon directional term with the same ray-traced visibility semantics used by the sun, including P15 RGB glass transmission;
+- moonlight, stars and the underlying sky remain in the shared environment definition used by GI bounce misses and the split P16 reflection pass;
+- daylight/sun behavior remains unchanged, and the moon does not add light while below the horizon or during new moon;
+- Alpha 40 intentionally keeps the star field temporally stable. Weather-dependent star suppression / Minecraft `STAR_BRIGHTNESS` integration is a later environment-state follow-up rather than consuming more packed frame bits now.
 
 Alpha 39's P14D block-entity geometry capture remains the current geometry baseline. `BlockEntityRenderDispatcher` scopes renderer-resolved `Model` / `ModelPart` capture into Totem Lumen-owned block-local quads, stable mutable `MODEL_MESH` ids preserve animation without exhausting the 12-bit mesh space, and chunk/level lifecycle recycles dynamic mesh ids. Bell/chest/shulker animation correctness still requires in-game validation; exact flowing/sloped fluid surfaces remain the next pre-P17 geometry domain.
 
@@ -57,7 +62,7 @@ Minecraft client extraction
   -> immutable/copy-owned scene + shared mutable mesh slots
   -> Vulkan GPU scene + shared generic model mesh pool
   -> P12-P15 base compute pass
-       -> P13 sun / sky / moon environment
+       -> P13 sun / sky / moon + lunar phase + procedural stars
   -> P16 reflection compute pass
   -> composition
 ```
@@ -77,7 +82,7 @@ CI installs Gradle 9.5.1 explicitly.
 
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — client/server layering and hard architectural boundaries.
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — renderer roadmap and completed milestones.
-- [`docs/P13_OVERWORLD_MOON.md`](docs/P13_OVERWORLD_MOON.md) — Overworld moon disk, moonlight transport, limitations and runtime validation.
+- [`docs/P13_OVERWORLD_MOON.md`](docs/P13_OVERWORLD_MOON.md) — Alpha 40 Overworld night sky: moon disk, eight-step lunar phase, procedural stars, transport and runtime validation.
 - [`docs/P14C_GENERIC_BLOCK_MODELS.md`](docs/P14C_GENERIC_BLOCK_MODELS.md) — generic static block-model extraction, GPU ABI, geometry-domain matrix, limits and validation plan.
 - [`docs/P14D_BLOCK_ENTITY_GEOMETRY.md`](docs/P14D_BLOCK_ENTITY_GEOMETRY.md) — block-entity renderer geometry capture, stable mutable mesh slots, lifecycle, limitations and runtime validation.
 - [`docs/P16_REFLECTION_ROUGHNESS.md`](docs/P16_REFLECTION_ROUGHNESS.md) — reflection model, surface profiles, ABI choice, limitations and validation plan.

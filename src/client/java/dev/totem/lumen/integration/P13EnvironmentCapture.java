@@ -4,8 +4,10 @@ import dev.totem.lumen.TotemLumenClient;
 import dev.totem.lumen.scene.EnvironmentFrameState;
 import net.fabricmc.fabric.api.client.rendering.v1.level.LevelExtractionEvents;
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.world.attribute.EnvironmentAttributes;
+import net.minecraft.world.level.MoonPhase;
 
-/** Captures dimension/time-of-day state before SceneExtractionBridge snapshots the frame. */
+/** Captures dimension/time-of-day/lunar-phase state before SceneExtractionBridge snapshots the frame. */
 public final class P13EnvironmentCapture {
     private static boolean initialized;
     private static String lastDimensionId;
@@ -26,14 +28,17 @@ public final class P13EnvironmentCapture {
     private static void capture(ClientLevel level) {
         String dimensionId = level.dimension().identifier().toString();
         long overworldClockTime = level.getOverworldClockTime();
-        EnvironmentFrameState.capture(dimensionId, overworldClockTime);
+        MoonPhase moonPhase = level.environmentAttributes()
+                .getDimensionValue(EnvironmentAttributes.MOON_PHASE);
+        EnvironmentFrameState.capture(dimensionId, overworldClockTime, moonPhase.index());
 
         if (!dimensionId.equals(lastDimensionId)) {
             lastDimensionId = dimensionId;
             TotemLumenClient.LOGGER.info(
-                    "P13 environment source active: dimension={}, overworldClockTime={}",
+                    "P13 environment source active: dimension={}, overworldClockTime={}, moonPhase={}",
                     dimensionId,
-                    overworldClockTime
+                    overworldClockTime,
+                    moonPhase.getSerializedName()
             );
         }
     }
