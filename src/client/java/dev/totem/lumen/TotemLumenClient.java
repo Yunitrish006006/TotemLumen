@@ -93,35 +93,7 @@ public final class TotemLumenClient implements ClientModInitializer {
             // The old P5 world bootstrap is now a zero-GPU compatibility gate.
             P5WorldDebugComposite.runOnceOnRenderThread();
 
-            if (rendererRuntimeFailed) {
-                return;
-            }
-
-            Throwable shaderFailure = VulkanComputeProgram.mainGiShaderPrewarmFailure();
-            if (shaderFailure != null) {
-                rendererRuntimeFailed = true;
-                LOGGER.error(
-                        "Totem Lumen shader prewarm failed; disabling its renderer for this session while Minecraft continues",
-                        shaderFailure
-                );
-                return;
-            }
-
-            Throwable pipelineFailure = VulkanComputeProgram.mainGiPipelinePrewarmFailure();
-            if (pipelineFailure != null) {
-                rendererRuntimeFailed = true;
-                LOGGER.error(
-                        "Totem Lumen Vulkan pipeline prewarm failed; disabling its renderer for this session while Minecraft continues",
-                        pipelineFailure
-                );
-                return;
-            }
-
-            // Never wait for shaderc, SPIR-V -> MSL conversion, or Metal pipeline compilation from
-            // the render thread. Vanilla Minecraft remains responsive until both background stages
-            // are ready, then Totem Lumen starts on a later frame.
-            if (!VulkanComputeProgram.mainGiShaderPrewarmReady()
-                    || !VulkanComputeProgram.mainGiPipelinePrewarmReady()) {
+            if (rendererRuntimeFailed || !RendererBootstrap.readyForRendering()) {
                 return;
             }
 
