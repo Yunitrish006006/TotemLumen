@@ -4,6 +4,8 @@ import dev.totem.lumen.TotemLumenClient;
 import dev.totem.lumen.scene.FluidGeometrySnapshot;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.level.block.LiquidBlock;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.FluidState;
 
 import java.util.ArrayList;
@@ -17,14 +19,15 @@ public final class FluidRenderGeometryCapture {
     private FluidRenderGeometryCapture() {
     }
 
-    public static void begin(BlockPos pos, FluidState fluidState) {
+    public static void begin(BlockPos pos, BlockState blockState, FluidState fluidState) {
         String dimensionId = FluidRenderGeometryCache.activeDimensionId();
-        if (dimensionId == null || pos == null || fluidState == null || fluidState.isEmpty()) {
+        if (dimensionId == null || pos == null || blockState == null || fluidState == null || fluidState.isEmpty()) {
             ACTIVE.remove();
             return;
         }
         String fluidTypeId = BuiltInRegistries.FLUID.getKey(fluidState.getType()).toString();
-        ACTIVE.set(new Capture(dimensionId, pos.immutable(), fluidTypeId));
+        boolean fluidOnlyCell = blockState.getBlock() instanceof LiquidBlock;
+        ACTIVE.set(new Capture(dimensionId, pos.immutable(), fluidTypeId, fluidOnlyCell));
     }
 
     public static void face(
@@ -69,6 +72,7 @@ public final class FluidRenderGeometryCapture {
                 capture.pos.getX(),
                 capture.pos.getY(),
                 capture.pos.getZ(),
+                capture.fluidOnlyCell,
                 positions,
                 uvs,
                 colors,
@@ -79,11 +83,12 @@ public final class FluidRenderGeometryCapture {
         if (!firstCaptureLogged) {
             firstCaptureLogged = true;
             TotemLumenClient.LOGGER.info(
-                    "P14E exact fluid geometry capture active: fluid={}, block=({}, {}, {}), quads={}",
+                    "P14E exact fluid geometry capture active: fluid={}, block=({}, {}, {}), fluidOnly={}, quads={}",
                     capture.fluidTypeId,
                     capture.pos.getX(),
                     capture.pos.getY(),
                     capture.pos.getZ(),
+                    capture.fluidOnlyCell,
                     quadCount
             );
         }
@@ -97,12 +102,14 @@ public final class FluidRenderGeometryCapture {
         private final String dimensionId;
         private final BlockPos pos;
         private final String fluidTypeId;
+        private final boolean fluidOnlyCell;
         private final List<Face> faces = new ArrayList<>(6);
 
-        private Capture(String dimensionId, BlockPos pos, String fluidTypeId) {
+        private Capture(String dimensionId, BlockPos pos, String fluidTypeId, boolean fluidOnlyCell) {
             this.dimensionId = dimensionId;
             this.pos = pos;
             this.fluidTypeId = fluidTypeId;
+            this.fluidOnlyCell = fluidOnlyCell;
         }
     }
 
