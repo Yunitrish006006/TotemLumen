@@ -18,11 +18,12 @@ Minecraft 26.2 entity rendering is submission based. `EntityRenderDispatcher.sub
 
 P17 therefore reuses the same architectural principle as P14D:
 
-1. establish a capture scope around one entity submission;
-2. observe renderer-resolved `Model` commands already selected by Minecraft;
-3. apply the exact render state to the model before copying geometry;
-4. copy only transformed primitive positions into Totem Lumen-owned arrays;
-5. retain no live Minecraft `Entity`, `Model`, `ModelPart`, render-state, or `PoseStack` objects in the ray-tracing scene.
+1. bind Minecraft's temporary render state to the stable source entity identity during `EntityRenderer.getAndUpdateRenderState(...)`;
+2. establish a capture scope around one entity submission;
+3. observe renderer-resolved `Model` commands already selected by Minecraft;
+4. apply the exact render state to the model before copying geometry;
+5. copy only transformed primitive positions into Totem Lumen-owned arrays;
+6. retain no live Minecraft `Entity`, `Model`, `ModelPart`, render-state, or `PoseStack` objects in the ray-tracing scene.
 
 Alpha 42 initially captures only `LivingEntityRenderState` scopes. Other entity command families are explicit follow-ups.
 
@@ -37,6 +38,8 @@ The immutable snapshot separately stores the entity render state's absolute worl
 ```text
 worldBound = entityWorldPosition + capturedEntityLocalVertex
 ```
+
+Absolute world positions and AABBs remain double precision on the CPU. A future GPU ABI should convert them to section-relative values rather than prematurely storing large world coordinates in float precision.
 
 This separation is required so future GPU upload can update an instance transform independently of shared/static mesh data when possible.
 
@@ -71,7 +74,11 @@ The CPU broad phase uses a fixed default capacity of 32 entity references per se
 
 ## Capture cache and lifecycle
 
-`EntityRenderGeometryCache` assigns weak render-state identities to Totem Lumen instance ids and retains only immutable snapshots. Entries not observed for a small number of level ticks are removed. Disconnect/client shutdown clears the cache.
+Minecraft render states are not treated as persistent entity identity. `EntityRendererStateMixin` observes `EntityRenderer.getAndUpdateRenderState(Entity, float)` and binds the returned render-state object to a Totem Lumen instance keyed by `(dimension id, Entity.getId())`. The later dispatcher/model capture uses that binding for the current frame.
+
+This keeps one stable Totem Lumen instance id across per-frame render-state allocation while still ensuring the retained scene contains no live `Entity` reference. A fallback temporary id exists only as a diagnostic compatibility path if Minecraft changes extraction ordering.
+
+Entries not observed for a small number of level ticks are removed together with their stable entity-id mapping. Disconnect/client shutdown clears all bindings and snapshots.
 
 The first runtime diagnostic is:
 
@@ -79,7 +86,19 @@ The first runtime diagnostic is:
 P17 dynamic entity geometry capture active: type=<entity type> quads=<count>
 ```
 
+A fallback identity path additionally logs a warning and must not appear in a successful Alpha 42 runtime gate.
+
 This proves Minecraft's live entity submit path reached the generic capture layer. It does **not** by itself prove GPU rendering is complete.
+
+## Build-time Minecraft ABI gate
+
+The existing mixin descriptor verifier now checks all P17 Minecraft-facing methods against the actual Minecraft 26.2 client runtime classes:
+
+- `EntityRenderer.getAndUpdateRenderState(Entity, float) -> EntityRenderState`;
+- `EntityRenderDispatcher.submit(EntityRenderState, CameraRenderState, double, double, double, PoseStack, SubmitNodeCollector)`;
+- the two `submitModel(...)` implementations already shared with P14D.
+
+These are required mixins. A descriptor drift must fail CI instead of being discovered as an `InvalidInjectionException` at player startup.
 
 ## GPU integration plan
 
@@ -88,8 +107,10 @@ Alpha 42 is developed in explicit gates.
 ### P17A — capture + CPU broad phase
 
 - Player/general LivingEntity model submissions captured.
+- Stable source entity identity survives temporary per-frame render states.
 - Immutable scene snapshots produced.
 - Section-binned broad phase implemented and unit tested.
+- Minecraft-facing mixin descriptors verified against 26.2 during CI.
 - No change to final ray result yet.
 
 ### P17B — Vulkan scene ABI
@@ -132,13 +153,14 @@ Alpha 42 is accepted only when all of the following are demonstrated in-world:
 1. a remote or third-person player produces captured dynamic geometry;
 2. at least two ordinary living mobs with different skeletons/models produce captured geometry without entity-specific hooks;
 3. walking, turning, crouching and limb animation update geometry without stale trails;
-4. despawn/chunk movement/world rejoin does not retain stale entities;
-5. entity geometry appears in the Totem Lumen primary ray image;
-6. entities cast directional/local-light shadows;
-7. entities appear in P16 reflections;
-8. existing P12-P16 static-world rendering remains functional;
-9. no unbounded per-frame mesh-id/resource growth occurs;
-10. section candidate overflow is zero in the validation scene or is reported explicitly if the stress case exceeds the configured capacity.
+4. no `temporary instance id` fallback warning appears during the normal Player/LivingEntity validation path;
+5. despawn/chunk movement/world rejoin does not retain stale entities;
+6. entity geometry appears in the Totem Lumen primary ray image;
+7. entities cast directional/local-light shadows;
+8. entities appear in P16 reflections;
+9. existing P12-P16 static-world rendering remains functional;
+10. no unbounded per-frame mesh-id/resource growth occurs;
+11. section candidate overflow is zero in the validation scene or is reported explicitly if the stress case exceeds the configured capacity.
 
 ## Explicit follow-ups
 
