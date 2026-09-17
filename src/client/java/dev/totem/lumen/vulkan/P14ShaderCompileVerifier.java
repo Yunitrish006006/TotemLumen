@@ -4,7 +4,7 @@ import org.lwjgl.util.shaderc.Shaderc;
 
 import java.lang.reflect.Field;
 
-/** Build-time verifier for the production P12-P15 base pass and split P16 reflection pass. */
+/** Build-time verifier for the production base pass and split P16 reflection pass. */
 public final class P14ShaderCompileVerifier {
     private static final String BASE_SHADER_NAME = "totem_lumen_p12_one_bounce_gi.comp";
 
@@ -23,10 +23,14 @@ public final class P14ShaderCompileVerifier {
         baseSource = P14GeometryCorrectionPatch.apply(baseSource);
         baseSource = P13SkyOcclusionPatch.apply(baseSource);
         baseSource = P16ReflectionRoughnessPatch.apply(baseSource);
+        baseSource = P17ShaderIntegration.apply(baseSource);
 
         verifyP13NightSkySource(baseSource);
-        String reflectionSource = P16ReflectionPassShader.build();
+        verifyP17DynamicEntitySource(baseSource, "base pass");
+
+        String reflectionSource = P17ShaderIntegration.apply(P16ReflectionPassShader.build());
         verifyP13NightSkySource(reflectionSource);
+        verifyP17DynamicEntitySource(reflectionSource, "P16 reflection pass");
 
         long compiler = Shaderc.shaderc_compiler_initialize();
         if (compiler == 0L) {
@@ -34,12 +38,12 @@ public final class P14ShaderCompileVerifier {
         }
 
         try {
-            compileAndVerify(compiler, BASE_SHADER_NAME, baseSource, "P12-P15 base pass");
+            compileAndVerify(compiler, BASE_SHADER_NAME, baseSource, "P12-P15+P17 base pass");
             compileAndVerify(
                     compiler,
                     P16ReflectionPassShader.SHADER_NAME,
                     reflectionSource,
-                    "P16 split reflection pass"
+                    "P16+P17 split reflection pass"
             );
         } finally {
             Shaderc.shaderc_compiler_release(compiler);
@@ -66,9 +70,30 @@ public final class P14ShaderCompileVerifier {
         );
     }
 
+    private static void verifyP17DynamicEntitySource(String source, String label) {
+        requireSourceMarker(source, "const uint P17_ENTITY_MATERIAL_ID = 0xFFFEu;", label + " entity material id");
+        requireSourceMarker(source, "HitResult p17TraceStaticRayLimited(", label + " static trace preservation");
+        requireSourceMarker(source, "bool p17TrySectionEntities(", label + " section broad phase");
+        requireSourceMarker(source, "HitResult p17TraceEntityRayLimited(", label + " entity trace");
+        requireSourceMarker(
+                source,
+                "HitResult traceRayLimited(vec3 origin, vec3 direction, float maxDistance) {",
+                label + " shared nearest-hit entry"
+        );
+        requireSourceMarker(
+                source,
+                "if (candidate.materialId == P17_ENTITY_MATERIAL_ID)",
+                label + " P15 opaque entity baseline"
+        );
+        System.out.println(
+                "P17 dynamic-entity shader verification PASS (" + label + "): "
+                        + "sectionBroadPhase=true, triangles=true, nearestHit=true, p15OpaqueBaseline=true"
+        );
+    }
+
     private static void requireSourceMarker(String source, String marker, String label) {
         if (!source.contains(marker)) {
-            throw new IllegalStateException("P13 night-sky shader verification missing " + label + ": " + marker);
+            throw new IllegalStateException("Runtime shader verification missing " + label + ": " + marker);
         }
     }
 
