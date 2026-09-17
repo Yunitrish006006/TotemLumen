@@ -19,7 +19,16 @@ The server gameplay subsystem never initializes or depends on Vulkan. A dedicate
 
 ## Current milestone
 
-`0.1.0-alpha.40` rebuilds the P13 Overworld night sky inside Totem Lumen's shared environment-lighting path: procedural moon, Minecraft's resolved eight-step lunar phase, and a deterministic procedural star field now remain present when Totem Lumen owns the GI Composite output.
+`0.1.0-alpha.41` hardens client renderer activation so Totem Lumen can no longer report a false-ready Vulkan state while the backend or compute pipeline is unavailable.
+
+- renderer startup now progresses through explicit `WAITING_FOR_DEVICE`, `WAITING_FOR_VULKAN_INTEROP`, `WAITING_FOR_PIPELINE`, and `READY_FOR_SCENE_EXTRACTION` states;
+- a Vulkan device that is reported by Minecraft but not yet accessible through the Totem Lumen bridge remains retryable instead of being marked ready;
+- unsupported Vulkan compute/storage capabilities stop in `DISABLED_UNSUPPORTED_VULKAN` instead of continuing into a renderer path that cannot run;
+- shader or pipeline-prewarm failure stops in `PIPELINE_FAILED` with a concrete log entry;
+- world rendering is gated on the centralized renderer readiness state rather than independently polling shader/pipeline flags from the render callback;
+- long MoltenVK/Metal pipeline compilation remains asynchronous, so vanilla rendering stays responsive while Alpha 41 reports `WAITING_FOR_PIPELINE` in the log.
+
+Alpha 40's P13 Overworld night sky remains fully included: procedural moon, Minecraft's resolved eight-step lunar phase, and a deterministic procedural star field remain present when Totem Lumen owns the GI Composite output.
 
 - the moon direction is the exact celestial opposite of the existing time-of-day sun direction;
 - `P13EnvironmentCapture` reads Minecraft 26.2's resolved `EnvironmentAttributes.MOON_PHASE`, preserving the vanilla full/waning/quarter/crescent/new/waxing phase order;
@@ -31,7 +40,7 @@ The server gameplay subsystem never initializes or depends on Vulkan. A dedicate
 - Overworld surfaces receive a separate weak cool moon directional term with the same ray-traced visibility semantics used by the sun, including P15 RGB glass transmission;
 - moonlight, stars and the underlying sky remain in the shared environment definition used by GI bounce misses and the split P16 reflection pass;
 - daylight/sun behavior remains unchanged, and the moon does not add light while below the horizon or during new moon;
-- Alpha 40 intentionally keeps the star field temporally stable. Weather-dependent star suppression / Minecraft `STAR_BRIGHTNESS` integration is a later environment-state follow-up rather than consuming more packed frame bits now.
+- weather-dependent star suppression / Minecraft `STAR_BRIGHTNESS` integration remains a later environment-state follow-up.
 
 Alpha 39's P14D block-entity geometry capture remains the current geometry baseline. `BlockEntityRenderDispatcher` scopes renderer-resolved `Model` / `ModelPart` capture into Totem Lumen-owned block-local quads, stable mutable `MODEL_MESH` ids preserve animation without exhausting the 12-bit mesh space, and chunk/level lifecycle recycles dynamic mesh ids. Bell/chest/shulker animation correctness still requires in-game validation; exact flowing/sloped fluid surfaces remain the next pre-P17 geometry domain.
 
@@ -44,6 +53,8 @@ Alpha 38's persistent Vulkan pipeline cache remains enabled. Apple M4 + MoltenVK
 - Fabric API for Minecraft 26.2
 - Java 25 (normally provided by the Minecraft launcher/server runtime)
 - A Minecraft-compatible Vulkan backend **only when using the client renderer**
+
+The client renderer must actually be launched with Minecraft's Vulkan backend. Totem Lumen intentionally has no OpenGL renderer or fallback. Development `runClient` already requests Vulkan; normal launcher profiles must also be configured to use Vulkan.
 
 A dedicated server does not need Vulkan, MoltenVK, a GPU renderer, or shader tooling.
 
