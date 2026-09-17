@@ -1,11 +1,15 @@
 package dev.totem.lumen.vulkan;
 
 import dev.totem.lumen.TotemLumenClient;
+import dev.totem.lumen.gpu.FluidSceneSelector;
 import dev.totem.lumen.gpu.GpuDynamicEntityScene;
 import dev.totem.lumen.gpu.GpuFluidScene;
 import dev.totem.lumen.integration.FluidRenderGeometryCache;
+import dev.totem.lumen.scene.SectionKey;
+import dev.totem.lumen.scene.SectionSnapshot;
 
 import java.nio.ByteBuffer;
+import java.util.List;
 
 /** Packs/copies the P14E exact-fluid scene tail independently from static voxel payloads. */
 public final class P14EFluidGpuUploader {
@@ -14,16 +18,20 @@ public final class P14EFluidGpuUploader {
 
     private static volatile long lastBaseByteOffset = -1L;
     private static volatile long lastCopyBytes;
+    private static volatile List<SectionKey> residentSections = List.of();
     private static long lastPackedRevision = Long.MIN_VALUE;
     private static boolean copyPending;
     private static int lastLoggedCellCount = -1;
     private static int lastLoggedQuadCount = -1;
     private static int lastLoggedMaxProbe = -1;
+    private static int lastLoggedResidentCellCount = -1;
+    private static int lastLoggedDroppedCellCount = -1;
 
     private P14EFluidGpuUploader() {
     }
 
-    public static synchronized void pack(ByteBuffer buffer) {
+    public static synchronized void pack(ByteBuffer buffer, List<SectionSnapshot> sections) {
+        residentSections = sections.stream().map(SectionSnapshot::key).toList();
         packState(buffer, FluidRenderGeometryCache.sceneState());
     }
 
@@ -44,7 +52,13 @@ public final class P14EFluidGpuUploader {
         int p17BaseWord = Math.addExact(p14BaseWord, P14ModelMeshGpuLayout.MAX_STORAGE_WORDS);
         int fluidBaseWord = Math.addExact(p17BaseWord, GpuDynamicEntityScene.MAX_STORAGE_WORDS);
 
-        GpuFluidScene.PackResult packed = GpuFluidScene.pack(buffer, fluidBaseWord, state.fluids());
+        FluidSceneSelector.Selection selection = FluidSceneSelector.select(
+                state.fluids(),
+                residentSections,
+                GpuFluidScene.MAX_FLUID_CELLS,
+                GpuFluidScene.MAX_FLUID_QUADS
+        );
+        GpuFluidScene.PackResult packed = GpuFluidScene.pack(buffer, fluidBaseWord, selection.fluids());
         lastBaseByteOffset = (long) fluidBaseWord * Integer.BYTES;
         lastCopyBytes = packed.usedBytes();
         lastPackedRevision = state.revision();
@@ -52,17 +66,36 @@ public final class P14EFluidGpuUploader {
 
         if (lastLoggedCellCount != packed.cellCount()
                 || lastLoggedQuadCount != packed.totalQuads()
-                || lastLoggedMaxProbe != packed.maxProbe()) {
+                || lastLoggedMaxProbe != packed.maxProbe()
+                || lastLoggedResidentCellCount != selection.residentCellCount()
+                || lastLoggedDroppedCellCount != selection.droppedCellCount()) {
             lastLoggedCellCount = packed.cellCount();
             lastLoggedQuadCount = packed.totalQuads();
             lastLoggedMaxProbe = packed.maxProbe();
+            lastLoggedResidentCellCount = selection.residentCellCount();
+            lastLoggedDroppedCellCount = selection.droppedCellCount();
             TotemLumenClient.LOGGER.info(
-                    "P14E fluid GPU scene: cells={}, quads={}, maxProbe={}, bytes={}, maxBytes={}",
+                    "P14E fluid GPU scene: cells={}, quads={}, residentCells={}, residentQuads={}, droppedCells={}, droppedQuads={}, maxProbe={}, bytes={}, maxBytes={}",
                     packed.cellCount(),
                     packed.totalQuads(),
+                    selection.residentCellCount(),
+                    selection.residentQuadCount(),
+                    selection.droppedCellCount(),
+                    selection.droppedQuadCount(),
                     packed.maxProbe(),
                     lastCopyBytes,
                     GpuFluidScene.MAX_STORAGE_BYTES
+            );
+        }
+        if (selection.truncated()) {
+            TotemLumenClient.LOGGER.warn(
+                    "P14E resident fluid scene exceeded bounded GPU capacity; keeping nearest resident geometry and dropping farther cells: residentCells={}, selectedCells={}, residentQuads={}, selectedQuads={}, maxCells={}, maxQuads={}",
+                    selection.residentCellCount(),
+                    packed.cellCount(),
+                    selection.residentQuadCount(),
+                    packed.totalQuads(),
+                    GpuFluidScene.MAX_FLUID_CELLS,
+                    GpuFluidScene.MAX_FLUID_QUADS
             );
         }
     }
