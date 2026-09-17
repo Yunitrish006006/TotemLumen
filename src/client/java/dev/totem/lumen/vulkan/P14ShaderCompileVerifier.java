@@ -1,5 +1,6 @@
 package dev.totem.lumen.vulkan;
 
+import dev.totem.lumen.gpu.GpuFluidScene;
 import org.lwjgl.util.shaderc.Shaderc;
 
 /** Build-time verifier for bootstrap readiness and all staged production compute passes. */
@@ -40,24 +41,9 @@ public final class P14ShaderCompileVerifier {
         }
 
         try {
-            compileAndVerify(
-                    compiler,
-                    BOOTSTRAP_SHADER_NAME,
-                    bootstrapSource,
-                    "Vulkan bootstrap readiness pass"
-            );
-            compileAndVerify(
-                    compiler,
-                    P12FullBasePipeline.SHADER_NAME,
-                    baseSource,
-                    "P12-P15+P14E full base pass"
-            );
-            compileAndVerify(
-                    compiler,
-                    P17EnhancedBasePipeline.SHADER_NAME,
-                    p17Source,
-                    "P14E+P17 enhanced base pass"
-            );
+            compileAndVerify(compiler, BOOTSTRAP_SHADER_NAME, bootstrapSource, "Vulkan bootstrap readiness pass");
+            compileAndVerify(compiler, P12FullBasePipeline.SHADER_NAME, baseSource, "P12-P15+P14E full base pass");
+            compileAndVerify(compiler, P17EnhancedBasePipeline.SHADER_NAME, p17Source, "P14E+P17 enhanced base pass");
             compileAndVerify(
                     compiler,
                     P16ReflectionPassShader.SHADER_NAME,
@@ -122,7 +108,11 @@ public final class P14ShaderCompileVerifier {
     }
 
     private static void verifyP14EFluidSource(String source, String label) {
-        requireSourceMarker(source, "const uint P14E_FLUID_ABI_VERSION = 1u;", label + " fluid ABI");
+        requireSourceMarker(
+                source,
+                "const uint P14E_FLUID_ABI_VERSION = " + GpuFluidScene.ABI_VERSION + "u;",
+                label + " fluid ABI"
+        );
         requireSourceMarker(source, "uint p14eFindFluidCell(", label + " block-coordinate fluid lookup");
         requireSourceMarker(source, "bool p14eIntersectFluidCell(", label + " exact fluid quad trace");
         requireSourceMarker(source, "bool p14eFluidOnly = false;", label + " pure-fluid suppression state");
@@ -135,13 +125,15 @@ public final class P14ShaderCompileVerifier {
         requireSourceMarker(source, "P14E_WATER_MATERIAL_ID", label + " water surface identity");
         requireSourceMarker(source, "P14E_LAVA_MATERIAL_ID", label + " lava surface identity");
         System.out.println(
-                "P14E exact-fluid shader verification PASS (" + label + "): "
-                        + "blockLookup=true, resolvedQuads=true, waterloggedCoexistence=true, nearestHit=true"
+                "P14E exact-fluid shader verification PASS (" + label + "): abi="
+                        + GpuFluidScene.ABI_VERSION
+                        + ", blockLookup=true, resolvedQuads=true, waterloggedCoexistence=true, nearestHit=true"
         );
     }
 
     private static void verifyP14EFluidOptics(String source, String label, boolean reflectionPass) {
-        requireSourceMarker(source, "vec3 p14eResolvedFluidTint(HitResult hit)", label + " resolved water tint");
+        requireSourceMarker(source, "vec3 p14eResolvedFluidTint(HitResult hit)", label + " fluid tint helper");
+        requireSourceMarker(source, "uint argb = scene.data[descriptor + 8u];", label + " unlit fluid tint descriptor");
         requireSourceMarker(source, "vec4 p14eWaterTransmission(HitResult hit)", label + " water transmission");
         requireSourceMarker(
                 source,
@@ -172,7 +164,7 @@ public final class P14ShaderCompileVerifier {
         }
         System.out.println(
                 "P14E fluid-optics verification PASS (" + label + "): "
-                        + "waterTransmission=true, resolvedTint=true, lavaEmission=true, exactWaterReflection="
+                        + "waterTransmission=true, unlitTint=true, lavaEmission=true, exactWaterReflection="
                         + reflectionPass
         );
     }
