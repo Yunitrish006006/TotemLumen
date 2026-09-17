@@ -16,6 +16,7 @@ public final class GpuFluidScene {
     public static final int FLUID_KIND_OTHER = 0;
     public static final int FLUID_KIND_WATER = 1;
     public static final int FLUID_KIND_LAVA = 2;
+    public static final int CELL_FLAG_FLUID_ONLY = 1;
 
     public static final int HEADER_WORDS = 8;
     public static final int CELL_DESCRIPTOR_WORDS_PER_RECORD = 8;
@@ -93,7 +94,7 @@ public final class GpuFluidScene {
             putWord(buffer, descriptor + 4, fluid.fluidTypeId().hashCode());
             putWord(buffer, descriptor + 5, nextQuad);
             putWord(buffer, descriptor + 6, fluid.quadCount());
-            putWord(buffer, descriptor + 7, 0);
+            putWord(buffer, descriptor + 7, fluid.fluidOnlyCell() ? CELL_FLAG_FLUID_ONLY : 0);
 
             float[] positions = fluid.copyQuadPositions();
             int[] colors = fluid.copyQuadColors();
