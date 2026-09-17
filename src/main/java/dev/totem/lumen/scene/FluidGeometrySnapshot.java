@@ -14,6 +14,7 @@ public final class FluidGeometrySnapshot {
     private final int sectionY;
     private final int sectionZ;
     private final boolean fluidOnlyCell;
+    private final int tintArgb;
     private final float[] quadPositions;
     private final float[] quadUvs;
     private final int[] quadColors;
@@ -26,6 +27,7 @@ public final class FluidGeometrySnapshot {
             int blockY,
             int blockZ,
             boolean fluidOnlyCell,
+            int tintArgb,
             float[] quadPositions,
             float[] quadUvs,
             int[] quadColors,
@@ -40,6 +42,7 @@ public final class FluidGeometrySnapshot {
         this.sectionY = Math.floorDiv(blockY, 16);
         this.sectionZ = Math.floorDiv(blockZ, 16);
         this.fluidOnlyCell = fluidOnlyCell;
+        this.tintArgb = tintArgb;
 
         Objects.requireNonNull(quadPositions, "quadPositions");
         Objects.requireNonNull(quadUvs, "quadUvs");
@@ -104,6 +107,11 @@ public final class FluidGeometrySnapshot {
         return fluidOnlyCell;
     }
 
+    /** Unlit model/world tint returned by Minecraft's FluidModel tint source, or -1 when untinted. */
+    public int tintArgb() {
+        return tintArgb;
+    }
+
     public int quadCount() {
         return quadColors.length;
     }
@@ -116,6 +124,7 @@ public final class FluidGeometrySnapshot {
         return quadUvs.clone();
     }
 
+    /** Per-face color after Minecraft's cardinal-lighting multiplication. */
     public int[] copyQuadColors() {
         return quadColors.clone();
     }
@@ -145,6 +154,7 @@ public final class FluidGeometrySnapshot {
                 && blockY == other.blockY
                 && blockZ == other.blockZ
                 && fluidOnlyCell == other.fluidOnlyCell
+                && tintArgb == other.tintArgb
                 && Arrays.equals(quadPositions, other.quadPositions)
                 && Arrays.equals(quadUvs, other.quadUvs)
                 && Arrays.equals(quadColors, other.quadColors)
