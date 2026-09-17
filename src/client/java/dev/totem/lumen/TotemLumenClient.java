@@ -47,6 +47,13 @@ public final class TotemLumenClient implements ClientModInitializer {
                     payload.rules().size()
             );
         });
+        ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> {
+            if (client.level != null) {
+                FluidRenderGeometryCache.setActiveDimension(
+                        client.level.dimension().identifier().toString()
+                );
+            }
+        });
         ClientPlayConnectionEvents.DISCONNECT.register((listener, client) -> {
             if (ClientLightingWorldRules.reset()) {
                 LOGGER.info("Cleared server-authoritative lighting world rules after disconnect");
