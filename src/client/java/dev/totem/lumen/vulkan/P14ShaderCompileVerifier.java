@@ -20,16 +20,14 @@ public final class P14ShaderCompileVerifier {
         verifyP14EFluidSource(baseSource, "full base pass");
         verifyP14EFluidOptics(baseSource, "full base pass", false);
 
-        String p17Source = P17ShaderIntegration.apply(baseSource);
+        String p17Source = P17EnhancedBasePipeline.buildSourceForVerification();
         verifyP14EFluidSource(p17Source, "P17 enhanced base pass");
         verifyP14EFluidOptics(p17Source, "P17 enhanced base pass", false);
         verifyP17DynamicEntitySource(p17Source, "enhanced base pass");
 
-        String reflectionSource = P17ShaderIntegration.apply(
-                P14EFluidOpticsPatch.apply(
-                        P14EFluidShaderPatch.apply(P16ReflectionPassShader.build())
-                )
-        );
+        String reflectionGeometry = P14EFluidShaderPatch.apply(P16ReflectionPassShader.build());
+        String reflectionEntity = P17ShaderIntegration.apply(reflectionGeometry);
+        String reflectionSource = P14EFluidOpticsPatch.apply(reflectionEntity);
         verifyP13NightSkySource(reflectionSource);
         verifyP14EFluidSource(reflectionSource, "P16 reflection pass");
         verifyP14EFluidOptics(reflectionSource, "P16 reflection pass", true);
