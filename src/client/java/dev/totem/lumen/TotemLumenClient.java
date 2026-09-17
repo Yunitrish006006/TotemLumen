@@ -3,6 +3,7 @@ package dev.totem.lumen;
 import com.mojang.blaze3d.platform.InputConstants;
 import dev.totem.lumen.integration.ClientLightingWorldRules;
 import dev.totem.lumen.integration.EntityRenderGeometryCache;
+import dev.totem.lumen.integration.FluidRenderGeometryCache;
 import dev.totem.lumen.integration.MinecraftBlockModelMeshResolver;
 import dev.totem.lumen.integration.P13EnvironmentCapture;
 import dev.totem.lumen.integration.SceneExtractionBridge;
@@ -50,6 +51,7 @@ public final class TotemLumenClient implements ClientModInitializer {
             if (ClientLightingWorldRules.reset()) {
                 LOGGER.info("Cleared server-authoritative lighting world rules after disconnect");
             }
+            FluidRenderGeometryCache.clear();
             EntityRenderGeometryCache.clear();
             RendererCompileProgressNotifier.reset();
         });
@@ -79,8 +81,10 @@ public final class TotemLumenClient implements ClientModInitializer {
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             RendererBootstrap.tick();
             if (client.level != null) {
+                String dimensionId = client.level.dimension().identifier().toString();
+                FluidRenderGeometryCache.setActiveDimension(dimensionId);
                 EntityRenderGeometryCache.prune(
-                        client.level.dimension().identifier().toString(),
+                        dimensionId,
                         client.level.getGameTime()
                 );
             }
@@ -133,6 +137,7 @@ public final class TotemLumenClient implements ClientModInitializer {
 
         ClientLifecycleEvents.CLIENT_STOPPING.register(client -> {
             RendererCompileProgressNotifier.reset();
+            FluidRenderGeometryCache.clear();
             EntityRenderGeometryCache.clear();
             P5StableLookupRenderer.shutdown();
         });
