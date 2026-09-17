@@ -12,6 +12,7 @@
     "MinecraftBlockModelMeshResolverMixin",
     "SceneExtractionBridgeBlockEntityMixin",
     "P5StableLookupRendererMixin",
+    "P5StableLookupRendererP17Mixin",
     "P5RendererResourcesMixin",
     "VulkanComputeProgramMixin"
   ],
