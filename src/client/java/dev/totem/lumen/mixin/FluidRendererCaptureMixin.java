@@ -24,7 +24,7 @@ public abstract class FluidRendererCaptureMixin {
             FluidState fluidState,
             CallbackInfo ci
     ) {
-        FluidRenderGeometryCapture.begin(pos, fluidState);
+        FluidRenderGeometryCapture.begin(pos, blockState, fluidState);
     }
 
     @Inject(method = "addFace", at = @At("HEAD"))
