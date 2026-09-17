@@ -17,16 +17,21 @@ public final class P14ShaderCompileVerifier {
         verifyP13NightSkySource(baseSource);
         verifyFullBaseIsolation(baseSource);
         verifyP14EFluidSource(baseSource, "full base pass");
+        verifyP14EFluidOptics(baseSource, "full base pass", false);
 
         String p17Source = P17ShaderIntegration.apply(baseSource);
         verifyP14EFluidSource(p17Source, "P17 enhanced base pass");
+        verifyP14EFluidOptics(p17Source, "P17 enhanced base pass", false);
         verifyP17DynamicEntitySource(p17Source, "enhanced base pass");
 
         String reflectionSource = P17ShaderIntegration.apply(
-                P14EFluidShaderPatch.apply(P16ReflectionPassShader.build())
+                P14EFluidOpticsPatch.apply(
+                        P14EFluidShaderPatch.apply(P16ReflectionPassShader.build())
+                )
         );
         verifyP13NightSkySource(reflectionSource);
         verifyP14EFluidSource(reflectionSource, "P16 reflection pass");
+        verifyP14EFluidOptics(reflectionSource, "P16 reflection pass", true);
         verifyP17DynamicEntitySource(reflectionSource, "P16 reflection pass");
 
         long compiler = Shaderc.shaderc_compiler_initialize();
@@ -132,6 +137,43 @@ public final class P14ShaderCompileVerifier {
         System.out.println(
                 "P14E exact-fluid shader verification PASS (" + label + "): "
                         + "blockLookup=true, resolvedQuads=true, waterloggedCoexistence=true, nearestHit=true"
+        );
+    }
+
+    private static void verifyP14EFluidOptics(String source, String label, boolean reflectionPass) {
+        requireSourceMarker(source, "vec3 p14eResolvedFluidTint(HitResult hit)", label + " resolved water tint");
+        requireSourceMarker(source, "vec4 p14eWaterTransmission(HitResult hit)", label + " water transmission");
+        requireSourceMarker(
+                source,
+                "bool p14eWaterSurface = candidate.materialId == P14E_WATER_MATERIAL_ID;",
+                label + " P15 water interface"
+        );
+        requireSourceMarker(
+                source,
+                "advance = candidate.distance + 0.002;",
+                label + " exact-interface advance"
+        );
+        requireSourceMarker(
+                source,
+                "if (materialId == P14E_LAVA_MATERIAL_ID) return vec4(1.00, 0.12, 0.015, 1.0);",
+                label + " lava emission"
+        );
+        if (reflectionPass) {
+            requireSourceMarker(
+                    source,
+                    "if (hit.materialId == P14E_WATER_MATERIAL_ID) return vec2(0.025, 0.0);",
+                    label + " low-roughness water reflection"
+            );
+            requireSourceMarker(
+                    source,
+                    "bool p14eReflectWater = p14eRawPrimary.hit != 0u",
+                    label + " raw exact-water reflection surface"
+            );
+        }
+        System.out.println(
+                "P14E fluid-optics verification PASS (" + label + "): "
+                        + "waterTransmission=true, resolvedTint=true, lavaEmission=true, exactWaterReflection="
+                        + reflectionPass
         );
     }
 
