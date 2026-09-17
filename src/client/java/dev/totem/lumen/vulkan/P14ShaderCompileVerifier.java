@@ -2,30 +2,20 @@ package dev.totem.lumen.vulkan;
 
 import org.lwjgl.util.shaderc.Shaderc;
 
-import java.lang.reflect.Field;
-
-/** Build-time verifier for base readiness, optional P17 enhancement and split P16 reflection. */
+/** Build-time verifier for bootstrap readiness and all staged production compute passes. */
 public final class P14ShaderCompileVerifier {
-    private static final String BASE_SHADER_NAME = "totem_lumen_p12_one_bounce_gi.comp";
+    private static final String BOOTSTRAP_SHADER_NAME = "totem_lumen_p12_one_bounce_gi.comp";
 
     private P14ShaderCompileVerifier() {
     }
 
-    public static void main(String[] args) throws Exception {
-        Field shaderField = P5StableLookupRenderer.class.getDeclaredField("SHADER");
-        shaderField.setAccessible(true);
-        String baseSource = (String) shaderField.get(null);
+    public static void main(String[] args) {
+        String bootstrapSource = P5BootstrapShader.source();
+        verifyBootstrapSource(bootstrapSource);
 
-        baseSource = P12GiShaderPatch.apply(baseSource);
-        baseSource = P13EndBrightnessPatch.apply(baseSource);
-        baseSource = P14GeometryShaderPatch.apply(baseSource);
-        baseSource = P14CommonGeometryPatch.apply(baseSource);
-        baseSource = P14GeometryCorrectionPatch.apply(baseSource);
-        baseSource = P13SkyOcclusionPatch.apply(baseSource);
-        baseSource = P16ReflectionRoughnessPatch.apply(baseSource);
-
+        String baseSource = P12FullBasePipeline.buildSourceForVerification();
         verifyP13NightSkySource(baseSource);
-        verifyBaseReadinessSource(baseSource);
+        verifyFullBaseIsolation(baseSource);
 
         String p17Source = P17ShaderIntegration.apply(baseSource);
         verifyP17DynamicEntitySource(p17Source, "enhanced base pass");
@@ -40,7 +30,18 @@ public final class P14ShaderCompileVerifier {
         }
 
         try {
-            compileAndVerify(compiler, BASE_SHADER_NAME, baseSource, "P12-P15 readiness base pass");
+            compileAndVerify(
+                    compiler,
+                    BOOTSTRAP_SHADER_NAME,
+                    bootstrapSource,
+                    "Vulkan bootstrap readiness pass"
+            );
+            compileAndVerify(
+                    compiler,
+                    P12FullBasePipeline.SHADER_NAME,
+                    baseSource,
+                    "P12-P15 full base pass"
+            );
             compileAndVerify(
                     compiler,
                     P17EnhancedBasePipeline.SHADER_NAME,
@@ -56,6 +57,27 @@ public final class P14ShaderCompileVerifier {
         } finally {
             Shaderc.shaderc_compiler_release(compiler);
         }
+    }
+
+    private static void verifyBootstrapSource(String source) {
+        requireSourceMarker(source, "uint materialAt(ivec3 voxel)", "bootstrap material lookup");
+        requireSourceMarker(source, "HitResult traceRayLimited(", "bootstrap voxel DDA");
+        requireSourceMarker(source, "vec3 bootstrapColor(", "bootstrap output");
+        if (source.contains("p13Moon")
+                || source.contains("P17_ENTITY_MATERIAL_ID")
+                || source.contains("p16ReflectionRgb")
+                || source.contains("temporalHistoryColor")) {
+            throw new IllegalStateException("Bootstrap shader accidentally contains staged renderer features");
+        }
+        if (source.length() > 16_000) {
+            throw new IllegalStateException(
+                    "Bootstrap shader exceeded cold-start size budget: " + source.length() + " chars"
+            );
+        }
+        System.out.println(
+                "Vulkan bootstrap readiness verification PASS: chars=" + source.length()
+                        + ", voxelDda=true, stagedGi=false, p17=false, reflection=false"
+        );
     }
 
     private static void verifyP13NightSkySource(String source) {
@@ -78,15 +100,13 @@ public final class P14ShaderCompileVerifier {
         );
     }
 
-    private static void verifyBaseReadinessSource(String source) {
+    private static void verifyFullBaseIsolation(String source) {
         if (source.contains("P17_ENTITY_MATERIAL_ID")) {
-            throw new IllegalStateException(
-                    "P17 must not participate in the renderer-readiness base pipeline"
-            );
+            throw new IllegalStateException("P17 must remain outside the full P12-P15 base pipeline");
         }
         System.out.println(
-                "P17 readiness isolation verification PASS: basePipelineContainsP17=false, "
-                        + "dynamicEntityCompileCannotBlockRendererReady=true"
+                "Staged readiness verification PASS: bootstrap->P12-P15->P17/P16, "
+                        + "fullBaseContainsP17=false"
         );
     }
 
