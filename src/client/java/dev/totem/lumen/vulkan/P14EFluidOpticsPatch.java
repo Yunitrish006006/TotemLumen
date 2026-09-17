@@ -12,7 +12,7 @@ final class P14EFluidOpticsPatch {
         source = patchP15WaterTransmission(source);
         source = patchP16WaterReflection(source);
         TotemLumenClient.LOGGER.info(
-                "P14E fluid optics active: exactWaterTransmission=true, resolvedWaterTint=true, "
+                "P14E fluid optics active: exactWaterTransmission=true, unlitMinecraftFluidTint=true, "
                         + "exactWaterReflection=true, lavaEmission=true, refraction=false, volumetricAbsorption=false"
         );
         return source;
@@ -55,10 +55,10 @@ final class P14EFluidOpticsPatch {
                     if (fluidIndex == P14E_INVALID_INDEX) return vec3(0.25, 0.50, 0.78);
                     uint descriptor = fluidBase + P14E_CELL_DESCRIPTOR_BASE
                             + fluidIndex * P14E_CELL_DESCRIPTOR_WORDS;
-                    uint firstQuad = scene.data[descriptor + 5u];
-                    uint quadWord = fluidBase + P14E_QUAD_POOL_BASE
-                            + firstQuad * P14E_QUAD_WORDS;
-                    uint argb = scene.data[quadWord + 12u];
+                    // Descriptor word 8 is the unlit FluidModel tint captured before Minecraft
+                    // applies cardinal face-lighting. Using the emitted face color here would
+                    // multiply directional lighting into optical transmission a second time.
+                    uint argb = scene.data[descriptor + 8u];
                     vec3 rgb = vec3(
                         float((argb >> 16u) & 255u),
                         float((argb >> 8u) & 255u),
