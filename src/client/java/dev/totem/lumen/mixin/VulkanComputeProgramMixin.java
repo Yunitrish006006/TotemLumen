@@ -2,6 +2,7 @@ package dev.totem.lumen.mixin;
 
 import com.mojang.blaze3d.vulkan.VulkanDevice;
 import dev.totem.lumen.vulkan.P16MultipassReflection;
+import dev.totem.lumen.vulkan.P17ShaderIntegration;
 import dev.totem.lumen.vulkan.ShadercNativeHeap;
 import dev.totem.lumen.vulkan.VulkanComputeProgram;
 import dev.totem.lumen.vulkan.resource.VulkanOwnedBuffer;
@@ -13,13 +14,22 @@ import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
- * Starts the independent P16 pipeline, keeps its split shader on the proven O0 shaderc path, and
- * keeps large transformed GLSL source strings off LWJGL's bounded MemoryStack.
+ * Starts the independent P16 pipeline, keeps its split shader on the proven O0 shaderc path,
+ * attaches P17 dynamic-entity tracing to the production base shader, and keeps large transformed
+ * GLSL source strings off LWJGL's bounded MemoryStack.
  */
 @Mixin(value = VulkanComputeProgram.class, remap = false)
 public abstract class VulkanComputeProgramMixin {
     private static final String MAIN_GI_SHADER = "totem_lumen_p12_one_bounce_gi.comp";
     private static final String P16_WORKER = "TotemLumen-P16Pipeline";
+
+    @Inject(method = "transformMainGiShader", at = @At("RETURN"), cancellable = true)
+    private static void totemLumen$attachP17Tracing(
+            String source,
+            CallbackInfoReturnable<String> cir
+    ) {
+        cir.setReturnValue(P17ShaderIntegration.apply(cir.getReturnValue()));
+    }
 
     @Inject(method = "create", at = @At("RETURN"))
     private static void totemLumen$attachP16(
