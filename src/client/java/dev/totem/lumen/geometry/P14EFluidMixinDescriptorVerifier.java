@@ -2,6 +2,7 @@ package dev.totem.lumen.geometry;
 
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import dev.totem.lumen.mixin.FluidRendererCaptureMixin;
+import net.minecraft.client.color.block.BlockTintSource;
 import net.minecraft.client.renderer.block.BlockAndTintGetter;
 import net.minecraft.client.renderer.block.FluidRenderer;
 import net.minecraft.client.renderer.chunk.ChunkSectionLayer;
@@ -34,6 +35,17 @@ public final class P14EFluidMixinDescriptorVerifier {
         verifyTesselateCallback("totemLumen$beginFluidCapture");
         verifyTesselateCallback("totemLumen$endFluidCapture");
 
+        Method tint = BlockTintSource.class.getDeclaredMethod(
+                "colorInWorld",
+                BlockState.class,
+                BlockAndTintGetter.class,
+                BlockPos.class
+        );
+        if (tint.getReturnType() != int.class) {
+            throw new IllegalStateException("BlockTintSource.colorInWorld must return int");
+        }
+        verifyTintCallback();
+
         Class<?>[] addFace = addFaceDescriptor();
         Method face = FluidRenderer.class.getDeclaredMethod("addFace", addFace);
         if (face.getReturnType() != void.class) {
@@ -49,6 +61,7 @@ public final class P14EFluidMixinDescriptorVerifier {
         System.out.println(
                 "P14E fluid mixin descriptor verification PASS: minecraft=26.2, "
                         + "tesselate=BlockAndTintGetter+BlockPos+Output+BlockState+FluidState, "
+                        + "tintSource=BlockState+BlockAndTintGetter+BlockPos->int, "
                         + "addFace=VertexConsumer+20F+II+Z, output=ChunkSectionLayer->VertexConsumer"
         );
     }
@@ -72,6 +85,19 @@ public final class P14EFluidMixinDescriptorVerifier {
         }
         if (callback[callback.length - 1] != CallbackInfo.class) {
             throw new IllegalStateException(methodName + " callback must end with CallbackInfo");
+        }
+    }
+
+    private static void verifyTintCallback() {
+        Method handler = Arrays.stream(FluidRendererCaptureMixin.class.getDeclaredMethods())
+                .filter(method -> method.getName().equals("totemLumen$captureFluidTint"))
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException("Missing P14E tint callback"));
+        if (handler.getReturnType() != int.class
+                || !Arrays.equals(handler.getParameterTypes(), new Class<?>[]{int.class})) {
+            throw new IllegalStateException(
+                    "P14E tint callback must have descriptor (int)->int"
+            );
         }
     }
 
