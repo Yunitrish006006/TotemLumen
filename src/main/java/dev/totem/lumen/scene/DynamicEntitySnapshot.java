@@ -8,7 +8,8 @@ import java.util.Objects;
  *
  * <p>Captured vertex positions are entity-local. World-space bounds are derived once when the
  * snapshot is created so later CPU/GPU broad-phase code does not need access to a Minecraft
- * {@code Entity} or render state.</p>
+ * {@code Entity} or render state. Absolute world coordinates stay double precision on the CPU;
+ * the future GPU ABI can encode section-relative values without losing far-world precision.</p>
  */
 public final class DynamicEntitySnapshot {
     private final long instanceId;
@@ -17,12 +18,12 @@ public final class DynamicEntitySnapshot {
     private final double worldX;
     private final double worldY;
     private final double worldZ;
-    private final float minX;
-    private final float minY;
-    private final float minZ;
-    private final float maxX;
-    private final float maxY;
-    private final float maxZ;
+    private final double minX;
+    private final double minY;
+    private final double minZ;
+    private final double maxX;
+    private final double maxY;
+    private final double maxZ;
     private final float[] quadPositions;
 
     public DynamicEntitySnapshot(
@@ -103,27 +104,27 @@ public final class DynamicEntitySnapshot {
         return worldZ;
     }
 
-    public float minX() {
+    public double minX() {
         return minX;
     }
 
-    public float minY() {
+    public double minY() {
         return minY;
     }
 
-    public float minZ() {
+    public double minZ() {
         return minZ;
     }
 
-    public float maxX() {
+    public double maxX() {
         return maxX;
     }
 
-    public float maxY() {
+    public double maxY() {
         return maxY;
     }
 
-    public float maxZ() {
+    public double maxZ() {
         return maxZ;
     }
 
@@ -146,13 +147,10 @@ public final class DynamicEntitySnapshot {
                 && Arrays.equals(quadPositions, other.quadPositions);
     }
 
-    private static float checkedWorldBound(double origin, float local, String name) {
+    private static double checkedWorldBound(double origin, float local, String name) {
         double value = origin + local;
         requireFinite(value, name);
-        if (value < -Float.MAX_VALUE || value > Float.MAX_VALUE) {
-            throw new IllegalArgumentException(name + " exceeds float range");
-        }
-        return (float) value;
+        return value;
     }
 
     private static float requireFinite(float value, String name) {
