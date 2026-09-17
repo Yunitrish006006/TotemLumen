@@ -229,7 +229,7 @@ Implemented baseline:
 Known geometry/material gaps after Alpha 41 include dynamic world entities, exact flowing/sloped fluid surfaces, texture-alpha silhouettes, specialized renderer command families and resource-pack/PBR material data.
 
 ## P17 - Dynamic entities (`0.1.0-alpha.42`)
-Status: **ACTIVE MILESTONE**
+Status: **IMPLEMENTED / CI PASS; Apple M4 runtime visual validation pending**
 
 P17A — capture + CPU broad phase: **IMPLEMENTED / CI PASS**
 - Player/general `LivingEntity` scopes capture renderer-resolved Minecraft `Model` geometry.
@@ -245,9 +245,9 @@ P17B — bounded Vulkan scene ABI + upload: **IMPLEMENTED / CI PASS**
 - Entity pose/movement/lifecycle revisions repack and copy only the P17 tail instead of re-uploading static section voxels.
 - Entity-scene changes conservatively disable temporal-history reads for that frame until P17 hit identity is integrated into history validation.
 
-P17C — shared nearest-hit integration: **IN PROGRESS**
-- Dynamic entity triangles must compete with static voxel/model geometry for nearest ray distance.
-- The same hit path must serve primary visibility, sun/moon and local-light shadows, diffuse GI, environment visibility and P16 reflection.
+P17C — shared nearest-hit integration: **IMPLEMENTED / CI PASS; runtime visual validation pending**
+- Dynamic entity triangles compete with static voxel/model geometry for nearest ray distance.
+- The shared hit path is compiled into primary visibility and P16 reflection, and is reused by shadow/GI/environment consumers through the common trace entry.
 - Alpha 42 is not visually complete until this path is runtime-validated.
 
 P17D — entity material fidelity: **PENDING**
@@ -256,16 +256,23 @@ P17D — entity material fidelity: **PENDING**
 
 Canonical P17 design/runtime gate: [`P17_DYNAMIC_ENTITIES.md`](P17_DYNAMIC_ENTITIES.md).
 
-## P14E - Exact fluid geometry (`0.1.0-alpha.43`, planned)
-Status: **PLANNED AFTER P17**
+## P14E - Exact fluid geometry (`0.1.0-alpha.43`)
+Status: **IMPLEMENTED / CI PASS; Apple M4 runtime revalidation pending after first capacity fix**
 
-- Capture Minecraft's renderer-resolved flowing/sloped water and lava surfaces rather than treating every fluid cell as a full/flat voxel approximation.
-- Support fluid level slopes, corner heights, side faces/waterfalls, lava and live fluid updates.
-- Feed the same exact surface into primary rays, shadows, GI, P15 transmission and P16 reflection.
-- Reuse existing scene invalidation and shared geometry principles; do not create block-id-specific hand-authored fluid geometry tables.
+- Minecraft 26.2 `FluidRenderer` resolved faces are the source of truth for water/lava geometry.
+- P14E-A renderer capture is active on Apple M4 and has captured flowing lava in-world.
+- P14E-B uses Fluid ABI v2 with exact block-coordinate lookup and a separate bounded GPU tail.
+- First Apple M4 run exposed a dimension-wide cache packing bug at `17,216 / 16,384` cells; the fix now filters GPU packing through P5's ordered nearest/resident section window.
+- If a pathological resident window still exceeds the fixed budget, nearer fluid cells are retained and farther cells are dropped with a warning rather than disabling the renderer.
+- Nonresident fluid-cache revisions no longer trigger redundant fluid-tail uploads or temporal-history invalidation.
+- P14E-C exact triangles participate in the shared nearest-hit path used by full base/P17/P16 shader variants.
+- P14E-D water transmission uses unlit Minecraft fluid tint; water reflection uses the same exact surface/normal; lava is emissive/opaque.
+- Remaining gate is in-world geometry/optics validation: slopes, waterfalls/lavafalls, section boundaries, waterlogged coexistence, live updates, underwater transitions, transmission/reflection and bounded diagnostics.
+
+Canonical P14E design/runtime log: [`P14E_EXACT_FLUID_GEOMETRY.md`](P14E_EXACT_FLUID_GEOMETRY.md).
 
 ## P18 - Resource pack / LabPBR integration
-Status: **PLANNED AFTER EXACT FLUID GEOMETRY**
+Status: **PLANNED AFTER EXACT FLUID GEOMETRY RUNTIME GATE**
 
 - Move surface source-of-truth from built-in fallback roughness/metallic values toward resource-pack/LabPBR data.
 - Integrate texture alpha/material semantics without splitting ray geometry consumers into separate implementations.
