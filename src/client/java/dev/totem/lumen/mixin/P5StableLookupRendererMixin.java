@@ -3,6 +3,7 @@ package dev.totem.lumen.mixin;
 import dev.totem.lumen.scene.SectionSnapshot;
 import dev.totem.lumen.vulkan.P14ModelMeshGpuUploader;
 import dev.totem.lumen.vulkan.P16MultipassReflection;
+import dev.totem.lumen.vulkan.P17DynamicEntityGpuUploader;
 import dev.totem.lumen.vulkan.resource.VulkanOwnedBuffer;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.vulkan.VK10;
@@ -18,23 +19,24 @@ import java.nio.ByteBuffer;
 import java.util.List;
 
 /**
- * Shared P14C/P14D scene-tail upload hooks plus the optional P16 reflection dispatch.
+ * Shared scene-tail upload hooks plus the optional P16 reflection dispatch.
  *
- * <p>Static model descriptors are packed during ordinary full scene uploads. P14D mutable block-
- * entity mesh revisions can additionally repack/copy only the model tail on a camera-only frame,
- * avoiding a 64-section voxel repack for every animation pose.</p>
+ * <p>P14 static/mutable block-model meshes and P17 dynamic entities live in separate fixed-capacity
+ * regions after the pixel target. Either tail can repack/copy on a camera-only frame without
+ * forcing a 64-section voxel upload.</p>
  */
 @Mixin(targets = "dev.totem.lumen.vulkan.P5StableLookupRenderer", remap = false)
 public abstract class P5StableLookupRendererMixin {
     private static final long CAMERA_UPLOAD_MAX_BYTES = 4096L;
 
     @Inject(method = "packLookupSectionsAndLights", at = @At("TAIL"))
-    private static void totemLumen$packModelMeshes(
+    private static void totemLumen$packGeometryTails(
             ByteBuffer buffer,
             List<SectionSnapshot> sections,
             CallbackInfo ci
     ) {
         P14ModelMeshGpuUploader.pack(buffer);
+        P17DynamicEntityGpuUploader.pack(buffer);
     }
 
     @Redirect(
@@ -44,18 +46,30 @@ public abstract class P5StableLookupRendererMixin {
                     target = "Ldev/totem/lumen/vulkan/resource/VulkanOwnedBuffer;flush(JJ)V"
             )
     )
-    private static void totemLumen$flushStaticAndModelTail(
+    private static void totemLumen$flushSceneAndGeometryTails(
             VulkanOwnedBuffer upload,
             long offset,
             long length
     ) {
         boolean modelChanged = P14ModelMeshGpuUploader.packIfDirty(upload.mappedView());
+        boolean entityChanged = P17DynamicEntityGpuUploader.packIfDirty(upload.mappedView());
         upload.flush(offset, length);
-        if (length <= CAMERA_UPLOAD_MAX_BYTES && !modelChanged) return;
 
-        long modelOffset = P14ModelMeshGpuUploader.lastBaseByteOffset();
-        long modelBytes = P14ModelMeshGpuUploader.lastCopyBytes();
-        if (modelOffset >= 0L && modelBytes > 0L) upload.flush(modelOffset, modelBytes);
+        boolean fullSceneUpload = length > CAMERA_UPLOAD_MAX_BYTES;
+        if (fullSceneUpload || modelChanged) {
+            flushTail(
+                    upload,
+                    P14ModelMeshGpuUploader.lastBaseByteOffset(),
+                    P14ModelMeshGpuUploader.lastCopyBytes()
+            );
+        }
+        if (fullSceneUpload || entityChanged) {
+            flushTail(
+                    upload,
+                    P17DynamicEntityGpuUploader.lastBaseByteOffset(),
+                    P17DynamicEntityGpuUploader.lastCopyBytes()
+            );
+        }
     }
 
     @Redirect(
@@ -65,26 +79,31 @@ public abstract class P5StableLookupRendererMixin {
                     target = "Lorg/lwjgl/vulkan/VK10;vkCmdCopyBuffer(Lorg/lwjgl/vulkan/VkCommandBuffer;JJLorg/lwjgl/vulkan/VkBufferCopy$Buffer;)V"
             )
     )
-    private static void totemLumen$copyStaticAndModelTail(
+    private static void totemLumen$copySceneAndGeometryTails(
             VkCommandBuffer commandBuffer,
             long sourceBuffer,
             long destinationBuffer,
             VkBufferCopy.Buffer regions
     ) {
         VK10.vkCmdCopyBuffer(commandBuffer, sourceBuffer, destinationBuffer, regions);
-        if (!P14ModelMeshGpuUploader.consumeCopyPending()) return;
 
-        long modelOffset = P14ModelMeshGpuUploader.lastBaseByteOffset();
-        long modelBytes = P14ModelMeshGpuUploader.lastCopyBytes();
-        if (modelOffset < 0L || modelBytes <= 0L) return;
-
-        try (MemoryStack stack = MemoryStack.stackPush()) {
-            VkBufferCopy.Buffer modelCopy = VkBufferCopy.calloc(1, stack);
-            modelCopy.get(0)
-                    .srcOffset(modelOffset)
-                    .dstOffset(modelOffset)
-                    .size(modelBytes);
-            VK10.vkCmdCopyBuffer(commandBuffer, sourceBuffer, destinationBuffer, modelCopy);
+        if (P14ModelMeshGpuUploader.consumeCopyPending()) {
+            copyTail(
+                    commandBuffer,
+                    sourceBuffer,
+                    destinationBuffer,
+                    P14ModelMeshGpuUploader.lastBaseByteOffset(),
+                    P14ModelMeshGpuUploader.lastCopyBytes()
+            );
+        }
+        if (P17DynamicEntityGpuUploader.consumeCopyPending()) {
+            copyTail(
+                    commandBuffer,
+                    sourceBuffer,
+                    destinationBuffer,
+                    P17DynamicEntityGpuUploader.lastBaseByteOffset(),
+                    P17DynamicEntityGpuUploader.lastCopyBytes()
+            );
         }
     }
 
@@ -113,5 +132,27 @@ public abstract class P5StableLookupRendererMixin {
     @Inject(method = "shutdown", at = @At("HEAD"))
     private static void totemLumen$shutdownReflection(CallbackInfo ci) {
         P16MultipassReflection.shutdown();
+    }
+
+    private static void flushTail(VulkanOwnedBuffer upload, long offset, long bytes) {
+        if (offset >= 0L && bytes > 0L) upload.flush(offset, bytes);
+    }
+
+    private static void copyTail(
+            VkCommandBuffer commandBuffer,
+            long sourceBuffer,
+            long destinationBuffer,
+            long offset,
+            long bytes
+    ) {
+        if (offset < 0L || bytes <= 0L) return;
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            VkBufferCopy.Buffer copy = VkBufferCopy.calloc(1, stack);
+            copy.get(0)
+                    .srcOffset(offset)
+                    .dstOffset(offset)
+                    .size(bytes);
+            VK10.vkCmdCopyBuffer(commandBuffer, sourceBuffer, destinationBuffer, copy);
+        }
     }
 }
