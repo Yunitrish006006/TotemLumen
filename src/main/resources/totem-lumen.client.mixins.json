@@ -5,6 +5,7 @@
     "GpuDeviceAccessor",
     "ClientLevelBlockUpdateMixin",
     "BlockEntityRenderDispatcherMixin",
+    "EntityRendererStateMixin",
     "EntityRenderDispatcherMixin",
     "SubmitNodeStorageBlockEntityMixin",
     "SubmitNodeCollectionBlockEntityMixin",
