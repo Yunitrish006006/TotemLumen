@@ -69,15 +69,12 @@ public final class FluidRenderGeometryCache {
     }
 
     public static List<FluidGeometrySnapshot> snapshots() {
-        ArrayList<FluidGeometrySnapshot> result = new ArrayList<>(SNAPSHOTS.values());
-        result.sort(Comparator
-                .comparingInt(FluidGeometrySnapshot::sectionX)
-                .thenComparingInt(FluidGeometrySnapshot::sectionY)
-                .thenComparingInt(FluidGeometrySnapshot::sectionZ)
-                .thenComparingInt(FluidGeometrySnapshot::blockX)
-                .thenComparingInt(FluidGeometrySnapshot::blockY)
-                .thenComparingInt(FluidGeometrySnapshot::blockZ));
-        return List.copyOf(result);
+        return copySnapshots();
+    }
+
+    /** Returns revision and immutable snapshot list from one synchronized cache observation. */
+    public static synchronized SceneState sceneState() {
+        return new SceneState(REVISION.get(), copySnapshots());
     }
 
     public static long revision() {
@@ -92,5 +89,20 @@ public final class FluidRenderGeometryCache {
                 REVISION.incrementAndGet();
             }
         }
+    }
+
+    private static List<FluidGeometrySnapshot> copySnapshots() {
+        ArrayList<FluidGeometrySnapshot> result = new ArrayList<>(SNAPSHOTS.values());
+        result.sort(Comparator
+                .comparingInt(FluidGeometrySnapshot::sectionX)
+                .thenComparingInt(FluidGeometrySnapshot::sectionY)
+                .thenComparingInt(FluidGeometrySnapshot::sectionZ)
+                .thenComparingInt(FluidGeometrySnapshot::blockX)
+                .thenComparingInt(FluidGeometrySnapshot::blockY)
+                .thenComparingInt(FluidGeometrySnapshot::blockZ));
+        return List.copyOf(result);
+    }
+
+    public record SceneState(long revision, List<FluidGeometrySnapshot> fluids) {
     }
 }
