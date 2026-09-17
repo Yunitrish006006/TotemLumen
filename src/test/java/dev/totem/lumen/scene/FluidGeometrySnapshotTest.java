@@ -3,9 +3,9 @@ package dev.totem.lumen.scene;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 final class FluidGeometrySnapshotTest {
     @Test
@@ -22,6 +22,7 @@ final class FluidGeometrySnapshotTest {
                 -1,
                 66,
                 33,
+                true,
                 positions,
                 new float[]{0, 0, 1, 0, 1, 1, 0, 1},
                 new int[]{0xCC3366FF},
@@ -31,6 +32,7 @@ final class FluidGeometrySnapshotTest {
         assertEquals(-1, snapshot.sectionX());
         assertEquals(4, snapshot.sectionY());
         assertEquals(2, snapshot.sectionZ());
+        assertTrue(snapshot.fluidOnlyCell());
         assertEquals(-1.0, snapshot.worldVertexX(0, 0));
         assertEquals(66.75, snapshot.worldVertexY(0, 0));
         assertEquals(33.0, snapshot.worldVertexZ(0, 0));
@@ -44,7 +46,7 @@ final class FluidGeometrySnapshotTest {
         int[] colors = {0xFFFFFFFF};
         boolean[] doubleSided = {true};
         FluidGeometrySnapshot snapshot = new FluidGeometrySnapshot(
-                "minecraft:overworld", "minecraft:water", 0, 0, 0,
+                "minecraft:overworld", "minecraft:water", 0, 0, 0, false,
                 positions, uvs, colors, doubleSided
         );
 
@@ -56,19 +58,19 @@ final class FluidGeometrySnapshotTest {
         assertEquals(0.0F, snapshot.copyQuadPositions()[0]);
         assertEquals(0.0F, snapshot.copyQuadUvs()[0]);
         assertEquals(0xFFFFFFFF, snapshot.copyQuadColors()[0]);
-        assertFalse(snapshot.copyDoubleSided()[0] == false);
+        assertTrue(snapshot.copyDoubleSided()[0]);
         assertNotSame(snapshot.copyQuadPositions(), snapshot.copyQuadPositions());
     }
 
     @Test
     void rejectsMalformedOrNonFiniteGeometry() {
         assertThrows(IllegalArgumentException.class, () -> new FluidGeometrySnapshot(
-                "minecraft:overworld", "minecraft:water", 0, 0, 0,
+                "minecraft:overworld", "minecraft:water", 0, 0, 0, true,
                 new float[11], new float[8], new int[]{1}, new boolean[]{false}
         ));
         float[] positions = {0, 0, 0, 1, 0, 0, 1, Float.NaN, 0, 0, 1, 0};
         assertThrows(IllegalArgumentException.class, () -> new FluidGeometrySnapshot(
-                "minecraft:overworld", "minecraft:water", 0, 0, 0,
+                "minecraft:overworld", "minecraft:water", 0, 0, 0, true,
                 positions, new float[8], new int[]{1}, new boolean[]{false}
         ));
     }
