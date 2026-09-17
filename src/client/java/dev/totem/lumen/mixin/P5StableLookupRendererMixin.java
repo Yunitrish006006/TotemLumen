@@ -33,7 +33,7 @@ public abstract class P5StableLookupRendererMixin {
     ) {
         P14ModelMeshGpuUploader.pack(buffer);
         P17DynamicEntityGpuUploader.pack(buffer);
-        P14EFluidGpuUploader.pack(buffer);
+        P14EFluidGpuUploader.pack(buffer, sections);
     }
 
     @Redirect(
