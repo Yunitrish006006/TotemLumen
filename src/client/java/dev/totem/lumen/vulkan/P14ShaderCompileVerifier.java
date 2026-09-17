@@ -16,12 +16,17 @@ public final class P14ShaderCompileVerifier {
         String baseSource = P12FullBasePipeline.buildSourceForVerification();
         verifyP13NightSkySource(baseSource);
         verifyFullBaseIsolation(baseSource);
+        verifyP14EFluidSource(baseSource, "full base pass");
 
         String p17Source = P17ShaderIntegration.apply(baseSource);
+        verifyP14EFluidSource(p17Source, "P17 enhanced base pass");
         verifyP17DynamicEntitySource(p17Source, "enhanced base pass");
 
-        String reflectionSource = P17ShaderIntegration.apply(P16ReflectionPassShader.build());
+        String reflectionSource = P17ShaderIntegration.apply(
+                P14EFluidShaderPatch.apply(P16ReflectionPassShader.build())
+        );
         verifyP13NightSkySource(reflectionSource);
+        verifyP14EFluidSource(reflectionSource, "P16 reflection pass");
         verifyP17DynamicEntitySource(reflectionSource, "P16 reflection pass");
 
         long compiler = Shaderc.shaderc_compiler_initialize();
@@ -40,19 +45,19 @@ public final class P14ShaderCompileVerifier {
                     compiler,
                     P12FullBasePipeline.SHADER_NAME,
                     baseSource,
-                    "P12-P15 full base pass"
+                    "P12-P15+P14E full base pass"
             );
             compileAndVerify(
                     compiler,
                     P17EnhancedBasePipeline.SHADER_NAME,
                     p17Source,
-                    "P17 enhanced base pass"
+                    "P14E+P17 enhanced base pass"
             );
             compileAndVerify(
                     compiler,
                     P16ReflectionPassShader.SHADER_NAME,
                     reflectionSource,
-                    "P16+P17 split reflection pass"
+                    "P14E+P16+P17 split reflection pass"
             );
         } finally {
             Shaderc.shaderc_compiler_release(compiler);
@@ -64,6 +69,7 @@ public final class P14ShaderCompileVerifier {
         requireSourceMarker(source, "HitResult traceRayLimited(", "bootstrap voxel DDA");
         requireSourceMarker(source, "vec3 bootstrapColor(", "bootstrap output");
         if (source.contains("p13Moon")
+                || source.contains("P14E_FLUID_ABI_VERSION")
                 || source.contains("P17_ENTITY_MATERIAL_ID")
                 || source.contains("p16ReflectionRgb")
                 || source.contains("temporalHistoryColor")) {
@@ -76,7 +82,7 @@ public final class P14ShaderCompileVerifier {
         }
         System.out.println(
                 "Vulkan bootstrap readiness verification PASS: chars=" + source.length()
-                        + ", voxelDda=true, stagedGi=false, p17=false, reflection=false"
+                        + ", voxelDda=true, stagedGi=false, p14e=false, p17=false, reflection=false"
         );
     }
 
@@ -105,8 +111,27 @@ public final class P14ShaderCompileVerifier {
             throw new IllegalStateException("P17 must remain outside the full P12-P15 base pipeline");
         }
         System.out.println(
-                "Staged readiness verification PASS: bootstrap->P12-P15->P17/P16, "
+                "Staged readiness verification PASS: bootstrap->P12-P15+P14E->P17/P16, "
                         + "fullBaseContainsP17=false"
+        );
+    }
+
+    private static void verifyP14EFluidSource(String source, String label) {
+        requireSourceMarker(source, "const uint P14E_FLUID_ABI_VERSION = 1u;", label + " fluid ABI");
+        requireSourceMarker(source, "uint p14eFindFluidCell(", label + " block-coordinate fluid lookup");
+        requireSourceMarker(source, "bool p14eIntersectFluidCell(", label + " exact fluid quad trace");
+        requireSourceMarker(source, "bool p14eFluidOnly = false;", label + " pure-fluid suppression state");
+        requireSourceMarker(source, "bool p14eStaticHit = false;", label + " waterlogged static coexistence");
+        requireSourceMarker(
+                source,
+                "p14eFluidDistance < p14eStaticDistance - 0.00001",
+                label + " in-cell nearest-hit competition"
+        );
+        requireSourceMarker(source, "P14E_WATER_MATERIAL_ID", label + " water surface identity");
+        requireSourceMarker(source, "P14E_LAVA_MATERIAL_ID", label + " lava surface identity");
+        System.out.println(
+                "P14E exact-fluid shader verification PASS (" + label + "): "
+                        + "blockLookup=true, resolvedQuads=true, waterloggedCoexistence=true, nearestHit=true"
         );
     }
 
@@ -162,7 +187,7 @@ public final class P14ShaderCompileVerifier {
             try {
                 int status = Shaderc.shaderc_result_get_compilation_status(result);
                 if (status != 0) {
-                    printLineRange(source, 1, Math.min(120, source.split("\\R", -1).length));
+                    printLineRange(source, 1, Math.min(160, source.split("\\R", -1).length));
                     throw new IllegalStateException(
                             label + " verification failed: " + Shaderc.shaderc_result_get_error_message(result)
                     );
