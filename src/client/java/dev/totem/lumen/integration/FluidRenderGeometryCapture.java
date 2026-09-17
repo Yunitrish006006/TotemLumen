@@ -30,6 +30,12 @@ public final class FluidRenderGeometryCapture {
         ACTIVE.set(new Capture(dimensionId, pos.immutable(), fluidTypeId, fluidOnlyCell));
     }
 
+    /** Called from the exact FluidModel tint-source expression before cardinal face lighting is applied. */
+    public static void tint(int tintArgb) {
+        Capture capture = ACTIVE.get();
+        if (capture != null) capture.tintArgb = tintArgb;
+    }
+
     public static void face(
             float x0, float y0, float z0, float u0, float v0,
             float x1, float y1, float z1, float u1, float v1,
@@ -73,6 +79,7 @@ public final class FluidRenderGeometryCapture {
                 capture.pos.getY(),
                 capture.pos.getZ(),
                 capture.fluidOnlyCell,
+                capture.tintArgb,
                 positions,
                 uvs,
                 colors,
@@ -83,12 +90,13 @@ public final class FluidRenderGeometryCapture {
         if (!firstCaptureLogged) {
             firstCaptureLogged = true;
             TotemLumenClient.LOGGER.info(
-                    "P14E exact fluid geometry capture active: fluid={}, block=({}, {}, {}), fluidOnly={}, quads={}",
+                    "P14E exact fluid geometry capture active: fluid={}, block=({}, {}, {}), fluidOnly={}, tint=0x{}, quads={}",
                     capture.fluidTypeId,
                     capture.pos.getX(),
                     capture.pos.getY(),
                     capture.pos.getZ(),
                     capture.fluidOnlyCell,
+                    Integer.toHexString(capture.tintArgb),
                     quadCount
             );
         }
@@ -104,6 +112,7 @@ public final class FluidRenderGeometryCapture {
         private final String fluidTypeId;
         private final boolean fluidOnlyCell;
         private final List<Face> faces = new ArrayList<>(6);
+        private int tintArgb = -1;
 
         private Capture(String dimensionId, BlockPos pos, String fluidTypeId, boolean fluidOnlyCell) {
             this.dimensionId = dimensionId;
