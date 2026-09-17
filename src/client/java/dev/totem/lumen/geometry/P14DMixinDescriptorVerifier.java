@@ -2,6 +2,7 @@ package dev.totem.lumen.geometry;
 
 import com.mojang.blaze3d.vertex.PoseStack;
 import dev.totem.lumen.mixin.EntityRenderDispatcherMixin;
+import dev.totem.lumen.mixin.EntityRendererStateMixin;
 import dev.totem.lumen.mixin.SubmitNodeCollectionBlockEntityMixin;
 import dev.totem.lumen.mixin.SubmitNodeStorageBlockEntityMixin;
 import net.minecraft.client.model.Model;
@@ -9,12 +10,15 @@ import net.minecraft.client.renderer.SubmitNodeCollection;
 import net.minecraft.client.renderer.SubmitNodeCollector;
 import net.minecraft.client.renderer.SubmitNodeStorage;
 import net.minecraft.client.renderer.entity.EntityRenderDispatcher;
+import net.minecraft.client.renderer.entity.EntityRenderer;
 import net.minecraft.client.renderer.entity.state.EntityRenderState;
 import net.minecraft.client.renderer.feature.ModelFeatureRenderer;
 import net.minecraft.client.renderer.rendertype.RenderType;
 import net.minecraft.client.renderer.state.level.CameraRenderState;
 import net.minecraft.client.renderer.texture.TextureAtlasSprite;
+import net.minecraft.world.entity.Entity;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 import java.lang.reflect.Method;
 import java.util.Arrays;
@@ -63,10 +67,12 @@ public final class P14DMixinDescriptorVerifier {
                 SubmitNodeCollection.class,
                 SubmitNodeCollectionBlockEntityMixin.class
         );
+        verifyEntityStateBinding();
         verifyEntitySubmit();
         System.out.println(
                 "P14D/P17 mixin descriptor verification PASS: minecraft=26.2, "
                         + "submitModel=Model+Object+PoseStack+RenderType+III+TextureAtlasSprite+I+CrumblingOverlay, "
+                        + "entityState=Entity+F->EntityRenderState, "
                         + "entitySubmit=EntityRenderState+CameraRenderState+DDD+PoseStack+SubmitNodeCollector"
         );
     }
@@ -109,6 +115,36 @@ public final class P14DMixinDescriptorVerifier {
         if (hasLegacyCallback) {
             throw new IllegalStateException(
                     mixinClass.getName() + " still contains the incompatible legacy submitModel callback"
+            );
+        }
+    }
+
+    private static void verifyEntityStateBinding() throws Exception {
+        Method target = EntityRenderer.class.getDeclaredMethod(
+                "getAndUpdateRenderState",
+                Entity.class,
+                float.class
+        );
+        if (target.getReturnType() != EntityRenderState.class) {
+            throw new IllegalStateException(
+                    "EntityRenderer.getAndUpdateRenderState must return EntityRenderState"
+            );
+        }
+
+        Method handler = Arrays.stream(EntityRendererStateMixin.class.getDeclaredMethods())
+                .filter(method -> method.getName().equals("totemLumen$bindEntityRenderState"))
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException(
+                        "Missing P17 entity render-state binding callback"
+                ));
+        Class<?>[] callback = handler.getParameterTypes();
+        if (callback.length != 3
+                || callback[0] != Entity.class
+                || callback[1] != float.class
+                || callback[2] != CallbackInfoReturnable.class) {
+            throw new IllegalStateException(
+                    "P17 entity render-state binding callback descriptor mismatch: "
+                            + Arrays.toString(callback)
             );
         }
     }
