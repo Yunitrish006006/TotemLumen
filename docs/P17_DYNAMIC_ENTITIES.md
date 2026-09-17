@@ -18,7 +18,7 @@ Minecraft 26.2 entity rendering is submission based. `EntityRenderDispatcher.sub
 
 P17 therefore reuses the same architectural principle as P14D:
 
-1. bind Minecraft's temporary render state to the stable source entity identity during `EntityRenderer.getAndUpdateRenderState(...)`;
+1. bind Minecraft's temporary render state to the stable source entity identity during `EntityRenderer.createRenderState(...)`;
 2. establish a capture scope around one entity submission;
 3. observe renderer-resolved `Model` commands already selected by Minecraft;
 4. apply the exact render state to the model before copying geometry;
@@ -74,7 +74,7 @@ The CPU broad phase uses a fixed default capacity of 32 entity references per se
 
 ## Capture cache and lifecycle
 
-Minecraft render states are not treated as persistent entity identity. `EntityRendererStateMixin` observes `EntityRenderer.getAndUpdateRenderState(Entity, float)` and binds the returned render-state object to a Totem Lumen instance keyed by `(dimension id, Entity.getId())`. The later dispatcher/model capture uses that binding for the current frame.
+Minecraft render states are not treated as persistent entity identity. `EntityRendererStateMixin` observes Minecraft 26.2's official-mapped `EntityRenderer.createRenderState(Entity, float)` and binds the returned render-state object to a Totem Lumen instance keyed by `(dimension id, Entity.getId())`. The later dispatcher/model capture uses that binding for the current frame.
 
 This keeps one stable Totem Lumen instance id across per-frame render-state allocation while still ensuring the retained scene contains no live `Entity` reference. A fallback temporary id exists only as a diagnostic compatibility path if Minecraft changes extraction ordering.
 
@@ -94,7 +94,7 @@ This proves Minecraft's live entity submit path reached the generic capture laye
 
 The existing mixin descriptor verifier now checks all P17 Minecraft-facing methods against the actual Minecraft 26.2 client runtime classes:
 
-- `EntityRenderer.getAndUpdateRenderState(Entity, float) -> EntityRenderState`;
+- `EntityRenderer.createRenderState(Entity, float) -> EntityRenderState`;
 - `EntityRenderDispatcher.submit(EntityRenderState, CameraRenderState, double, double, double, PoseStack, SubmitNodeCollector)`;
 - the two `submitModel(...)` implementations already shared with P14D.
 
