@@ -4,17 +4,12 @@ import com.mojang.blaze3d.vulkan.VulkanDevice;
 import dev.totem.lumen.TotemLumenClient;
 import dev.totem.lumen.vulkan.resource.VulkanOwnedBuffer;
 
-import java.lang.reflect.Field;
-import java.lang.reflect.Method;
-
 /**
- * Optional P17-enhanced replacement for the P12-P15 base compute program.
+ * Optional P17-enhanced replacement for the full P12-P15 compute program.
  *
- * <p>Apple Silicon + MoltenVK has already shown that monolithic compute pipelines around the old
- * P16 size can take minutes to compile. Dynamic-entity tracing therefore must never participate in
- * renderer readiness. The proven P12-P15 program becomes ready first; this class builds the larger
- * P17 variant on a daemon worker and atomically substitutes it at command-record time only after the
- * whole Vulkan program is ready.</p>
+ * <p>P17 never participates in renderer readiness. The tiny bootstrap becomes usable first, then
+ * the full P12-P15 base, then this larger dynamic-entity variant. Command recording snapshots the
+ * selected program once so pipeline/layout/descriptor reads for one frame cannot mix generations.</p>
  */
 public final class P17EnhancedBasePipeline {
     public static final String SHADER_NAME = "totem_lumen_p17_dynamic_entities.comp";
@@ -38,9 +33,7 @@ public final class P17EnhancedBasePipeline {
         VulkanComputeProgram staleProgram;
         long workerGeneration;
         synchronized (LOCK) {
-            if (attachedScene == scene && (activeProgram != null || failure == null)) {
-                return;
-            }
+            if (attachedScene == scene && (activeProgram != null || failure == null)) return;
             staleProgram = activeProgram;
             activeProgram = null;
             attachedScene = scene;
@@ -64,7 +57,7 @@ public final class P17EnhancedBasePipeline {
         try {
             String source = buildSourceForVerification();
             TotemLumenClient.LOGGER.info(
-                    "P17 enhanced pipeline creation START: shader={}, sourceChars={}; base renderer remains available during compile",
+                    "P17 enhanced pipeline creation START: shader={}, sourceChars={}; P12-P15 full renderer remains available during compile",
                     SHADER_NAME,
                     source.length()
             );
@@ -89,12 +82,10 @@ public final class P17EnhancedBasePipeline {
             );
         } catch (Throwable buildFailure) {
             synchronized (LOCK) {
-                if (workerGeneration == generation && attachedScene == scene) {
-                    failure = buildFailure;
-                }
+                if (workerGeneration == generation && attachedScene == scene) failure = buildFailure;
             }
             TotemLumenClient.LOGGER.error(
-                    "P17 enhanced pipeline FAILED; keeping the P12-P15 base renderer active without dynamic-entity ray hits",
+                    "P17 enhanced pipeline FAILED; keeping the P12-P15 full renderer active without dynamic-entity ray hits",
                     buildFailure
             );
         } finally {
@@ -102,30 +93,13 @@ public final class P17EnhancedBasePipeline {
         }
     }
 
-    /**
-     * Builds the exact P17 source from the same private production transform used by the readiness
-     * pipeline, then adds only the dynamic-entity nearest-hit layer.
-     */
     static String buildSourceForVerification() {
-        try {
-            Field shaderField = P5StableLookupRenderer.class.getDeclaredField("SHADER");
-            shaderField.setAccessible(true);
-            String source = (String) shaderField.get(null);
-
-            Method transform = VulkanComputeProgram.class.getDeclaredMethod(
-                    "transformMainGiShader",
-                    String.class
-            );
-            transform.setAccessible(true);
-            String baseSource = (String) transform.invoke(null, source);
-            return P17ShaderIntegration.apply(baseSource);
-        } catch (ReflectiveOperationException failure) {
-            throw new IllegalStateException("Failed to build P17 enhanced production shader", failure);
-        }
+        return P17ShaderIntegration.apply(P12FullBasePipeline.buildSourceForVerification());
     }
 
-    /** Snapshot the optional enhanced program once so one command recording cannot mix pipelines. */
+    /** Snapshot full-base and P17 programs once for one command-recording operation. */
     public static void beginDispatch() {
+        P12FullBasePipeline.beginDispatch();
         DISPATCH_PROGRAM.set(activeProgram);
         VulkanComputeProgram selected = DISPATCH_PROGRAM.get();
         if (selected != null && !firstDispatchLogged) {
@@ -136,13 +110,15 @@ public final class P17EnhancedBasePipeline {
         }
     }
 
-    public static VulkanComputeProgram selectForCurrentDispatch(VulkanComputeProgram fallback) {
+    public static VulkanComputeProgram selectForCurrentDispatch(VulkanComputeProgram bootstrap) {
         VulkanComputeProgram selected = DISPATCH_PROGRAM.get();
-        return selected == null ? fallback : selected;
+        if (selected != null) return selected;
+        return P12FullBasePipeline.selectForCurrentDispatch(bootstrap);
     }
 
     public static void endDispatch() {
         DISPATCH_PROGRAM.remove();
+        P12FullBasePipeline.endDispatch();
     }
 
     public static boolean ready() {
