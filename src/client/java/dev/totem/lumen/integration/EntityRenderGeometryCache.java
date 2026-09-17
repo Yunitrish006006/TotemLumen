@@ -115,15 +115,16 @@ public final class EntityRenderGeometryCache {
     }
 
     public static synchronized List<DynamicEntitySnapshot> snapshot() {
-        List<DynamicEntitySnapshot> result = new ArrayList<>(ENTRIES.size());
-        for (CacheEntry entry : ENTRIES.values()) {
-            result.add(entry.snapshot);
-        }
-        return List.copyOf(result);
+        return copySnapshots();
+    }
+
+    /** Returns revision and immutable entity list from the same synchronized cache observation. */
+    public static synchronized SceneState sceneState() {
+        return new SceneState(revision, copySnapshots());
     }
 
     public static synchronized DynamicEntityBroadPhase broadPhase() {
-        return DynamicEntityBroadPhase.build(snapshot());
+        return DynamicEntityBroadPhase.build(copySnapshots());
     }
 
     public static synchronized long revision() {
@@ -145,11 +146,22 @@ public final class EntityRenderGeometryCache {
         fallbackIdentityLogged = false;
     }
 
+    private static List<DynamicEntitySnapshot> copySnapshots() {
+        List<DynamicEntitySnapshot> result = new ArrayList<>(ENTRIES.size());
+        for (CacheEntry entry : ENTRIES.values()) {
+            result.add(entry.snapshot);
+        }
+        return List.copyOf(result);
+    }
+
     private static long allocateInstanceId() {
         if (nextInstanceId == Long.MAX_VALUE) {
             throw new IllegalStateException("P17 dynamic entity instance id space exhausted");
         }
         return nextInstanceId++;
+    }
+
+    public record SceneState(long revision, List<DynamicEntitySnapshot> entities) {
     }
 
     private record EntityKey(String dimensionId, int entityId) {
