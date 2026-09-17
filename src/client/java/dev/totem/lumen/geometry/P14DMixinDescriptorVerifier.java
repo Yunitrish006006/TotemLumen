@@ -72,7 +72,7 @@ public final class P14DMixinDescriptorVerifier {
         System.out.println(
                 "P14D/P17 mixin descriptor verification PASS: minecraft=26.2, "
                         + "submitModel=Model+Object+PoseStack+RenderType+III+TextureAtlasSprite+I+CrumblingOverlay, "
-                        + "entityState=Entity+F->EntityRenderState, "
+                        + "createRenderState=Entity+F->EntityRenderState, "
                         + "entitySubmit=EntityRenderState+CameraRenderState+DDD+PoseStack+SubmitNodeCollector"
         );
     }
@@ -121,13 +121,13 @@ public final class P14DMixinDescriptorVerifier {
 
     private static void verifyEntityStateBinding() throws Exception {
         Method target = EntityRenderer.class.getDeclaredMethod(
-                "getAndUpdateRenderState",
+                "createRenderState",
                 Entity.class,
                 float.class
         );
         if (target.getReturnType() != EntityRenderState.class) {
             throw new IllegalStateException(
-                    "EntityRenderer.getAndUpdateRenderState must return EntityRenderState"
+                    "EntityRenderer.createRenderState must return EntityRenderState"
             );
         }
 
