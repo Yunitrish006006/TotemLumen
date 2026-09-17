@@ -8,7 +8,7 @@ import java.util.Objects;
 
 /** CPU mirror/packer for the bounded P14E exact-fluid scene tail. */
 public final class GpuFluidScene {
-    public static final int ABI_VERSION = 1;
+    public static final int ABI_VERSION = 2;
     public static final int MAX_FLUID_CELLS = 16_384;
     public static final int MAX_FLUID_QUADS = 65_536;
     public static final int LOOKUP_CAPACITY = 32_768;
@@ -19,7 +19,7 @@ public final class GpuFluidScene {
     public static final int CELL_FLAG_FLUID_ONLY = 1;
 
     public static final int HEADER_WORDS = 8;
-    public static final int CELL_DESCRIPTOR_WORDS_PER_RECORD = 8;
+    public static final int CELL_DESCRIPTOR_WORDS_PER_RECORD = 9;
     public static final int CELL_DESCRIPTOR_WORDS = MAX_FLUID_CELLS * CELL_DESCRIPTOR_WORDS_PER_RECORD;
     public static final int LOOKUP_WORDS_PER_BUCKET = 4;
     public static final int LOOKUP_WORDS = LOOKUP_CAPACITY * LOOKUP_WORDS_PER_BUCKET;
@@ -95,6 +95,7 @@ public final class GpuFluidScene {
             putWord(buffer, descriptor + 5, nextQuad);
             putWord(buffer, descriptor + 6, fluid.quadCount());
             putWord(buffer, descriptor + 7, fluid.fluidOnlyCell() ? CELL_FLAG_FLUID_ONLY : 0);
+            putWord(buffer, descriptor + 8, fluid.tintArgb());
 
             float[] positions = fluid.copyQuadPositions();
             int[] colors = fluid.copyQuadColors();
