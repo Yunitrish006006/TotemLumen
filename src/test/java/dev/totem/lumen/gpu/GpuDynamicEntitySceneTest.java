@@ -51,7 +51,7 @@ class GpuDynamicEntitySceneTest {
         );
         assertEquals(
                 0,
-                GpuDynamicEntityScene.packedSectionCandidate(buffer, 0, 2, 4, -1, 0)
+                GpuDynamicEntityScene.packedSectionCandidate(buffer, 0, 2, 4, -2, 0)
         );
     }
 
