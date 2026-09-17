@@ -5,6 +5,7 @@ import dev.totem.lumen.gpu.FluidSceneSelector;
 import dev.totem.lumen.gpu.GpuDynamicEntityScene;
 import dev.totem.lumen.gpu.GpuFluidScene;
 import dev.totem.lumen.integration.FluidRenderGeometryCache;
+import dev.totem.lumen.scene.FluidGeometrySnapshot;
 import dev.totem.lumen.scene.SectionKey;
 import dev.totem.lumen.scene.SectionSnapshot;
 
@@ -19,7 +20,8 @@ public final class P14EFluidGpuUploader {
     private static volatile long lastBaseByteOffset = -1L;
     private static volatile long lastCopyBytes;
     private static volatile List<SectionKey> residentSections = List.of();
-    private static long lastPackedRevision = Long.MIN_VALUE;
+    private static long lastObservedRevision = Long.MIN_VALUE;
+    private static List<FluidGeometrySnapshot> lastPackedFluids = List.of();
     private static boolean copyPending;
     private static int lastLoggedCellCount = -1;
     private static int lastLoggedQuadCount = -1;
@@ -32,18 +34,40 @@ public final class P14EFluidGpuUploader {
 
     public static synchronized void pack(ByteBuffer buffer, List<SectionSnapshot> sections) {
         residentSections = sections.stream().map(SectionSnapshot::key).toList();
-        packState(buffer, FluidRenderGeometryCache.sceneState());
+        FluidRenderGeometryCache.SceneState state = FluidRenderGeometryCache.sceneState();
+        FluidSceneSelector.Selection selection = select(state);
+        packSelection(buffer, state.revision(), selection);
     }
 
     public static synchronized boolean packIfDirty(ByteBuffer buffer) {
         FluidRenderGeometryCache.SceneState state = FluidRenderGeometryCache.sceneState();
-        if (state.revision() == lastPackedRevision) return false;
-        packState(buffer, state);
+        if (state.revision() == lastObservedRevision) return false;
+
+        FluidSceneSelector.Selection selection = select(state);
+        lastObservedRevision = state.revision();
+        if (selection.fluids().equals(lastPackedFluids)) {
+            return false;
+        }
+
+        packSelection(buffer, state.revision(), selection);
         invalidateHistoryRead(buffer);
         return true;
     }
 
-    private static void packState(ByteBuffer buffer, FluidRenderGeometryCache.SceneState state) {
+    private static FluidSceneSelector.Selection select(FluidRenderGeometryCache.SceneState state) {
+        return FluidSceneSelector.select(
+                state.fluids(),
+                residentSections,
+                GpuFluidScene.MAX_FLUID_CELLS,
+                GpuFluidScene.MAX_FLUID_QUADS
+        );
+    }
+
+    private static void packSelection(
+            ByteBuffer buffer,
+            long observedRevision,
+            FluidSceneSelector.Selection selection
+    ) {
         int pixelBaseWord = buffer.getInt(3 * Integer.BYTES);
         int width = buffer.getInt(4 * Integer.BYTES);
         int height = buffer.getInt(5 * Integer.BYTES);
@@ -52,23 +76,19 @@ public final class P14EFluidGpuUploader {
         int p17BaseWord = Math.addExact(p14BaseWord, P14ModelMeshGpuLayout.MAX_STORAGE_WORDS);
         int fluidBaseWord = Math.addExact(p17BaseWord, GpuDynamicEntityScene.MAX_STORAGE_WORDS);
 
-        FluidSceneSelector.Selection selection = FluidSceneSelector.select(
-                state.fluids(),
-                residentSections,
-                GpuFluidScene.MAX_FLUID_CELLS,
-                GpuFluidScene.MAX_FLUID_QUADS
-        );
         GpuFluidScene.PackResult packed = GpuFluidScene.pack(buffer, fluidBaseWord, selection.fluids());
         lastBaseByteOffset = (long) fluidBaseWord * Integer.BYTES;
         lastCopyBytes = packed.usedBytes();
-        lastPackedRevision = state.revision();
+        lastObservedRevision = observedRevision;
+        lastPackedFluids = selection.fluids();
         copyPending = true;
 
-        if (lastLoggedCellCount != packed.cellCount()
+        boolean diagnosticsChanged = lastLoggedCellCount != packed.cellCount()
                 || lastLoggedQuadCount != packed.totalQuads()
                 || lastLoggedMaxProbe != packed.maxProbe()
                 || lastLoggedResidentCellCount != selection.residentCellCount()
-                || lastLoggedDroppedCellCount != selection.droppedCellCount()) {
+                || lastLoggedDroppedCellCount != selection.droppedCellCount();
+        if (diagnosticsChanged) {
             lastLoggedCellCount = packed.cellCount();
             lastLoggedQuadCount = packed.totalQuads();
             lastLoggedMaxProbe = packed.maxProbe();
@@ -86,17 +106,17 @@ public final class P14EFluidGpuUploader {
                     lastCopyBytes,
                     GpuFluidScene.MAX_STORAGE_BYTES
             );
-        }
-        if (selection.truncated()) {
-            TotemLumenClient.LOGGER.warn(
-                    "P14E resident fluid scene exceeded bounded GPU capacity; keeping nearest resident geometry and dropping farther cells: residentCells={}, selectedCells={}, residentQuads={}, selectedQuads={}, maxCells={}, maxQuads={}",
-                    selection.residentCellCount(),
-                    packed.cellCount(),
-                    selection.residentQuadCount(),
-                    packed.totalQuads(),
-                    GpuFluidScene.MAX_FLUID_CELLS,
-                    GpuFluidScene.MAX_FLUID_QUADS
-            );
+            if (selection.truncated()) {
+                TotemLumenClient.LOGGER.warn(
+                        "P14E resident fluid scene exceeded bounded GPU capacity; keeping nearest resident geometry and dropping farther cells: residentCells={}, selectedCells={}, residentQuads={}, selectedQuads={}, maxCells={}, maxQuads={}",
+                        selection.residentCellCount(),
+                        packed.cellCount(),
+                        selection.residentQuadCount(),
+                        packed.totalQuads(),
+                        GpuFluidScene.MAX_FLUID_CELLS,
+                        GpuFluidScene.MAX_FLUID_QUADS
+                );
+            }
         }
     }
 
