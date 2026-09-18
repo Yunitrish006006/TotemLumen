@@ -237,7 +237,8 @@ public final class P17EnhancedBasePipeline {
     }
 
     public static Throwable failure() {
-        return failure;
+        Throwable bindingFailure = failure;
+        return bindingFailure != null ? bindingFailure : prewarmFailure;
     }
 
 
