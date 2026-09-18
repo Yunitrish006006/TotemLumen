@@ -12,6 +12,7 @@ import dev.totem.lumen.gpu.GpuSectionLightLists;
 import dev.totem.lumen.gpu.GpuSectionLookupTable;
 import dev.totem.lumen.gpu.GpuSectionSlotAllocator;
 import dev.totem.lumen.integration.LabPbrTextureRegistry;
+import dev.totem.lumen.integration.RendererRuntimeTuningRegistry;
 import dev.totem.lumen.integration.SceneExtractionBridge;
 import dev.totem.lumen.render.RendererSettings;
 import dev.totem.lumen.scene.FrameSnapshot;
@@ -43,7 +44,7 @@ import java.util.Set;
 public final class P5StableLookupRenderer {
     private static final int MAX_SECTIONS = 64;
     private static final int MIN_SECTIONS = 16;
-    private static final int HEADER_WORDS = 64;
+    private static final int HEADER_WORDS = 96;
     private static final int LOOKUP_CAPACITY = 128;
     private static final int LOOKUP_BASE_WORD = HEADER_WORDS;
     private static final int LOOKUP_WORDS = LOOKUP_CAPACITY * GpuSectionLookupTable.WORDS_PER_BUCKET;
@@ -54,7 +55,7 @@ public final class P5StableLookupRenderer {
             + MAX_SECTIONS * GpuSectionLightLists.MAX_LIGHTS_PER_SECTION;
     private static final int LIGHT_WORDS_PER_RECORD = 8;
     private static final int MAX_MATERIALS = 4096;
-    private static final int MATERIAL_EMISSION_WORDS_PER_RECORD = 4;
+    private static final int MATERIAL_EMISSION_WORDS_PER_RECORD = 16;
     private static final int MATERIAL_EMISSION_BASE_WORD = LIGHT_DATA_BASE_WORD
             + GpuSectionLightLists.MAX_GLOBAL_LIGHTS * LIGHT_WORDS_PER_RECORD;
     private static final int STATIC_DATA_END_WORD = MATERIAL_EMISSION_BASE_WORD
@@ -62,7 +63,7 @@ public final class P5StableLookupRenderer {
     private static final int HISTORY_RECORD_WORDS = 8;
     private static final int MAX_STEPS = 512;
     private static final float MAX_DISTANCE = 256.0f;
-    private static final int CAMERA_UPLOAD_WORDS = 54;
+    private static final int CAMERA_UPLOAD_WORDS = HEADER_WORDS;
     private static final int SOFT_SHADOW_SAMPLES = 4;
     private static final float SOFT_SHADOW_ANGULAR_RADIUS = 0.055f;
     private static final float TEMPORAL_HISTORY_WEIGHT = 0.80f;
@@ -81,19 +82,19 @@ public final class P5StableLookupRenderer {
                 uint data[];
             } scene;
 
-            const uint LOOKUP_BASE = 64u;
+            const uint LOOKUP_BASE = 96u;
             const uint LOOKUP_CAPACITY = 128u;
             const uint LOOKUP_MASK = 127u;
             const uint LOOKUP_WORDS_PER_BUCKET = 4u;
-            const uint VOXEL_BASE = 576u;
+            const uint VOXEL_BASE = 608u;
             const uint VOXELS_PER_SECTION = 4096u;
-            const uint SECTION_LIGHT_COUNT_BASE = 262720u;
-            const uint SECTION_LIGHT_INDEX_BASE = 262784u;
-            const uint LIGHT_DATA_BASE = 263296u;
+            const uint SECTION_LIGHT_COUNT_BASE = 262752u;
+            const uint SECTION_LIGHT_INDEX_BASE = 262816u;
+            const uint LIGHT_DATA_BASE = 263328u;
             const uint MAX_LIGHTS_PER_SECTION = 8u;
             const uint LIGHT_WORDS_PER_RECORD = 8u;
-            const uint MATERIAL_EMISSION_BASE = 265344u;
-            const uint MATERIAL_EMISSION_WORDS_PER_RECORD = 4u;
+            const uint MATERIAL_EMISSION_BASE = 265376u;
+            const uint MATERIAL_EMISSION_WORDS_PER_RECORD = 16u;
             const uint HISTORY_RECORD_WORDS = 8u;
             const float TEMPORAL_HISTORY_WEIGHT = 0.80;
             const uint GI_HISTORY_MAX_SAMPLES = 64u;
@@ -391,7 +392,7 @@ public final class P5StableLookupRenderer {
                 }
 
                 vec4 surfaceEmission = materialEmission(hit.materialId);
-                vec3 emitted = surfaceEmission.rgb * surfaceEmission.a * 1.6;
+                vec3 emitted = surfaceEmission.rgb * surfaceEmission.a * uintBitsToFloat(scene.data[83]);
                 float lighting = 0.12 + 0.88 * nDotL * visibility;
                 return packRgba(materialColor(hit.materialId) * lighting + emitted, 255u);
             }
@@ -409,7 +410,7 @@ public final class P5StableLookupRenderer {
                 }
 
                 vec4 surfaceEmission = materialEmission(hit.materialId);
-                vec3 emitted = surfaceEmission.rgb * surfaceEmission.a * 1.6;
+                vec3 emitted = surfaceEmission.rgb * surfaceEmission.a * uintBitsToFloat(scene.data[83]);
                 float lighting = 0.12 + 0.88 * nDotL * visibility;
                 return packRgba(materialColor(hit.materialId) * lighting + emitted, 255u);
             }
@@ -426,7 +427,7 @@ public final class P5StableLookupRenderer {
                 }
 
                 vec4 emission = materialEmission(hit.materialId);
-                vec3 emitted = emission.rgb * emission.a * 1.6;
+                vec3 emitted = emission.rgb * emission.a * uintBitsToFloat(scene.data[83]);
                 float lighting = 0.04 + 0.96 * nDotL * visibility;
                 return materialColor(hit.materialId) * lighting + emitted;
             }
@@ -490,14 +491,14 @@ public final class P5StableLookupRenderer {
             uint localLightColor(HitResult hit, vec3 primaryOrigin, vec3 primaryDirection, bool emissiveMode) {
                 int slot = sectionSlotForVoxel(hit.voxel);
                 vec4 surfaceEmission = emissiveMode ? materialEmission(hit.materialId) : vec4(0.0);
-                vec3 emitted = surfaceEmission.rgb * surfaceEmission.a * 1.6;
+                vec3 emitted = surfaceEmission.rgb * surfaceEmission.a * uintBitsToFloat(scene.data[83]);
                 if (slot < 0) {
                     return packRgba(materialColor(hit.materialId) * 0.05 + emitted, 255u);
                 }
 
                 vec3 surfaceNormal = resolvedSurfaceNormal(hit, primaryDirection);
                 vec3 hitPoint = primaryOrigin + primaryDirection * hit.distance;
-                vec3 lighting = vec3(0.045);
+                vec3 lighting = vec3(uintBitsToFloat(scene.data[82]));
                 uint lightCount = min(scene.data[SECTION_LIGHT_COUNT_BASE + uint(slot)], MAX_LIGHTS_PER_SECTION);
                 uint areaSamples = clamp(scene.data[45], 1u, 4u);
 
@@ -556,7 +557,7 @@ public final class P5StableLookupRenderer {
                     }
 
                     lighting += lightColor * (
-                        2.4 * intensity * sampleLighting / float(areaSamples)
+                        uintBitsToFloat(scene.data[54]) * intensity * sampleLighting / float(areaSamples)
                     );
                 }
 
@@ -573,14 +574,14 @@ public final class P5StableLookupRenderer {
             ) {
                 vec3 indirect = oneBounceIndirectRgb(hit, primaryOrigin, primaryDirection, pixel, sampleIndex);
                 if (indirectOnly) {
-                    return packRgba(indirect * 1.35, 255u);
+                    return packRgba(indirect * uintBitsToFloat(scene.data[84]), 255u);
                 }
 
                 vec3 direct = unpackRgb(temporalCurrentColor(hit, primaryOrigin, primaryDirection, sampleIndex));
                 vec3 localWithBase = unpackRgb(localLightColor(hit, primaryOrigin, primaryDirection, true));
                 vec4 emission = materialEmission(hit.materialId);
-                vec3 emitted = emission.rgb * emission.a * 1.6;
-                vec3 localBase = materialColor(hit.materialId) * 0.045 + emitted;
+                vec3 emitted = emission.rgb * emission.a * uintBitsToFloat(scene.data[83]);
+                vec3 localBase = materialColor(hit.materialId) * uintBitsToFloat(scene.data[82]) + emitted;
                 vec3 localContribution = max(localWithBase - localBase, vec3(0.0));
                 return packRgba(direct + localContribution + indirect, 255u);
             }
@@ -1378,6 +1379,41 @@ public final class P5StableLookupRenderer {
         putWord(buffer, 51, resources.width);
         putWord(buffer, 52, resources.height);
         putWord(buffer, 53, (int) currentAnimationTick(frame));
+
+        RendererRuntimeTuningRegistry.ensureLoaded(Minecraft.getInstance().getResourceManager());
+        var tuning = RendererRuntimeTuningRegistry.current();
+        putWord(buffer, 54, Float.floatToRawIntBits(tuning.localLightGain()));
+        putWord(buffer, 55, Float.floatToRawIntBits(tuning.reflectionSpreadScale()));
+        putWord(buffer, 56, Float.floatToRawIntBits(tuning.reflectionRoughnessEnergy()));
+        putWord(buffer, 57, Float.floatToRawIntBits(tuning.reflectionDielectricEnergy()));
+        putWord(buffer, 58, Float.floatToRawIntBits(tuning.reflectionMetalEnergy()));
+        putWord(buffer, 59, Float.floatToRawIntBits(tuning.reflectionNormalBias()));
+        putWord(buffer, 60, Float.floatToRawIntBits(tuning.reflectionDirectionBias()));
+        putWord(buffer, 61, tuning.transmissionMaxLayers());
+        putWord(buffer, 62, Float.floatToRawIntBits(tuning.transmissionExitEpsilon()));
+        putWord(buffer, 63, Float.floatToRawIntBits(tuning.transmissionMinScalar()));
+        putWord(buffer, 64, Float.floatToRawIntBits(tuning.waterTintMix()));
+        putWord(buffer, 65, Float.floatToRawIntBits(tuning.waterTransmissionScalar()));
+        putWord(buffer, 66, Float.floatToRawIntBits(tuning.waterFallbackR()));
+        putWord(buffer, 67, Float.floatToRawIntBits(tuning.waterFallbackG()));
+        putWord(buffer, 68, Float.floatToRawIntBits(tuning.waterFallbackB()));
+        putWord(buffer, 69, Float.floatToRawIntBits(tuning.waterMaterialR()));
+        putWord(buffer, 70, Float.floatToRawIntBits(tuning.waterMaterialG()));
+        putWord(buffer, 71, Float.floatToRawIntBits(tuning.waterMaterialB()));
+        putWord(buffer, 72, Float.floatToRawIntBits(tuning.lavaMaterialR()));
+        putWord(buffer, 73, Float.floatToRawIntBits(tuning.lavaMaterialG()));
+        putWord(buffer, 74, Float.floatToRawIntBits(tuning.lavaMaterialB()));
+        putWord(buffer, 75, Float.floatToRawIntBits(tuning.otherFluidR()));
+        putWord(buffer, 76, Float.floatToRawIntBits(tuning.otherFluidG()));
+        putWord(buffer, 77, Float.floatToRawIntBits(tuning.otherFluidB()));
+        putWord(buffer, 78, Float.floatToRawIntBits(tuning.lavaEmissionR()));
+        putWord(buffer, 79, Float.floatToRawIntBits(tuning.lavaEmissionG()));
+        putWord(buffer, 80, Float.floatToRawIntBits(tuning.lavaEmissionB()));
+        putWord(buffer, 81, Float.floatToRawIntBits(tuning.lavaEmissionStrength()));
+        putWord(buffer, 82, Float.floatToRawIntBits(tuning.localAmbient()));
+        putWord(buffer, 83, Float.floatToRawIntBits(tuning.surfaceEmissionGain()));
+        putWord(buffer, 84, Float.floatToRawIntBits(tuning.giDisplayGain()));
+        for (int word = 85; word < HEADER_WORDS; word++) putWord(buffer, word, 0);
     }
 
     private static long currentAnimationTick(FrameSnapshot frame) {
@@ -1422,6 +1458,18 @@ public final class P5StableLookupRenderer {
             putWord(buffer, base + 1, Float.floatToRawIntBits(material.emissionG()));
             putWord(buffer, base + 2, Float.floatToRawIntBits(material.emissionB()));
             putWord(buffer, base + 3, Float.floatToRawIntBits(material.emissionLevel() / 15.0f));
+            putWord(buffer, base + 4, Float.floatToRawIntBits(material.transmissionR()));
+            putWord(buffer, base + 5, Float.floatToRawIntBits(material.transmissionG()));
+            putWord(buffer, base + 6, Float.floatToRawIntBits(material.transmissionB()));
+            putWord(buffer, base + 7, Float.floatToRawIntBits(material.opacity()));
+            putWord(buffer, base + 8, Float.floatToRawIntBits(material.indexOfRefraction()));
+            putWord(buffer, base + 9, Float.floatToRawIntBits(material.roughness()));
+            putWord(buffer, base + 10, Float.floatToRawIntBits(material.metallic()));
+            putWord(buffer, base + 11, material.flags());
+            putWord(buffer, base + 12, Float.floatToRawIntBits(material.lightRadiusScale()));
+            putWord(buffer, base + 13, Float.floatToRawIntBits(material.lightIntensityScale()));
+            putWord(buffer, base + 14, Float.floatToRawIntBits(material.reflectionScale()));
+            putWord(buffer, base + 15, 0);
             if (material.emissionLevel() > 0) {
                 lastEmissiveMaterialCount++;
             }
@@ -1440,7 +1488,9 @@ public final class P5StableLookupRenderer {
                             material.emissionLevel(),
                             material.emissionR(),
                             material.emissionG(),
-                            material.emissionB()
+                            material.emissionB(),
+                            material.lightRadiusScale(),
+                            material.lightIntensityScale()
                     );
                 }
         );
