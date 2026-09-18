@@ -81,7 +81,7 @@ final class P18LabPbrShadingPatch {
                     if (descriptor == 0u) return 0u;
 
                     uint textureBase = p18TextureSceneBase();
-                    uint texelOffset = scene.data[descriptor];
+                    uint texelOffset = p18CurrentFrameTexelOffset(textureBase, descriptor);
                     uint width = scene.data[descriptor + 1u];
                     uint height = scene.data[descriptor + 2u];
                     vec2 wrapped = fract(uv);
