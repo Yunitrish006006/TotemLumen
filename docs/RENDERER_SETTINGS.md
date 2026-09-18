@@ -120,7 +120,8 @@ Renderer compilation is split into **preparation** and **scene binding**:
 
 - the tiny Vulkan bootstrap is prepared first so Minecraft remains responsive;
 - as soon as the Vulkan device/bootstrap are ready, the full GI / sky / geometry / material pipeline begins compiling even if the player is still in menus;
-- after the full pipeline is prepared, player/entity ray tracing and reflections begin their own background prewarm;
+- player/entity nearest-hit tracing is compiled directly into that same full-lighting pipeline, so MoltenVK does not compile a second near-duplicate 100k+ character base shader;
+- after the unified full-lighting pipeline is prepared, the independent reflection pass begins its background prewarm;
 - entering a world allocates the scene storage buffer and binds already-prepared pipelines to it instead of starting their expensive driver compilation from scratch.
 
 Two persistent caches are used across launches:
@@ -134,7 +135,9 @@ The SPIR-V cache is keyed by the complete generated GLSL source, target environm
 
 Logs report SPIR-V HIT/MISS, Vulkan pipeline-cache session HIT/MISS and per-pipeline driver creation time. These timings are the baseline for deciding whether later work should target shader generation or MoltenVK/Metal compilation.
 
-The shared Vulkan pipeline cache does not serialize the whole `vkCreateComputePipelines` call. Independent player/entity and reflection builds may enter driver compilation concurrently; cache serialization to disk is deferred until all active builds finish. This matters most on a first-run MoltenVK compile, where one large pipeline can otherwise occupy the driver compiler for many minutes.
+The shared Vulkan pipeline cache does not serialize the whole `vkCreateComputePipelines` call. Independent driver builds may enter pipeline creation concurrently; cache serialization to disk is deferred until all active builds finish.
+
+Apple M4 cold-run measurements showed why the unified base is necessary: the old full-lighting pipeline took about 16m33s in MoltenVK/Metal and the separate near-duplicate entity-enhanced base took another about 20m17s. Warm-cache runs reduced those same driver calls to single-digit milliseconds. The runtime therefore now compiles one unified full-lighting/entity pipeline instead of paying both cold costs.
 
 ### Compile progress HUD
 
@@ -144,10 +147,9 @@ Current staged weights:
 
 - 0–10%: renderer/Vulkan backend discovery and interop;
 - 20%: bootstrap pipeline compiling;
-- 30%: full P12–P18 material-aware base compiling;
-- 70%: full base ready and Totem presentation can become active;
-- +15% when P17 dynamic-entity pipeline finishes;
-- +15% when P16 reflection pipeline finishes;
+- 30%: unified full lighting / materials / player-and-entity ray tracing compiling;
+- 85%: unified full lighting is ready and Totem presentation can become active;
+- +15% when the independent reflection pipeline finishes;
 - 100%: all staged compilation has finished; the HUD disappears automatically.
 
 A manual **Recompile Renderer Pipelines** resets the visible staged progress and the HUD appears again.
@@ -174,7 +176,7 @@ At two bounces, P16 performs a true second ray from the first reflected surface.
 
 The Diagnostics page retains:
 
-- bootstrap / full P12-P15 / P17 / P16 compile state;
+- Vulkan bootstrap / unified full-lighting-and-entity / reflection compile state;
 - full Render View cycling;
 - one-click GI Composite;
 - one-click P14E Fluid Geometry;
@@ -185,8 +187,7 @@ The Diagnostics page retains:
 CI must verify all runtime-setting shader markers and shaderc-compile:
 
 1. bootstrap readiness;
-2. P12-P15 + P14E full base;
-3. P14E + P17 enhanced base;
-4. P14E + P16 + P17 reflection.
+2. unified full lighting + exact fluids + PBR + dynamic entities;
+3. split reflection pass with dynamic-entity tracing.
 
 Bootstrap remains free of these staged quality features and is never composited to the player. It exists only as an internal readiness/compilation bridge, so cold startup cannot replace normal Minecraft presentation with a partial Totem renderer.
