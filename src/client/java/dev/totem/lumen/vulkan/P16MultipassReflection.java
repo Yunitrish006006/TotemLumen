@@ -9,86 +9,192 @@ import org.lwjgl.vulkan.VK10;
 import org.lwjgl.vulkan.VkBufferMemoryBarrier;
 import org.lwjgl.vulkan.VkCommandBuffer;
 
-/** Owns the split P16 reflection pipeline. */
+/** Owns the split reflection pipeline with menu-time prewarming and scene-time binding. */
 public final class P16MultipassReflection {
+    public static final String WORKER_NAME = "TotemLumen-P16Pipeline";
+
     private static final Object LOCK = new Object();
 
     private static volatile VulkanOwnedBuffer attachedScene;
     private static volatile VulkanComputeProgram activeProgram;
+    private static volatile VulkanComputeProgram.PreparedPipeline preparedPipeline;
+    private static volatile VulkanDevice preparedDevice;
     private static volatile Throwable failure;
+    private static volatile Throwable prewarmFailure;
     private static volatile long generation;
+    private static volatile boolean prewarmStarted;
     private static volatile boolean firstDispatchLogged;
 
     private P16MultipassReflection() {
     }
 
-    public static void attach(VulkanDevice device, VulkanOwnedBuffer scene) {
-        if (device == null || scene == null) return;
+    public static void prewarm(VulkanDevice device) {
+        if (device == null) return;
 
-        VulkanComputeProgram staleProgram;
         long workerGeneration;
         synchronized (LOCK) {
-            if (attachedScene == scene && (activeProgram != null || failure == null)) return;
-            staleProgram = activeProgram;
-            activeProgram = null;
-            attachedScene = scene;
-            failure = null;
-            firstDispatchLogged = false;
-            workerGeneration = ++generation;
+            if (preparedPipeline != null
+                    && preparedDevice != null
+                    && preparedDevice.vkDevice() == device.vkDevice()) {
+                return;
+            }
+            if (prewarmStarted
+                    && preparedDevice != null
+                    && preparedDevice.vkDevice() == device.vkDevice()) {
+                return;
+            }
+            if (preparedDevice != null && preparedDevice.vkDevice() != device.vkDevice()) {
+                ++generation;
+                preparedPipeline = null;
+                prewarmFailure = null;
+            }
+            preparedDevice = device;
+            prewarmStarted = true;
+            prewarmFailure = null;
+            workerGeneration = generation;
         }
-        closeAsync(staleProgram, "TotemLumen-P16OldPipelineCleanup");
 
-        Thread worker = new Thread(() -> buildPipeline(device, scene, workerGeneration), "TotemLumen-P16Pipeline");
+        Thread worker = new Thread(
+                () -> buildPreparedPipeline(device, workerGeneration),
+                WORKER_NAME
+        );
         worker.setDaemon(true);
         worker.start();
     }
 
-    private static void buildPipeline(VulkanDevice device, VulkanOwnedBuffer scene, long workerGeneration) {
-        VulkanComputeProgram created = null;
+    private static void buildPreparedPipeline(VulkanDevice device, long workerGeneration) {
+        VulkanComputeProgram.PreparedPipeline created = null;
         long startedAt = System.nanoTime();
         try {
             String geometrySource = P14EFluidShaderPatch.apply(P16ReflectionPassShader.build());
             String entitySource = P17ShaderIntegration.apply(geometrySource);
             String source = P14EFluidOpticsPatch.apply(entitySource);
             TotemLumenClient.LOGGER.info(
-                    "P16 split pipeline creation START: shader={}, sourceChars={}",
+                    "Reflection pipeline prewarm START: shader={}, sourceChars={}",
                     P16ReflectionPassShader.SHADER_NAME,
                     source.length()
             );
-            created = VulkanComputeProgram.create(
+            created = VulkanComputeProgram.preparePipeline(
                     device,
                     P16ReflectionPassShader.SHADER_NAME,
-                    source,
-                    scene
+                    source
             );
 
             synchronized (LOCK) {
-                if (workerGeneration != generation || attachedScene != scene) {
-                    VulkanComputeProgram stale = created;
+                if (workerGeneration != generation
+                        || preparedDevice == null
+                        || preparedDevice.vkDevice() != device.vkDevice()) {
+                    VulkanComputeProgram.PreparedPipeline stale = created;
                     created = null;
-                    closeAsync(stale, "TotemLumen-P16StalePipelineCleanup");
+                    closePreparedAsync(stale, "TotemLumen-P16StalePreparedCleanup");
                     return;
                 }
-                activeProgram = created;
+                preparedPipeline = created;
                 created = null;
+                prewarmStarted = false;
+                LOCK.notifyAll();
             }
 
             long elapsedMs = (System.nanoTime() - startedAt) / 1_000_000L;
             TotemLumenClient.LOGGER.info(
-                    "P16 split pipeline creation COMPLETE: shader={}, elapsed={} ms; base renderer remained available during compile",
+                    "Reflection pipeline prewarm COMPLETE: shader={}, elapsed={} ms",
                     P16ReflectionPassShader.SHADER_NAME,
                     elapsedMs
             );
         } catch (Throwable buildFailure) {
             synchronized (LOCK) {
-                if (workerGeneration == generation && attachedScene == scene) failure = buildFailure;
+                if (workerGeneration == generation) {
+                    prewarmFailure = buildFailure;
+                    prewarmStarted = false;
+                    LOCK.notifyAll();
+                }
+            }
+            TotemLumenClient.LOGGER.error("Reflection pipeline prewarm FAILED", buildFailure);
+        } finally {
+            closePreparedAsync(created, "TotemLumen-P16FailedPreparedCleanup");
+        }
+    }
+
+    public static void attach(VulkanDevice device, VulkanOwnedBuffer scene) {
+        if (device == null || scene == null) return;
+        prewarm(device);
+
+        VulkanComputeProgram staleProgram;
+        long workerGeneration;
+        synchronized (LOCK) {
+            if (attachedScene == scene && activeProgram != null) return;
+            staleProgram = activeProgram;
+            activeProgram = null;
+            attachedScene = scene;
+            failure = null;
+            firstDispatchLogged = false;
+            workerGeneration = generation;
+        }
+        closeAsync(staleProgram, "TotemLumen-P16OldBindingCleanup");
+
+        Thread worker = new Thread(
+                () -> bindPreparedPipeline(device, scene, workerGeneration),
+                "TotemLumen-P16Bind"
+        );
+        worker.setDaemon(true);
+        worker.start();
+    }
+
+    private static void bindPreparedPipeline(
+            VulkanDevice device,
+            VulkanOwnedBuffer scene,
+            long workerGeneration
+    ) {
+        VulkanComputeProgram created = null;
+        try {
+            VulkanComputeProgram.PreparedPipeline prepared;
+            synchronized (LOCK) {
+                while (workerGeneration == generation
+                        && attachedScene == scene
+                        && preparedPipeline == null
+                        && prewarmFailure == null) {
+                    LOCK.wait();
+                }
+                if (workerGeneration != generation || attachedScene != scene) {
+                    return;
+                }
+                if (prewarmFailure != null) {
+                    throw new IllegalStateException("Reflection pipeline prewarm failed", prewarmFailure);
+                }
+                prepared = preparedPipeline;
+            }
+
+            created = prepared.bind(device, scene);
+            synchronized (LOCK) {
+                if (workerGeneration != generation || attachedScene != scene) {
+                    VulkanComputeProgram stale = created;
+                    created = null;
+                    closeAsync(stale, "TotemLumen-P16StaleBindingCleanup");
+                    return;
+                }
+                activeProgram = created;
+                created = null;
+            }
+            TotemLumenClient.LOGGER.info("Reflection scene binding READY");
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            synchronized (LOCK) {
+                if (workerGeneration == generation && attachedScene == scene) {
+                    failure = interrupted;
+                }
+            }
+        } catch (Throwable bindFailure) {
+            synchronized (LOCK) {
+                if (workerGeneration == generation && attachedScene == scene) {
+                    failure = bindFailure;
+                }
             }
             TotemLumenClient.LOGGER.error(
-                    "P16 split reflection pipeline FAILED; keeping P12-P15 base renderer active without reflections",
-                    buildFailure
+                    "Reflection scene binding FAILED; base renderer remains active",
+                    bindFailure
             );
         } finally {
-            if (created != null) closeAsync(created, "TotemLumen-P16FailedPipelineCleanup");
+            closeAsync(created, "TotemLumen-P16FailedBindingCleanup");
         }
     }
 
@@ -145,25 +251,35 @@ public final class P16MultipassReflection {
         }
     }
 
+
     public static boolean ready() {
         return activeProgram != null;
     }
 
     public static Throwable failure() {
-        return failure;
+        Throwable bindingFailure = failure;
+        return bindingFailure != null ? bindingFailure : prewarmFailure;
     }
 
     public static void shutdown() {
         VulkanComputeProgram program;
+        VulkanComputeProgram.PreparedPipeline prepared;
         synchronized (LOCK) {
             ++generation;
             attachedScene = null;
             program = activeProgram;
             activeProgram = null;
+            prepared = preparedPipeline;
+            preparedPipeline = null;
+            preparedDevice = null;
             failure = null;
+            prewarmFailure = null;
+            prewarmStarted = false;
             firstDispatchLogged = false;
+            LOCK.notifyAll();
         }
-        closeAsync(program, "TotemLumen-P16ShutdownCleanup");
+        closeAsync(program, "TotemLumen-P16ShutdownBindingCleanup");
+        closePreparedAsync(prepared, "TotemLumen-P16ShutdownPreparedCleanup");
     }
 
     private static void closeAsync(VulkanComputeProgram program, String threadName) {
@@ -172,7 +288,23 @@ public final class P16MultipassReflection {
             try {
                 program.close();
             } catch (Throwable closeFailure) {
-                TotemLumenClient.LOGGER.warn("Failed to close stale P16 pipeline cleanly", closeFailure);
+                TotemLumenClient.LOGGER.warn("Failed to close stale P16 binding cleanly", closeFailure);
+            }
+        }, threadName);
+        cleanup.setDaemon(true);
+        cleanup.start();
+    }
+
+    private static void closePreparedAsync(
+            VulkanComputeProgram.PreparedPipeline prepared,
+            String threadName
+    ) {
+        if (prepared == null) return;
+        Thread cleanup = new Thread(() -> {
+            try {
+                prepared.close();
+            } catch (Throwable closeFailure) {
+                TotemLumenClient.LOGGER.warn("Failed to close prepared reflection pipeline cleanly", closeFailure);
             }
         }, threadName);
         cleanup.setDaemon(true);
