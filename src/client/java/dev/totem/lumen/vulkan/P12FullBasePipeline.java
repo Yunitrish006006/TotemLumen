@@ -107,9 +107,8 @@ public final class P12FullBasePipeline {
                     elapsedMs
             );
 
-            // These shaders also do not require a world. Start their expensive compilation while
-            // the player is still in menus/loading screens; descriptor binding happens later.
-            P17EnhancedBasePipeline.prewarm(device);
+            // Dynamic-entity nearest-hit tracing is compiled directly into this one production
+            // lighting pipeline. Reflection remains an independent pass and may prewarm now.
             P16MultipassReflection.prewarm(device);
         } catch (Throwable buildFailure) {
             synchronized (LOCK) {
@@ -199,7 +198,6 @@ public final class P12FullBasePipeline {
             TotemLumenClient.LOGGER.info(
                     "Full lighting scene binding READY; prewarmed pipeline is available for frame dispatch"
             );
-            P17EnhancedBasePipeline.attach(device, scene);
             P16MultipassReflection.attach(device, scene);
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
@@ -223,7 +221,7 @@ public final class P12FullBasePipeline {
         }
     }
 
-    /** Builds P12-P15 plus exact P14E geometry, before optional P17/P14E optical rewrites. */
+    /** Builds the shared static/fluid geometry source before entity nearest-hit and optics rewrites. */
     static String buildGeometrySourceForVerification() {
         try {
             Field shaderField = P5StableLookupRenderer.class.getDeclaredField("SHADER");
@@ -242,9 +240,10 @@ public final class P12FullBasePipeline {
         }
     }
 
-    /** Builds the exact pre-P17 production base source without using it as a readiness gate. */
+    /** Builds the single production lighting source, including dynamic-entity nearest-hit tracing. */
     static String buildSourceForVerification() {
-        return P14EFluidOpticsPatch.apply(buildGeometrySourceForVerification());
+        String entityAwareGeometry = P17ShaderIntegration.apply(buildGeometrySourceForVerification());
+        return P14EFluidOpticsPatch.apply(entityAwareGeometry);
     }
 
 
@@ -254,7 +253,7 @@ public final class P12FullBasePipeline {
         if (selected != null && !firstDispatchLogged) {
             firstDispatchLogged = true;
             TotemLumenClient.LOGGER.info(
-                    "P12-P15 full renderer READY: full base pipeline selected instead of bootstrap"
+                    "Full lighting renderer READY: static world, fluids, materials and dynamic entities share one pipeline"
             );
         }
     }
@@ -306,7 +305,6 @@ public final class P12FullBasePipeline {
     }
 
     public static void shutdown() {
-        P17EnhancedBasePipeline.shutdown();
         P16MultipassReflection.shutdown();
 
         VulkanComputeProgram program;

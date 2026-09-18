@@ -2,7 +2,6 @@ package dev.totem.lumen.render;
 
 import dev.totem.lumen.vulkan.P12FullBasePipeline;
 import dev.totem.lumen.vulkan.P16MultipassReflection;
-import dev.totem.lumen.vulkan.P17EnhancedBasePipeline;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.network.chat.Component;
@@ -95,21 +94,17 @@ public final class RendererCompileProgressNotifier {
             send(client, "message.totem-lumen.compile.full_ready");
         }
 
-        boolean p17Ready = P17EnhancedBasePipeline.ready();
+        boolean p17Ready = true; // Dynamic entities are part of the full-lighting pipeline.
         boolean p16Ready = P16MultipassReflection.ready();
-        Throwable p17Failure = P17EnhancedBasePipeline.failure();
+        Throwable p17Failure = null;
         Throwable p16Failure = P16MultipassReflection.failure();
 
-        if (!p17Ready && p17Failure != null && !p17FailureAnnounced) {
-            p17FailureAnnounced = true;
-            send(client, "message.totem-lumen.compile.p17_failed");
-        }
         if (!p16Ready && p16Failure != null && !p16FailureAnnounced) {
             p16FailureAnnounced = true;
             send(client, "message.totem-lumen.compile.p16_failed");
         }
 
-        if (p17Ready && !p17ReadyAnnounced) {
+        if (!p17ReadyAnnounced) {
             p17ReadyAnnounced = true;
             send(client, "message.totem-lumen.compile.p17_ready");
         }
@@ -155,12 +150,9 @@ public final class RendererCompileProgressNotifier {
                     yield 30;
                 }
 
-                boolean p17Finished = P17EnhancedBasePipeline.ready()
-                        || P17EnhancedBasePipeline.failure() != null;
                 boolean p16Finished = P16MultipassReflection.ready()
                         || P16MultipassReflection.failure() != null;
-                int progress = 70;
-                if (p17Finished) progress += 15;
+                int progress = 85; // Full lighting already includes player/entity ray tracing.
                 if (p16Finished) progress += 15;
                 yield progress;
             }

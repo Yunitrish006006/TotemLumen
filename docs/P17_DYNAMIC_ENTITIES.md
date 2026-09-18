@@ -172,47 +172,36 @@ No separate reflection-only or shadow-only entity geometry implementation is use
 
 The first P17C material result uses a conservative opaque entity surface identity. P17D will replace that baseline with texture/material fidelity.
 
-### Apple M4 / MoltenVK readiness regression and accepted split
+### Apple M4 / MoltenVK cold-compile architecture
 
-The first P17C runtime build incorrectly injected P17 directly into the renderer-readiness main compute shader. On Apple M4 + MoltenVK 1.4.2, runtime logging showed:
+Runtime measurements on Apple M4 + MoltenVK 1.4.2 showed that the former split solved readiness isolation but created a much larger cold-start cost:
 
 ```text
-Renderer state: WAITING_FOR_PIPELINE
-Background Vulkan pipeline creation START: shader=totem_lumen_p12_one_bounce_gi.comp
-Vulkan pipeline cache HIT: ...
+full lighting Vulkan pipeline:        992,772 ms  (~16m33s)
+separate entity-enhanced base:      1,217,001 ms  (~20m17s)
+warm-cache repeats:                         7–8 ms
 ```
 
-with no matching `Background Vulkan pipeline creation COMPLETE` before the test session ended. The same run successfully captured a zombie with 54 quads, proving the entity capture path was alive while the renderer itself remained blocked on driver pipeline creation.
+The separate entity pipeline was not small: it rebuilt almost the entire GI / environment / block geometry / fluid / transmission / PBR control flow and then added entity tracing. That made the driver compile two near-duplicate 100k+ character compute shaders.
 
-This reproduced the architectural class of the earlier Alpha 35 P16 MoltenVK stall. A cache-file `HIT` only means a compatible Vulkan pipeline-cache blob was loaded; it does not mean the exact changed shader pipeline already exists in that blob.
+The current architecture therefore uses one production full-lighting pipeline:
 
-Alpha 42 therefore adopts the same invariant that fixed P16:
+1. the tiny bootstrap remains the only early Vulkan readiness bridge and is never shown to the player;
+2. the production full-lighting shader includes static geometry, exact fluids, PBR/material shading and P17 dynamic-entity nearest-hit tracing in one source;
+3. there is no second `totem_lumen_p17_dynamic_entities.comp` Vulkan pipeline at runtime;
+4. the existing `P17EnhancedBasePipeline` class is only a compatibility facade for dispatch/status hooks and delegates to the unified full-lighting program;
+5. P17 entity geometry still participates in primary rays, sun/moon/local-light visibility, diffuse GI and P15 transmission because the shared `traceRayLimited()` path remains entity-aware;
+6. P16 reflection remains a separate optional pass and includes P17 tracing independently;
+7. Minecraft's normal presentation remains visible until the unified full-lighting pipeline is ready, so a long first-run Metal compile never exposes a partial Totem renderer.
 
-> Dynamic-entity pipeline compilation must never block Totem Lumen renderer readiness.
+CI now enforces the inverse of the old isolation rule: the unified production base **must** contain the P17 entity markers, and there is no second full-base shaderc compile for a P17 variant.
 
-The accepted P17 split is:
-
-1. the proven P12-P15 base shader remains the only readiness-gating compute pipeline;
-2. P17 is compiled as `totem_lumen_p17_dynamic_entities.comp` on `TotemLumen-P17Pipeline`;
-3. the base renderer continues dispatching while P17 compiles;
-4. once the complete P17 `VulkanComputeProgram` is ready, command recording atomically selects it for all pipeline/layout/descriptor reads in that frame;
-5. a slow or failed P17 compile leaves P12-P15 rendering active rather than returning the client to vanilla-only output;
-6. P16 remains an optional split reflection pass and can also include P17 tracing without becoming a renderer-readiness dependency.
-
-CI enforces the split. The readiness base must contain no `P17_ENTITY_MATERIAL_ID` marker and all three production variants are shaderc-compiled at O0:
+The key build diagnostic is:
 
 ```text
-P12-P15 readiness base: 69,638 chars / 178,544-byte SPIR-V
-P17 enhanced base:       81,241 chars / 205,576-byte SPIR-V
-P16+P17 reflection:      61,332 chars / 154,780-byte SPIR-V
-```
-
-The critical invariant is:
-
-```text
-P17 readiness isolation verification PASS:
-basePipelineContainsP17=false,
-dynamicEntityCompileCannotBlockRendererReady=true
+Unified full-lighting verification PASS:
+staticWorld=true, fluids=true, pbr=true, dynamicEntities=true,
+duplicateEntityPipeline=false
 ```
 
 ### P17D — material baseline
