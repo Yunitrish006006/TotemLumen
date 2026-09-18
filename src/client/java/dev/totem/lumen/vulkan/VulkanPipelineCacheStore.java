@@ -30,7 +30,7 @@ import java.nio.file.StandardOpenOption;
  */
 final class VulkanPipelineCacheStore {
     private static final Object LOCK = new Object();
-    private static final int CACHE_SCHEMA_VERSION = 2;
+    private static final int CACHE_SCHEMA_VERSION = 1;
     private static final long MAX_CACHE_BYTES = 64L * 1024L * 1024L;
     private static final int PIPELINE_CACHE_UUID_BYTES = 16;
 
