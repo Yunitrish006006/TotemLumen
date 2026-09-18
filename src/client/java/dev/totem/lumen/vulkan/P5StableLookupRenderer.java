@@ -448,6 +448,44 @@ public final class P5StableLookupRenderer {
                 return materialColor(primaryHit.materialId) * incomingRadiance * GI_STRENGTH;
             }
 
+            vec3 tlLocalEmitterSample(
+                    vec3 lightCenter,
+                    vec3 receiverPoint,
+                    uint sampleIndex,
+                    out vec3 emitterNormal
+            ) {
+                vec3 fromLight = receiverPoint - lightCenter;
+                vec3 axisMagnitude = abs(fromLight);
+                vec3 axisU;
+                vec3 axisV;
+
+                if (axisMagnitude.x >= axisMagnitude.y && axisMagnitude.x >= axisMagnitude.z) {
+                    emitterNormal = vec3(fromLight.x >= 0.0 ? 1.0 : -1.0, 0.0, 0.0);
+                    axisU = vec3(0.0, 1.0, 0.0);
+                    axisV = vec3(0.0, 0.0, 1.0);
+                } else if (axisMagnitude.y >= axisMagnitude.z) {
+                    emitterNormal = vec3(0.0, fromLight.y >= 0.0 ? 1.0 : -1.0, 0.0);
+                    axisU = vec3(1.0, 0.0, 0.0);
+                    axisV = vec3(0.0, 0.0, 1.0);
+                } else {
+                    emitterNormal = vec3(0.0, 0.0, fromLight.z >= 0.0 ? 1.0 : -1.0);
+                    axisU = vec3(1.0, 0.0, 0.0);
+                    axisV = vec3(0.0, 1.0, 0.0);
+                }
+
+                const vec2 LOCAL_AREA_OFFSETS[4] = vec2[4](
+                    vec2(0.00, 0.00),
+                    vec2(0.28, 0.20),
+                    vec2(-0.26, 0.22),
+                    vec2(0.04, -0.30)
+                );
+                vec2 offset = LOCAL_AREA_OFFSETS[int(sampleIndex & 3u)];
+                return lightCenter
+                        + emitterNormal * 0.495
+                        + axisU * offset.x
+                        + axisV * offset.y;
+            }
+
             uint localLightColor(HitResult hit, vec3 primaryOrigin, vec3 primaryDirection, bool emissiveMode) {
                 int slot = sectionSlotForVoxel(hit.voxel);
                 vec4 surfaceEmission = emissiveMode ? materialEmission(hit.materialId) : vec4(0.0);
@@ -460,6 +498,7 @@ public final class P5StableLookupRenderer {
                 vec3 hitPoint = primaryOrigin + primaryDirection * hit.distance;
                 vec3 lighting = vec3(0.045);
                 uint lightCount = min(scene.data[SECTION_LIGHT_COUNT_BASE + uint(slot)], MAX_LIGHTS_PER_SECTION);
+                uint areaSamples = clamp(scene.data[45], 1u, 4u);
 
                 for (uint localIndex = 0u; localIndex < lightCount; localIndex++) {
                     uint listWord = SECTION_LIGHT_INDEX_BASE + uint(slot) * MAX_LIGHTS_PER_SECTION + localIndex;
@@ -479,25 +518,45 @@ public final class P5StableLookupRenderer {
                     float intensity = emissiveMode
                             ? uintBitsToFloat(scene.data[lightBase + 7u])
                             : clamp((radius - 0.5) / 15.0, 0.0, 1.0);
-                    vec3 toLight = lightPosition - hitPoint;
-                    float distanceToLight = length(toLight);
-                    if (distanceToLight <= 0.0001 || distanceToLight >= radius) continue;
 
-                    vec3 lightDirection = toLight / distanceToLight;
-                    float nDotL = max(dot(surfaceNormal, lightDirection), 0.0);
-                    if (nDotL <= 0.0) continue;
+                    float sampleLighting = 0.0;
+                    for (uint areaIndex = 0u; areaIndex < 4u; areaIndex++) {
+                        if (areaIndex >= areaSamples) break;
 
-                    float visibility = 1.0;
-                    float shadowMaxDistance = max(distanceToLight - 0.55, 0.0);
-                    if (shadowMaxDistance > 0.02) {
-                        vec3 shadowOrigin = hitPoint + surfaceNormal * 0.025 + lightDirection * 0.01;
-                        HitResult blocker = traceRayLimited(shadowOrigin, lightDirection, shadowMaxDistance);
-                        visibility = blocker.hit == 0u ? 1.0 : 0.0;
+                        vec3 emitterNormal;
+                        vec3 samplePosition = tlLocalEmitterSample(
+                            lightPosition,
+                            hitPoint,
+                            areaIndex,
+                            emitterNormal
+                        );
+                        vec3 toLight = samplePosition - hitPoint;
+                        float distanceToLight = length(toLight);
+                        if (distanceToLight <= 0.0001 || distanceToLight >= radius) continue;
+
+                        vec3 lightDirection = toLight / distanceToLight;
+                        float nDotL = max(dot(surfaceNormal, lightDirection), 0.0);
+                        if (nDotL <= 0.0) continue;
+
+                        float emitterCosine = max(dot(emitterNormal, -lightDirection), 0.0);
+                        if (emitterCosine <= 0.0) continue;
+
+                        float visibility = 1.0;
+                        float shadowMaxDistance = max(distanceToLight - 0.06, 0.0);
+                        if (shadowMaxDistance > 0.02) {
+                            vec3 shadowOrigin = hitPoint + surfaceNormal * 0.025 + lightDirection * 0.01;
+                            HitResult blocker = traceRayLimited(shadowOrigin, lightDirection, shadowMaxDistance);
+                            visibility = blocker.hit == 0u ? 1.0 : 0.0;
+                        }
+
+                        float range = clamp(1.0 - distanceToLight / radius, 0.0, 1.0);
+                        float attenuation = range * range;
+                        sampleLighting += nDotL * emitterCosine * attenuation * visibility;
                     }
 
-                    float range = clamp(1.0 - distanceToLight / radius, 0.0, 1.0);
-                    float attenuation = range * range;
-                    lighting += lightColor * (2.4 * nDotL * attenuation * intensity * visibility);
+                    lighting += lightColor * (
+                        2.4 * intensity * sampleLighting / float(areaSamples)
+                    );
                 }
 
                 return packRgba(materialColor(hit.materialId) * lighting + emitted, 255u);
