@@ -286,6 +286,7 @@ final class P14EFluidShaderPatch {
         source = source.substring(0, candidateStart)
                 + candidateReplacement
                 + source.substring(traversalStart);
+        source = patchFluidDebugView(source);
 
         TotemLumenClient.LOGGER.info(
                 "P14E exact fluid tracing active: abi={}, blockLookup={}, maxCells={}, maxQuads={}, waterloggedCoexistence=true, sharedDda=true",
@@ -295,5 +296,70 @@ final class P14EFluidShaderPatch {
                 GpuFluidScene.MAX_FLUID_QUADS
         );
         return source;
+
+    private static String patchFluidDebugView(String source) {
+        String debugMarker = "uint debugColor(HitResult hit, vec3 primaryOrigin, vec3 primaryDirection) {";
+        if (!source.contains(debugMarker)) return source;
+
+        String helper = """
+                vec3 p14eFluidDebugColor(HitResult hit) {
+                    uint fluidBase = p14eFluidSceneBase();
+                    uint fluidIndex = p14eFindFluidCell(fluidBase, hit.voxel);
+                    if (fluidIndex == P14E_INVALID_INDEX) {
+                        return vec3(0.035, 0.035, 0.045);
+                    }
+
+                    uint descriptor = fluidBase + P14E_CELL_DESCRIPTOR_BASE
+                            + fluidIndex * P14E_CELL_DESCRIPTOR_WORDS;
+                    uint flags = scene.data[descriptor + 7u];
+                    bool fluidOnly = (flags & P14E_CELL_FLAG_FLUID_ONLY) != 0u;
+                    bool exactFluidHit = hit.materialId == P14E_WATER_MATERIAL_ID
+                            || hit.materialId == P14E_LAVA_MATERIAL_ID
+                            || hit.materialId == P14E_OTHER_FLUID_MATERIAL_ID;
+
+                    if (!exactFluidHit) {
+                        // Static geometry won inside a coexistence cell (for example a
+                        // waterlogged stair/fence). Bright green makes coexistence obvious.
+                        return fluidOnly
+                                ? vec3(0.12, 0.12, 0.14)
+                                : vec3(0.18, 1.00, 0.25);
+                    }
+
+                    if (!fluidOnly) {
+                        // Exact fluid surface inside a waterlogged/custom coexistence cell.
+                        return vec3(0.86, 0.18, 1.00);
+                    }
+                    if (hit.materialId == P14E_WATER_MATERIAL_ID) {
+                        return vec3(0.06, 0.72, 1.00);
+                    }
+                    if (hit.materialId == P14E_LAVA_MATERIAL_ID) {
+                        return vec3(1.00, 0.20, 0.02);
+                    }
+                    return vec3(1.00, 0.82, 0.10);
+                }
+
+                """;
+        source = source.replace(debugMarker, helper + debugMarker);
+
+        String modeMarker = """
+                        if (mode == 6u) {
+                            return localLightColor(hit, primaryOrigin, primaryDirection, true);
+                        }
+                        return softShadowColor(hit, primaryOrigin, primaryDirection);
+                """;
+        String modeReplacement = """
+                        if (mode == 6u) {
+                            return localLightColor(hit, primaryOrigin, primaryDirection, true);
+                        }
+                        if (mode == 12u) {
+                            return packRgba(p14eFluidDebugColor(hit), 255u);
+                        }
+                        return softShadowColor(hit, primaryOrigin, primaryDirection);
+                """;
+        if (!source.contains(modeMarker)) {
+            throw new IllegalStateException("P14E fluid debug-view marker missing: debugColor fallback");
+        }
+        return source.replace(modeMarker, modeReplacement);
+    }
     }
 }
