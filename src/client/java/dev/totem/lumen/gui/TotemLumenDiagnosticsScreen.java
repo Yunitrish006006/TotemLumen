@@ -1,6 +1,7 @@
 package dev.totem.lumen.gui;
 
 import dev.totem.lumen.render.RendererBootstrap;
+import dev.totem.lumen.render.RendererCompileProgressNotifier;
 import dev.totem.lumen.render.RendererState;
 import dev.totem.lumen.vulkan.P12FullBasePipeline;
 import dev.totem.lumen.vulkan.P16MultipassReflection;
@@ -49,6 +50,24 @@ public final class TotemLumenDiagnosticsScreen extends Screen {
                     P5StableLookupRenderer.setMode(P5StableLookupRenderer.DebugMode.FLUID_GEOMETRY);
                     refreshRenderViewButton();
                 }).bounds(left + halfWidth + 6, 148, halfWidth, 20).build()
+        );
+
+        this.addRenderableWidget(
+                Button.builder(Component.translatable("screen.totem-lumen.recompile"), ignored -> {
+                    boolean started = P12FullBasePipeline.recompile();
+                    if (started) {
+                        RendererCompileProgressNotifier.reset();
+                        if (this.minecraft.player != null) {
+                            this.minecraft.player.sendSystemMessage(
+                                    Component.translatable("message.totem-lumen.recompile.started")
+                            );
+                        }
+                    } else if (this.minecraft.player != null) {
+                        this.minecraft.player.sendSystemMessage(
+                                Component.translatable("message.totem-lumen.recompile.unavailable")
+                        );
+                    }
+                }).bounds(left, 174, contentWidth, 20).build()
         );
 
         this.addRenderableWidget(
