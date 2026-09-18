@@ -23,6 +23,7 @@ public final class P14ShaderCompileVerifier {
         verifyRuntimeQualitySettings(baseSource);
         verifyFixedCapacitySceneTails(baseSource, "full base pass");
         verifyP18TexturedSurfaces(baseSource, "full base pass", false);
+        verifyP18LabPbrShading(baseSource, "full base pass", false);
 
         String p17Source = P17EnhancedBasePipeline.buildSourceForVerification();
         verifyP14EFluidSource(p17Source, "P17 enhanced base pass");
@@ -31,6 +32,7 @@ public final class P14ShaderCompileVerifier {
         verifyP17DynamicEntitySource(p17Source, "enhanced base pass");
         verifyFixedCapacitySceneTails(p17Source, "P17 enhanced base pass");
         verifyP18TexturedSurfaces(p17Source, "P17 enhanced base pass", false);
+        verifyP18LabPbrShading(p17Source, "P17 enhanced base pass", false);
 
         String reflectionGeometry = P14EFluidShaderPatch.apply(P16ReflectionPassShader.build());
         String reflectionEntity = P17ShaderIntegration.apply(reflectionGeometry);
@@ -42,6 +44,7 @@ public final class P14ShaderCompileVerifier {
         verifyP17DynamicEntitySource(reflectionSource, "P16 reflection pass");
         verifyFixedCapacitySceneTails(reflectionSource, "P16 reflection pass");
         verifyP18TexturedSurfaces(reflectionSource, "P16 reflection pass", true);
+        verifyP18LabPbrShading(reflectionSource, "P16 reflection pass", true);
 
         long compiler = Shaderc.shaderc_compiler_initialize();
         if (compiler == 0L) {
@@ -283,6 +286,85 @@ public final class P14ShaderCompileVerifier {
                 "P18 textured-surface verification PASS (" + label + "): "
                         + "meshUv=true, cubeFastPath=true, alphaZeroReject=true, partialAlpha=stochastic, reflectionFallback="
                         + reflectionPass
+        );
+    }
+
+    private static void verifyP18LabPbrShading(
+            String source,
+            String label,
+            boolean reflectionPass
+    ) {
+        requireSourceMarker(
+                source,
+                "struct P18SurfaceSample {",
+                label + " shared P18 surface sample"
+        );
+        requireSourceMarker(
+                source,
+                "P18SurfaceSample p18ResolveSurface(",
+                label + " P18 surface resolver"
+        );
+        requireSourceMarker(
+                source,
+                "surface.albedo = p18ArgbRgb(albedoArgb);",
+                label + " resource-pack albedo"
+        );
+        requireSourceMarker(
+                source,
+                "float normalZ = sqrt(max(",
+                label + " LabPBR normal Z reconstruction"
+        );
+        requireSourceMarker(
+                source,
+                "surface.ao = float(normalArgb & 255u) / 255.0;",
+                label + " LabPBR AO"
+        );
+        requireSourceMarker(
+                source,
+                "surface.roughness = (1.0 - smoothness) * (1.0 - smoothness);",
+                label + " LabPBR perceptual smoothness"
+        );
+        requireSourceMarker(
+                source,
+                "surface.f0 = vec3(float(reflectance) / 255.0);",
+                label + " LabPBR linear dielectric F0"
+        );
+        requireSourceMarker(
+                source,
+                "vec3 p18HardcodedMetalF0(uint metalCode, vec3 albedo)",
+                label + " LabPBR hardcoded metals"
+        );
+        requireSourceMarker(
+                source,
+                "surface.emission += surface.albedo * (emissionStrength * 1.6);",
+                label + " LabPBR emission"
+        );
+        requireSourceMarker(
+                source,
+                "vec3 p18Diffuse = p18Surface.albedo * (1.0 - p18Surface.metallic);",
+                label + " local-light metal diffuse suppression"
+        );
+        if (reflectionPass) {
+            requireSourceMarker(
+                    source,
+                    "P18SurfaceSample p18Surface = p18ResolveSurface(",
+                    label + " P16 shared PBR sample"
+            );
+            requireSourceMarker(
+                    source,
+                    "? p18Surface.f0",
+                    label + " P16 LabPBR F0"
+            );
+            requireSourceMarker(
+                    source,
+                    "? p18Surface.normal",
+                    label + " P16 normal-map reflection normal"
+            );
+        }
+        System.out.println(
+                "P18 LabPBR shading verification PASS (" + label + "): "
+                        + "albedo=true, normal=true, ao=true, roughness=true, f0=true, "
+                        + "metal=true, emission=true, reflectionShared=" + reflectionPass
         );
     }
 
