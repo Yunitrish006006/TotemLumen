@@ -86,6 +86,9 @@ final class P16ReflectionPassShader {
                         float metallic = float((params >> 4u) & 0xFu) / 15.0;
                         return vec2(roughness, metallic);
                     }
+                    if (family == 0xB000u) {
+                        return p18CubeFallbackSurfaceProperties(params);
+                    }
                     if (family == 0x8000u) {
                         return vec2(0.05, 0.0);
                     }
