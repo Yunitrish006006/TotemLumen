@@ -173,6 +173,7 @@ public final class MinecraftBlockModelMeshResolver {
         if (reload) {
             // Keep old mesh ids alive while sections are progressively rebuilt. New model geometry
             // receives new/deduplicated ids, so resource reload never invalidates resident voxels.
+            LabPbrTextureRegistry.onResourceReload();
             SceneExtractionBridge.refreshModelGeometry();
             TotemLumenClient.LOGGER.info(
                     "P14C detected a new BlockStateModelSet; queued populated sections for model-geometry refresh"
@@ -219,8 +220,10 @@ public final class MinecraftBlockModelMeshResolver {
                 return QuadSurface.UNTEXTURED;
             }
 
+            String spriteId = sprite.contents().name().toString();
+            LabPbrTextureRegistry.observeSprite(spriteId);
             return new QuadSurface(
-                    sprite.contents().name().toString(),
+                    spriteId,
                     normalizeSpriteUv(quad.u(0), u0, uSpan),
                     normalizeSpriteUv(quad.v(0), v0, vSpan),
                     normalizeSpriteUv(quad.u(1), u0, uSpan),
