@@ -185,7 +185,7 @@ public final class TotemLumenVideoSettingsScreen extends Screen {
         return Component.translatable(
                 "screen.totem-lumen.internal_resolution",
                 qualityName(value.name()),
-                value.width()
+                value.percent()
         );
     }
 
