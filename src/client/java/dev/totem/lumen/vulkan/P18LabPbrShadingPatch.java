@@ -501,8 +501,7 @@ final class P18LabPbrShadingPatch {
                     vec3 normal = resolvedSurfaceNormal(hit, rayDirection);
                     vec3 albedo = materialColor(hit.materialId);
                     vec4 emission = materialEmission(hit.materialId);
-                    vec3 emitted = emission.rgb * emission.a
-                            * uintBitsToFloat(scene.data[83]);
+                    vec3 emitted = emission.rgb * emission.a * uintBitsToFloat(scene.data[83]);
                 """,
                 """
                     P18SurfaceSample p18Surface = p18ResolveSurface(hit, rayOrigin, rayDirection);
@@ -687,10 +686,8 @@ final class P18LabPbrShadingPatch {
                 composite,
                 """
                     vec4 emission = materialEmission(hit.materialId);
-                    vec3 emitted = emission.rgb * emission.a
-                            * uintBitsToFloat(scene.data[83]);
-                    vec3 localBase = materialColor(hit.materialId)
-                            * uintBitsToFloat(scene.data[82]) + emitted;
+                    vec3 emitted = emission.rgb * emission.a * uintBitsToFloat(scene.data[83]);
+                    vec3 localBase = materialColor(hit.materialId) * uintBitsToFloat(scene.data[82]) + emitted;
                 """,
                 """
                     P18SurfaceSample p18Surface = p18ResolveSurface(
