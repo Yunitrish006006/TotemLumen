@@ -1,5 +1,6 @@
 package dev.totem.lumen.gpu;
 
+import dev.totem.lumen.material.PbrImage;
 import dev.totem.lumen.scene.DynamicEntityBroadPhase;
 import dev.totem.lumen.scene.DynamicEntitySnapshot;
 import dev.totem.lumen.scene.SectionKey;
@@ -19,23 +20,29 @@ import java.util.Objects;
  * precision before tracing.</p>
  */
 public final class GpuDynamicEntityScene {
-    public static final int ABI_VERSION = 1;
+    public static final int ABI_VERSION = 2;
     public static final int MAX_ENTITIES = 256;
     public static final int MAX_ENTITY_QUADS = 65_536;
     public static final int SECTION_LOOKUP_CAPACITY = 512;
     public static final int MAX_ENTITIES_PER_SECTION = DynamicEntityBroadPhase.DEFAULT_MAX_ENTITIES_PER_SECTION;
 
-    public static final int HEADER_WORDS = 8;
-    public static final int ENTITY_DESCRIPTOR_WORDS_PER_RECORD = 16;
+    public static final int FLAG_SPIDER_EYES = 1;
+    public static final int MAX_SPIDER_EYE_DIMENSION = 128;
+    public static final int SPIDER_EYE_POOL_WORDS =
+            MAX_SPIDER_EYE_DIMENSION * MAX_SPIDER_EYE_DIMENSION;
+
+    public static final int HEADER_WORDS = 16;
+    public static final int ENTITY_DESCRIPTOR_WORDS_PER_RECORD = 24;
     public static final int ENTITY_DESCRIPTOR_WORDS = MAX_ENTITIES * ENTITY_DESCRIPTOR_WORDS_PER_RECORD;
     public static final int SECTION_BUCKET_WORDS = 4 + MAX_ENTITIES_PER_SECTION;
     public static final int SECTION_LOOKUP_WORDS = SECTION_LOOKUP_CAPACITY * SECTION_BUCKET_WORDS;
-    public static final int QUAD_WORDS_PER_RECORD = 12;
+    public static final int QUAD_WORDS_PER_RECORD = 20;
     public static final int QUAD_POOL_WORDS = MAX_ENTITY_QUADS * QUAD_WORDS_PER_RECORD;
 
     public static final int ENTITY_DESCRIPTOR_BASE_WORD = HEADER_WORDS;
     public static final int SECTION_LOOKUP_BASE_WORD = ENTITY_DESCRIPTOR_BASE_WORD + ENTITY_DESCRIPTOR_WORDS;
-    public static final int QUAD_POOL_BASE_WORD = SECTION_LOOKUP_BASE_WORD + SECTION_LOOKUP_WORDS;
+    public static final int SPIDER_EYE_POOL_BASE_WORD = SECTION_LOOKUP_BASE_WORD + SECTION_LOOKUP_WORDS;
+    public static final int QUAD_POOL_BASE_WORD = SPIDER_EYE_POOL_BASE_WORD + SPIDER_EYE_POOL_WORDS;
     public static final int MAX_STORAGE_WORDS = QUAD_POOL_BASE_WORD + QUAD_POOL_WORDS;
     public static final long MAX_STORAGE_BYTES = (long) MAX_STORAGE_WORDS * Integer.BYTES;
 
@@ -50,6 +57,15 @@ public final class GpuDynamicEntityScene {
             ByteBuffer buffer,
             int baseWord,
             List<DynamicEntitySnapshot> entities
+    ) {
+        return pack(buffer, baseWord, entities, null);
+    }
+
+    public static PackResult pack(
+            ByteBuffer buffer,
+            int baseWord,
+            List<DynamicEntitySnapshot> entities,
+            PbrImage spiderEyeTexture
     ) {
         Objects.requireNonNull(buffer, "buffer");
         Objects.requireNonNull(entities, "entities");
