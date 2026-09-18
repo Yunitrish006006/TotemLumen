@@ -11,7 +11,7 @@ final class LabPbr13DecoderTest {
 
         float smoothness = 128.0f / 255.0f;
         assertEquals((1.0f - smoothness) * (1.0f - smoothness), sample.roughness(), 0.00001f);
-        assertEquals((115.0f / 229.0f) * 0.08f, sample.dielectricF0(), 0.00001f);
+        assertEquals(115.0f / 255.0f, sample.dielectricF0(), 0.00001f);
         assertFalse(sample.metallic());
         assertEquals(0, sample.metalCode());
         assertEquals(127.0f / 254.0f, sample.emission(), 0.00001f);
