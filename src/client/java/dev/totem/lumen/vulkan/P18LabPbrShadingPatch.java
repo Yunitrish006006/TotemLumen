@@ -630,8 +630,7 @@ final class P18LabPbrShadingPatch {
                 """
                     int slot = sectionSlotForVoxel(hit.voxel);
                     vec4 surfaceEmission = emissiveMode ? materialEmission(hit.materialId) : vec4(0.0);
-                    vec3 emitted = surfaceEmission.rgb * surfaceEmission.a
-                            * uintBitsToFloat(scene.data[83]);
+                    vec3 emitted = surfaceEmission.rgb * surfaceEmission.a * uintBitsToFloat(scene.data[83]);
                 """,
                 """
                     int slot = sectionSlotForVoxel(hit.voxel);
