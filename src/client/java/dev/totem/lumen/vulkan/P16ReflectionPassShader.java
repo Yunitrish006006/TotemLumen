@@ -286,7 +286,8 @@ final class P16ReflectionPassShader {
             source = P14GeometryShaderPatch.apply(source);
             source = P14CommonGeometryPatch.apply(source);
             source = P14GeometryCorrectionPatch.apply(source);
-            return P13SkyOcclusionPatch.apply(source);
+            source = P13SkyOcclusionPatch.apply(source);
+            return RendererQualityShaderPatch.apply(source);
         } catch (ReflectiveOperationException failure) {
             throw new IllegalStateException("Failed to access P5 base shader for P16 split pass", failure);
         }
