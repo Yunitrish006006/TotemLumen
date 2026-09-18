@@ -33,10 +33,14 @@ final class P13StarfieldPatch {
                     float angle = p13DayPhase() * 6.28318530718;
                     float cosine = cos(angle);
                     float sine = sin(angle);
+
+                    // Moon/Sun travel through the XY celestial plane (around the Z axis).
+                    // Sample the procedural dome with the inverse celestial rotation so the
+                    // visible star field itself advances in the same direction as the moon.
                     vec3 rotated = vec3(
-                        cosine * dir.x - sine * dir.z,
-                        dir.y,
-                        sine * dir.x + cosine * dir.z
+                        cosine * dir.x + sine * dir.y,
+                        -sine * dir.x + cosine * dir.y,
+                        dir.z
                     );
                     float denominator = max(
                         abs(rotated.x) + abs(rotated.y) + abs(rotated.z),
@@ -106,7 +110,7 @@ final class P13StarfieldPatch {
         source = replaceRequiredOnce(source, oldSkyReturn, newSkyReturn, "Overworld sky star composition");
 
         TotemLumenClient.LOGGER.info(
-                "P13 Overworld starfield active: procedural=true, deterministic=true, rotatesWithDayPhase=true, twinkle=false, horizonFade=true"
+                "P13 Overworld starfield active: procedural=true, deterministic=true, celestialAxis=Z, movesWithMoon=true, twinkle=false, horizonFade=true"
         );
         return source;
     }
