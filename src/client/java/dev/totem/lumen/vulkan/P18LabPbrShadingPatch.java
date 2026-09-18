@@ -264,28 +264,58 @@ final class P18LabPbrShadingPatch {
                 }
 
                 void p18CubeBasis(
+                        uint surfaceSetId,
                         int face,
                         out vec3 tangent,
                         out vec3 bitangent,
                         out vec3 geometricNormal
                 ) {
-                    if (face == 0) geometricNormal = vec3(-1.0, 0.0, 0.0);
-                    else if (face == 1) geometricNormal = vec3(1.0, 0.0, 0.0);
-                    else if (face == 2) geometricNormal = vec3(0.0, -1.0, 0.0);
-                    else if (face == 3) geometricNormal = vec3(0.0, 1.0, 0.0);
-                    else if (face == 4) geometricNormal = vec3(0.0, 0.0, -1.0);
-                    else geometricNormal = vec3(0.0, 0.0, 1.0);
+                    float side = (face & 1) != 0 ? 1.0 : 0.0;
+                    vec3 p00;
+                    vec3 p10;
+                    vec3 p11;
 
                     if (face < 2) {
-                        tangent = vec3(0.0, 1.0, 0.0);
-                        bitangent = vec3(0.0, 0.0, 1.0);
+                        geometricNormal = face == 0
+                                ? vec3(-1.0, 0.0, 0.0)
+                                : vec3(1.0, 0.0, 0.0);
+                        p00 = vec3(side, 0.0, 0.0);
+                        p10 = vec3(side, 1.0, 0.0);
+                        p11 = vec3(side, 1.0, 1.0);
                     } else if (face < 4) {
-                        tangent = vec3(0.0, 0.0, 1.0);
-                        bitangent = vec3(1.0, 0.0, 0.0);
+                        geometricNormal = face == 2
+                                ? vec3(0.0, -1.0, 0.0)
+                                : vec3(0.0, 1.0, 0.0);
+                        p00 = vec3(0.0, side, 0.0);
+                        p10 = vec3(0.0, side, 1.0);
+                        p11 = vec3(1.0, side, 1.0);
                     } else {
-                        tangent = vec3(1.0, 0.0, 0.0);
-                        bitangent = vec3(0.0, 1.0, 0.0);
+                        geometricNormal = face == 4
+                                ? vec3(0.0, 0.0, -1.0)
+                                : vec3(0.0, 0.0, 1.0);
+                        p00 = vec3(0.0, 0.0, side);
+                        p10 = vec3(1.0, 0.0, side);
+                        p11 = vec3(1.0, 1.0, side);
                     }
+
+                    uint surfaceBase = p18SurfaceSceneBase();
+                    uint record = surfaceBase + P18_SURFACE_RECORD_BASE
+                            + surfaceSetId * P18_SURFACE_RECORD_WORDS;
+                    uint faceWord = record + 2u + uint(face) * P18_SURFACE_FACE_WORDS;
+                    vec2 uv00 = p18ReadUv(faceWord + 1u);
+                    vec2 uv10 = p18ReadUv(faceWord + 3u);
+                    vec2 uv11 = p18ReadUv(faceWord + 5u);
+                    p18TriangleBasis(
+                        p00,
+                        p10,
+                        p11,
+                        uv00,
+                        uv10,
+                        uv11,
+                        geometricNormal,
+                        tangent,
+                        bitangent
+                    );
                 }
 
                 P18SurfaceSample p18ResolveSurface(
@@ -329,7 +359,13 @@ final class P18LabPbrShadingPatch {
                             vec3 localHit = hitPoint - vec3(hit.voxel);
                             surface.textureHandle = p18CubeTextureHandle(params, face);
                             surface.uv = p18CubeFaceUv(params, face, localHit);
-                            p18CubeBasis(face, tangent, bitangent, surface.geometricNormal);
+                            p18CubeBasis(
+                                params,
+                                face,
+                                tangent,
+                                bitangent,
+                                surface.geometricNormal
+                            );
                             surface.normal = surface.geometricNormal;
                             resolved = surface.textureHandle > 0u;
                         }
