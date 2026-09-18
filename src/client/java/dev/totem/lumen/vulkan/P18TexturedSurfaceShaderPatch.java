@@ -81,6 +81,30 @@ final class P18TexturedSurfaceShaderPatch {
                     return (p18SampleAlbedoArgb(textureHandle, uv) >> 24u) & 0xFFu;
                 }
 
+                uint p18AlphaHash(uint value) {
+                    value ^= value >> 16u;
+                    value *= 0x7FEB352Du;
+                    value ^= value >> 15u;
+                    value *= 0x846CA68Bu;
+                    value ^= value >> 16u;
+                    return value;
+                }
+
+                bool p18AlphaAccept(uint textureHandle, vec2 uv, uint salt) {
+                    uint alpha = p18AlbedoAlpha(textureHandle, uv);
+                    if (alpha == 0u) return false;
+                    if (alpha == 255u) return true;
+
+                    uint state = textureHandle * 0x9E3779B1u
+                            ^ floatBitsToUint(uv.x) * 0x85EBCA77u
+                            ^ floatBitsToUint(uv.y) * 0xC2B2AE3Du
+                            ^ salt
+                            ^ scene.data[41] * 0x27D4EB2Du;
+                    uint hashed = p18AlphaHash(state);
+                    float sample = float(hashed & 0x00FFFFFFu) / 16777216.0;
+                    return sample < float(alpha) / 255.0;
+                }
+
                 vec2 p18ReadUv(uint wordBase) {
                     return vec2(
                         uintBitsToFloat(scene.data[wordBase]),
@@ -174,7 +198,12 @@ final class P18TexturedSurfaceShaderPatch {
                         vec3 localHit = hitPoint - voxelOrigin;
                         uint textureHandle = p18CubeTextureHandle(surfaceSetId, face);
                         vec2 uv = p18CubeFaceUv(surfaceSetId, face, localHit);
-                        if (p18AlbedoAlpha(textureHandle, uv) == 0u) {
+                        uint alphaSalt = uint(voxel.x) * 0x9E3779B1u
+                                ^ uint(voxel.y) * 0x85EBCA77u
+                                ^ uint(voxel.z) * 0xC2B2AE3Du
+                                ^ surfaceSetId * 0x27D4EB2Du
+                                ^ uint(face);
+                        if (!p18AlphaAccept(textureHandle, uv, alphaSalt)) {
                             return;
                         }
                     }
@@ -219,6 +248,7 @@ final class P18TexturedSurfaceShaderPatch {
                         vec2 uvB,
                         vec2 uvC,
                         uint textureHandle,
+                        uint alphaSalt,
                         float minDistance,
                         float maxDistance,
                         inout bool found,
@@ -245,7 +275,7 @@ final class P18TexturedSurfaceShaderPatch {
                     if (found && distance >= bestDistance) return;
 
                     vec2 surfaceUv = uvA * (1.0 - u - v) + uvB * u + uvC * v;
-                    if (p18AlbedoAlpha(textureHandle, surfaceUv) == 0u) return;
+                    if (!p18AlphaAccept(textureHandle, surfaceUv, alphaSalt)) return;
 
                     vec3 geometricNormal = cross(edge1, edge2);
                     float normalLength = length(geometricNormal);
@@ -311,12 +341,20 @@ final class P18TexturedSurfaceShaderPatch {
                         p14TryTriangle(
                             origin, direction, v0, v1, v2,
                             uv0, uv1, uv2, textureHandle,
+                            uint(voxel.x) * 0x9E3779B1u
+                                    ^ uint(voxel.y) * 0x85EBCA77u
+                                    ^ uint(voxel.z) * 0xC2B2AE3Du
+                                    ^ quadIndex * 2u,
                             cellEntryDistance, cellExitDistance,
                             found, bestDistance, bestNormal
                         );
                         p14TryTriangle(
                             origin, direction, v0, v2, v3,
                             uv0, uv2, uv3, textureHandle,
+                            uint(voxel.x) * 0x9E3779B1u
+                                    ^ uint(voxel.y) * 0x85EBCA77u
+                                    ^ uint(voxel.z) * 0xC2B2AE3Du
+                                    ^ quadIndex * 2u + 1u,
                             cellEntryDistance, cellExitDistance,
                             found, bestDistance, bestNormal
                         );
@@ -377,7 +415,7 @@ final class P18TexturedSurfaceShaderPatch {
 
         TotemLumenClient.LOGGER.info(
                 "P18 textured-surface tracing active: genericMeshAlphaCutout=true, "
-                        + "texturedCubeFastPath=true, alphaZeroReject=true, partialAlphaPreserved=true"
+                        + "texturedCubeFastPath=true, alphaZeroReject=true, partialAlphaStochasticCoverage=true"
         );
         return source;
     }
