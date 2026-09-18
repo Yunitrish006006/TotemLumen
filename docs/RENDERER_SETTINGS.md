@@ -114,6 +114,22 @@ Totem Lumen no longer exposes the simplified bootstrap renderer as a player-visi
 
 This provides the intended "ordinary Minecraft first, advanced lighting when ready" startup path without an expensive resource reload.
 
+### Compile progress HUD
+
+While compilation is active, a compact top-left HUD shows the current real pipeline stage and an overall 0–100% staged progress value. The percentage is deliberately stage-based because shaderc/Vulkan/MoltenVK do not expose a trustworthy intra-pipeline percentage callback.
+
+Current staged weights:
+
+- 0–10%: renderer/Vulkan backend discovery and interop;
+- 20%: bootstrap pipeline compiling;
+- 30%: full P12–P18 material-aware base compiling;
+- 70%: full base ready and Totem presentation can become active;
+- +15% when P17 dynamic-entity pipeline finishes;
+- +15% when P16 reflection pipeline finishes;
+- 100%: all staged compilation has finished; the HUD disappears automatically.
+
+A manual **Recompile Renderer Pipelines** resets the visible staged progress and the HUD appears again.
+
 ## Renderer master toggle
 
 `rendererEnabled=false` is a runtime renderer bypass, not a mod unload:
