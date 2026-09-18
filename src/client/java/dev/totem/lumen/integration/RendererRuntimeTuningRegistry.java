@@ -54,7 +54,8 @@ public final class RendererRuntimeTuningRegistry {
             float waterReflectionRoughness,
             float lavaReflectionRoughness,
             float waterReflectionScale,
-            float lavaReflectionScale
+            float lavaReflectionScale,
+            float entityEmissiveGain
     ) {
         public static final Values DEFAULT = new Values(
                 2.4f,
@@ -80,7 +81,8 @@ public final class RendererRuntimeTuningRegistry {
                 0.025f,
                 0.32f,
                 1.0f,
-                1.0f
+                1.0f,
+                2.0f
         );
 
         public Values {
@@ -119,6 +121,7 @@ public final class RendererRuntimeTuningRegistry {
             lavaReflectionRoughness = normalized(lavaReflectionRoughness, "lavaReflectionRoughness");
             waterReflectionScale = finite(waterReflectionScale, 0.0f, 4.0f, "waterReflectionScale");
             lavaReflectionScale = finite(lavaReflectionScale, 0.0f, 4.0f, "lavaReflectionScale");
+            entityEmissiveGain = finite(entityEmissiveGain, 0.0f, 8.0f, "entityEmissiveGain");
         }
 
         private static float normalized(float value, String name) {
@@ -219,7 +222,8 @@ public final class RendererRuntimeTuningRegistry {
                         readFloat(object, "water_reflection_roughness", d.waterReflectionRoughness()),
                         readFloat(object, "lava_reflection_roughness", d.lavaReflectionRoughness()),
                         readFloat(object, "water_reflection_scale", d.waterReflectionScale()),
-                        readFloat(object, "lava_reflection_scale", d.lavaReflectionScale())
+                        readFloat(object, "lava_reflection_scale", d.lavaReflectionScale()),
+                        readFloat(object, "entity_emissive_gain", d.entityEmissiveGain())
                 );
             }
         } catch (Throwable failure) {
