@@ -2,6 +2,7 @@ package dev.totem.lumen.vulkan;
 
 import com.mojang.blaze3d.vulkan.VulkanDevice;
 import dev.totem.lumen.TotemLumenClient;
+import dev.totem.lumen.render.RendererSettings;
 import dev.totem.lumen.vulkan.resource.VulkanOwnedBuffer;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.vulkan.VK10;
@@ -99,7 +100,7 @@ public final class P16MultipassReflection {
     ) {
         VulkanComputeProgram program = activeProgram;
         VulkanOwnedBuffer scene = attachedScene;
-        if (program == null || scene == null) return;
+        if (program == null || scene == null || RendererSettings.reflectionBounces() <= 0) return;
 
         try (MemoryStack stack = MemoryStack.stackPush()) {
             VkBufferMemoryBarrier.Buffer baseToReflection = VkBufferMemoryBarrier.calloc(1, stack);
@@ -137,7 +138,9 @@ public final class P16MultipassReflection {
         if (!firstDispatchLogged) {
             firstDispatchLogged = true;
             TotemLumenClient.LOGGER.info(
-                    "P16 multipass reflection READY: base=P12-P15+P14E+P17, reflection=separate-compute-pass+P14E+P17, secondaryRays=1, maxDistance=64"
+                    "P16 multipass reflection READY: base=P12-P15+P14E+P17, reflection=separate-compute-pass+P14E+P17, maxBounces={}, maxDistance={}",
+                    RendererSettings.reflectionBounces(),
+                    RendererSettings.reflectionDistance()
             );
         }
     }
