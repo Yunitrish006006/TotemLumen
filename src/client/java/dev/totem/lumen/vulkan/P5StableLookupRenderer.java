@@ -925,6 +925,7 @@ public final class P5StableLookupRenderer {
     private static DebugMode lastCompletedMode;
     private static String dimensionId;
     private static long lastSettingsRevision = Long.MIN_VALUE;
+    private static long lastRuntimeTuningRevision = Long.MIN_VALUE;
     private static long lastAnimationSignature = Long.MIN_VALUE;
     private static int activeRenderWidth;
     private static int activeRenderHeight;
@@ -971,6 +972,13 @@ public final class P5StableLookupRenderer {
         if (settingsRevision != lastSettingsRevision) {
             historyValid = false;
             lastSettingsRevision = settingsRevision;
+        }
+
+        RendererRuntimeTuningRegistry.ensureLoaded(Minecraft.getInstance().getResourceManager());
+        long runtimeTuningRevision = RendererRuntimeTuningRegistry.revision();
+        if (runtimeTuningRevision != lastRuntimeTuningRevision) {
+            historyValid = false;
+            lastRuntimeTuningRevision = runtimeTuningRevision;
         }
 
         long animationTick = currentAnimationTick(frame);
@@ -1306,6 +1314,7 @@ public final class P5StableLookupRenderer {
         lastMaxLightsPerSection = 0;
         lastPopulatedLightLists = 0;
         lastEmissiveMaterialCount = 0;
+        lastRuntimeTuningRevision = Long.MIN_VALUE;
         lastAnimationSignature = Long.MIN_VALUE;
         p7Logged = false;
         p8Logged = false;
