@@ -1,6 +1,7 @@
 package dev.totem.lumen.vulkan;
 
 import dev.totem.lumen.gpu.GpuFluidScene;
+import dev.totem.lumen.gpu.GpuPbrTextureScene;
 import org.lwjgl.util.shaderc.Shaderc;
 
 /** Build-time verifier for bootstrap readiness and all staged production compute passes. */
@@ -237,13 +238,29 @@ public final class P14ShaderCompileVerifier {
     ) {
         requireSourceMarker(
                 source,
-                "const uint P18_TEXTURE_ABI_VERSION = 1u;",
+                "const uint P18_TEXTURE_ABI_VERSION = " + GpuPbrTextureScene.ABI_VERSION + "u;",
                 label + " P18 texture ABI"
         );
         requireSourceMarker(
                 source,
                 "uint p18TextureSceneBase()",
                 label + " P18 texture scene base"
+        );
+        requireSourceMarker(
+                source,
+                "const uint P18_TEXTURE_ANIMATION_POOL_BASE = "
+                        + GpuPbrTextureScene.ANIMATION_POOL_BASE_WORD + "u;",
+                label + " P18 animation timeline pool"
+        );
+        requireSourceMarker(
+                source,
+                "uint p18CurrentFrameTexelOffset(uint textureBase, uint descriptor)",
+                label + " animated frame selection"
+        );
+        requireSourceMarker(
+                source,
+                "uint timelineIndex = scene.data[53] % timelineLength;",
+                label + " game-tick animation clock"
         );
         requireSourceMarker(
                 source,
@@ -284,8 +301,8 @@ public final class P14ShaderCompileVerifier {
         }
         System.out.println(
                 "P18 textured-surface verification PASS (" + label + "): "
-                        + "meshUv=true, cubeFastPath=true, alphaZeroReject=true, partialAlpha=stochastic, reflectionFallback="
-                        + reflectionPass
+                        + "meshUv=true, cubeFastPath=true, alphaZeroReject=true, partialAlpha=stochastic, "
+                        + "animatedFrames=true, gameTickClock=true, reflectionFallback=" + reflectionPass
         );
     }
 

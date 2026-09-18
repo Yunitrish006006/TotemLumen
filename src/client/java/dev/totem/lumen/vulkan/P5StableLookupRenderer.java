@@ -11,6 +11,7 @@ import dev.totem.lumen.TotemLumenClient;
 import dev.totem.lumen.gpu.GpuSectionLightLists;
 import dev.totem.lumen.gpu.GpuSectionLookupTable;
 import dev.totem.lumen.gpu.GpuSectionSlotAllocator;
+import dev.totem.lumen.integration.LabPbrTextureRegistry;
 import dev.totem.lumen.integration.SceneExtractionBridge;
 import dev.totem.lumen.render.RendererSettings;
 import dev.totem.lumen.scene.FrameSnapshot;
@@ -61,7 +62,7 @@ public final class P5StableLookupRenderer {
     private static final int HISTORY_RECORD_WORDS = 8;
     private static final int MAX_STEPS = 512;
     private static final float MAX_DISTANCE = 256.0f;
-    private static final int CAMERA_UPLOAD_WORDS = 53;
+    private static final int CAMERA_UPLOAD_WORDS = 54;
     private static final int SOFT_SHADOW_SAMPLES = 4;
     private static final float SOFT_SHADOW_ANGULAR_RADIUS = 0.055f;
     private static final float TEMPORAL_HISTORY_WEIGHT = 0.80f;
@@ -923,6 +924,7 @@ public final class P5StableLookupRenderer {
     private static DebugMode lastCompletedMode;
     private static String dimensionId;
     private static long lastSettingsRevision = Long.MIN_VALUE;
+    private static long lastAnimationSignature = Long.MIN_VALUE;
     private static int activeRenderWidth;
     private static int activeRenderHeight;
 
@@ -968,6 +970,15 @@ public final class P5StableLookupRenderer {
         if (settingsRevision != lastSettingsRevision) {
             historyValid = false;
             lastSettingsRevision = settingsRevision;
+        }
+
+        long animationTick = currentAnimationTick(frame);
+        long animationSignature = LabPbrTextureRegistry.loadedAnimatedCount() == 0
+                ? Long.MIN_VALUE
+                : LabPbrTextureRegistry.animationSignature(animationTick);
+        if (animationSignature != lastAnimationSignature) {
+            historyValid = false;
+            lastAnimationSignature = animationSignature;
         }
 
         int windowWidth = Math.max(1, Minecraft.getInstance().getWindow().getWidth());
@@ -1294,6 +1305,7 @@ public final class P5StableLookupRenderer {
         lastMaxLightsPerSection = 0;
         lastPopulatedLightLists = 0;
         lastEmissiveMaterialCount = 0;
+        lastAnimationSignature = Long.MIN_VALUE;
         p7Logged = false;
         p8Logged = false;
         p9Logged = false;
@@ -1365,6 +1377,13 @@ public final class P5StableLookupRenderer {
         putWord(buffer, 50, RendererSettings.denoiseQuality().radius());
         putWord(buffer, 51, resources.width);
         putWord(buffer, 52, resources.height);
+        putWord(buffer, 53, (int) currentAnimationTick(frame));
+    }
+
+    private static long currentAnimationTick(FrameSnapshot frame) {
+        return Minecraft.getInstance().level == null
+                ? frame.frameIndex()
+                : Minecraft.getInstance().level.getGameTime();
     }
 
     private static void packLookupSectionsAndLights(ByteBuffer buffer, List<SectionSnapshot> sections) {

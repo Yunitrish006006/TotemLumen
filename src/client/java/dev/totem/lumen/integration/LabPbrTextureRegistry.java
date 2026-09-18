@@ -1,7 +1,11 @@
 package dev.totem.lumen.integration;
 
 import com.mojang.blaze3d.platform.NativeImage;
+import net.minecraft.client.resources.metadata.animation.AnimationFrame;
+import net.minecraft.client.resources.metadata.animation.AnimationMetadataSection;
+import net.minecraft.client.resources.metadata.animation.FrameSize;
 import dev.totem.lumen.TotemLumenClient;
+import dev.totem.lumen.material.PbrAnimation;
 import dev.totem.lumen.material.PbrImage;
 import dev.totem.lumen.material.PbrTextureData;
 import dev.totem.lumen.material.PbrTextureHandleRegistry;
@@ -48,6 +52,7 @@ public final class LabPbrTextureRegistry {
     private static volatile DeclaredFormat declaredFormat = DeclaredFormat.UNDECLARED;
     private static volatile int loadedWithNormal;
     private static volatile int loadedWithSpecular;
+    private static volatile int loadedAnimated;
     private static volatile boolean firstLoadLogged;
 
     private LabPbrTextureRegistry() {
@@ -90,13 +95,15 @@ public final class LabPbrTextureRegistry {
                 }
                 if (loaded.hasNormalMap()) loadedWithNormal++;
                 if (loaded.hasSpecularMap()) loadedWithSpecular++;
-                if (!firstLoadLogged && (loaded.hasNormalMap() || loaded.hasSpecularMap())) {
+                if (loaded.animated()) loadedAnimated++;
+                if (!firstLoadLogged && (loaded.hasNormalMap() || loaded.hasSpecularMap() || loaded.animated())) {
                     firstLoadLogged = true;
                     TotemLumenClient.LOGGER.info(
-                            "P18 LabPBR texture capture active: sprite={}, normal={}, specular={}, format={}",
+                            "P18 texture capture active: sprite={}, normal={}, specular={}, animated={}, format={}",
                             spriteId,
                             loaded.hasNormalMap(),
                             loaded.hasSpecularMap(),
+                            loaded.animated(),
                             declaredFormat
                     );
                 }
@@ -116,6 +123,7 @@ public final class LabPbrTextureRegistry {
         }
         loadedWithNormal = 0;
         loadedWithSpecular = 0;
+        loadedAnimated = 0;
         firstLoadLogged = false;
         formatScanned = false;
         declaredFormat = DeclaredFormat.UNDECLARED;
@@ -163,6 +171,33 @@ public final class LabPbrTextureRegistry {
         return loadedWithSpecular;
     }
 
+    public static int loadedAnimatedCount() {
+        return loadedAnimated;
+    }
+
+    public static long animationSignature(long gameTick) {
+        long hash = 0xCBF29CE484222325L;
+        List<PbrTextureData> textures = snapshot();
+        for (PbrTextureData texture : textures) {
+            if (!texture.animated()) continue;
+            hash ^= texture.spriteId().hashCode();
+            hash *= 0x100000001B3L;
+            if (texture.albedoAnimation() != null) {
+                hash ^= texture.albedoAnimation().frameAtTick(gameTick);
+                hash *= 0x100000001B3L;
+            }
+            if (texture.normalAnimation() != null) {
+                hash ^= texture.normalAnimation().frameAtTick(gameTick);
+                hash *= 0x100000001B3L;
+            }
+            if (texture.specularAnimation() != null) {
+                hash ^= texture.specularAnimation().frameAtTick(gameTick);
+                hash *= 0x100000001B3L;
+            }
+        }
+        return hash;
+    }
+
     private static void scanDeclaredFormat(ResourceManager resources) {
         DeclaredFormat format = DeclaredFormat.UNDECLARED;
         try {
@@ -194,27 +229,61 @@ public final class LabPbrTextureRegistry {
         Identifier sprite = parseSpriteId(spriteId);
         if (sprite == null) return null;
 
-        PbrImage albedo = loadImage(resources, textureResource(sprite, ""));
+        LoadedLayer albedo = loadLayer(resources, textureResource(sprite, ""));
         if (albedo == null) {
             return null;
         }
-        PbrImage normal = loadImage(resources, textureResource(sprite, "_n"));
-        PbrImage specular = loadImage(resources, textureResource(sprite, "_s"));
-        return new PbrTextureData(spriteId, albedo, normal, specular);
-    }
+        LoadedLayer normal = loadLayer(resources, textureResource(sprite, "_n"));
+        LoadedLayer specular = loadLayer(resources, textureResource(sprite, "_s"));
 
-    private static PbrImage loadImage(ResourceManager resources, Identifier location) {
-        try {
-            var resource = resources.getResource(location);
-            if (resource.isEmpty()) return null;
-            try (InputStream input = resource.get().open();
-                 NativeImage image = NativeImage.read(input)) {
-                return new PbrImage(
-                        image.getWidth(),
-                        image.getHeight(),
-                        image.getPixels()
+        PbrAnimation normalAnimation = normal == null ? null : normal.animation();
+        PbrAnimation specularAnimation = specular == null ? null : specular.animation();
+        if (albedo.animation() != null) {
+            if (normal != null && normalAnimation == null) {
+                normalAnimation = inheritedAnimation(
+                        albedo.image(),
+                        albedo.animation(),
+                        normal.image()
                 );
             }
+            if (specular != null && specularAnimation == null) {
+                specularAnimation = inheritedAnimation(
+                        albedo.image(),
+                        albedo.animation(),
+                        specular.image()
+                );
+            }
+        }
+
+        return new PbrTextureData(
+                spriteId,
+                albedo.image(),
+                normal == null ? null : normal.image(),
+                specular == null ? null : specular.image(),
+                albedo.animation(),
+                normalAnimation,
+                specularAnimation
+        );
+    }
+
+    private static LoadedLayer loadLayer(ResourceManager resources, Identifier location) {
+        try {
+            var resourceOptional = resources.getResource(location);
+            if (resourceOptional.isEmpty()) return null;
+            var resource = resourceOptional.get();
+
+            PbrImage image;
+            try (InputStream input = resource.open();
+                 NativeImage nativeImage = NativeImage.read(input)) {
+                image = new PbrImage(
+                        nativeImage.getWidth(),
+                        nativeImage.getHeight(),
+                        nativeImage.getPixels()
+                );
+            }
+
+            PbrAnimation animation = loadAnimation(resource, location, image);
+            return new LoadedLayer(image, animation);
         } catch (Throwable failure) {
             TotemLumenClient.LOGGER.warn(
                     "P18 failed to decode resource-pack texture {}; ignoring this map",
@@ -225,9 +294,126 @@ public final class LabPbrTextureRegistry {
         }
     }
 
+    private static PbrAnimation loadAnimation(
+            net.minecraft.server.packs.resources.Resource resource,
+            Identifier textureLocation,
+            PbrImage image
+    ) {
+        try {
+            var metadata = resource.metadata().getSection(AnimationMetadataSection.TYPE);
+            if (metadata.isEmpty()) return null;
+
+            AnimationMetadataSection animation = metadata.get();
+            FrameSize frameSize = animation.calculateFrameSize(image.width(), image.height());
+            int frameWidth = frameSize.width();
+            int frameHeight = frameSize.height();
+            if (frameWidth <= 0 || frameHeight <= 0
+                    || image.width() % frameWidth != 0
+                    || image.height() % frameHeight != 0) {
+                TotemLumenClient.LOGGER.warn(
+                        "P18 animation metadata dimensions do not tile texture {}; image={}x{}, frame={}x{}",
+                        textureLocation,
+                        image.width(),
+                        image.height(),
+                        frameWidth,
+                        frameHeight
+                );
+                return null;
+            }
+
+            int columns = image.width() / frameWidth;
+            int rows = image.height() / frameHeight;
+            int sourceFrameCount = Math.multiplyExact(columns, rows);
+            int defaultFrameTime = Math.max(1, animation.defaultFrameTime());
+
+            List<Integer> timeline = new ArrayList<>();
+            List<AnimationFrame> frames = animation.frames().orElse(null);
+            if (frames == null || frames.isEmpty()) {
+                for (int frame = 0; frame < sourceFrameCount; frame++) {
+                    appendFrameTicks(timeline, frame, defaultFrameTime);
+                }
+            } else {
+                for (AnimationFrame entry : frames) {
+                    int frameIndex = entry.index();
+                    if (frameIndex < 0 || frameIndex >= sourceFrameCount) {
+                        TotemLumenClient.LOGGER.warn(
+                                "P18 animation frame {} is outside {} source frames for {}",
+                                frameIndex,
+                                sourceFrameCount,
+                                textureLocation
+                        );
+                        continue;
+                    }
+                    appendFrameTicks(
+                            timeline,
+                            frameIndex,
+                            Math.max(1, entry.timeOr(defaultFrameTime))
+                    );
+                }
+            }
+
+            if (timeline.isEmpty()) return null;
+            int[] expanded = timeline.stream().mapToInt(Integer::intValue).toArray();
+            TotemLumenClient.LOGGER.info(
+                    "P18 animated texture discovered: texture={}, frame={}x{}, sourceFrames={}, timelineTicks={}, interpolate={}",
+                    textureLocation,
+                    frameWidth,
+                    frameHeight,
+                    sourceFrameCount,
+                    expanded.length,
+                    animation.interpolatedFrames()
+            );
+            return new PbrAnimation(
+                    frameWidth,
+                    frameHeight,
+                    expanded,
+                    animation.interpolatedFrames()
+            );
+        } catch (Throwable failure) {
+            TotemLumenClient.LOGGER.warn(
+                    "P18 failed to read animation metadata for {}; treating texture as static",
+                    textureLocation,
+                    failure
+            );
+            return null;
+        }
+    }
+
+    private static PbrAnimation inheritedAnimation(
+            PbrImage sourceImage,
+            PbrAnimation sourceAnimation,
+            PbrImage targetImage
+    ) {
+        int columns = sourceImage.width() / sourceAnimation.frameWidth();
+        int rows = sourceImage.height() / sourceAnimation.frameHeight();
+        if (columns <= 0 || rows <= 0
+                || targetImage.width() % columns != 0
+                || targetImage.height() % rows != 0) {
+            return null;
+        }
+        int frameWidth = targetImage.width() / columns;
+        int frameHeight = targetImage.height() / rows;
+        return new PbrAnimation(
+                frameWidth,
+                frameHeight,
+                sourceAnimation.copyTimelineFrames(),
+                sourceAnimation.interpolate()
+        );
+    }
+
+    private static void appendFrameTicks(List<Integer> timeline, int frameIndex, int ticks) {
+        int boundedTicks = Math.min(Math.max(ticks, 1), 4096);
+        for (int tick = 0; tick < boundedTicks; tick++) {
+            timeline.add(frameIndex);
+        }
+    }
+
     private static Identifier textureResource(Identifier sprite, String suffix) {
         String path = "textures/" + sprite.getPath() + suffix + ".png";
         return Identifier.fromNamespaceAndPath(sprite.getNamespace(), path);
+    }
+
+    private record LoadedLayer(PbrImage image, PbrAnimation animation) {
     }
 
     private static Identifier parseSpriteId(String spriteId) {
