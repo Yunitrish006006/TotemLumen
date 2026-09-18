@@ -1,12 +1,10 @@
 package dev.totem.lumen.gui;
 
 import dev.totem.lumen.render.RendererBootstrap;
-import dev.totem.lumen.render.RendererState;
 import dev.totem.lumen.render.RendererSettings;
 import dev.totem.lumen.vulkan.P12FullBasePipeline;
 import dev.totem.lumen.vulkan.P16MultipassReflection;
 import dev.totem.lumen.vulkan.P17EnhancedBasePipeline;
-import dev.totem.lumen.vulkan.P5StableLookupRenderer;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
@@ -14,15 +12,23 @@ import net.minecraft.network.chat.Component;
 
 import java.util.Locale;
 
-/** Totem Lumen renderer controls exposed from Minecraft's Video Settings screen. */
+/** Main Totem Lumen renderer controls exposed from Minecraft's Video Settings screen. */
 public final class TotemLumenVideoSettingsScreen extends Screen {
-    private static final int CONTENT_WIDTH = 310;
+    private static final int CONTENT_WIDTH = 330;
     private static final int BUTTON_HEIGHT = 20;
+    private static final int ROW_GAP = 22;
 
     private final Screen parent;
+    private Button giQualityButton;
+    private Button shadowQualityButton;
+    private Button rayDistanceButton;
+    private Button internalResolutionButton;
+    private Button reflectionsEnabledButton;
+    private Button waterReflectionsButton;
     private Button reflectionBouncesButton;
     private Button reflectionDistanceButton;
-    private Button renderViewButton;
+    private Button temporalQualityButton;
+    private Button denoiseQualityButton;
 
     public TotemLumenVideoSettingsScreen(Screen parent) {
         super(Component.translatable("screen.totem-lumen.title"));
@@ -31,54 +37,81 @@ public final class TotemLumenVideoSettingsScreen extends Screen {
 
     @Override
     protected void init() {
-        int contentWidth = Math.min(CONTENT_WIDTH, Math.max(220, this.width - 32));
+        int contentWidth = Math.min(CONTENT_WIDTH, Math.max(240, this.width - 24));
         int left = (this.width - contentWidth) / 2;
         int halfWidth = (contentWidth - 6) / 2;
-        int doneY = Math.min(this.height - 28, 246);
-        int quickY = doneY - 26;
-        int renderViewY = quickY - 26;
-        int reflectionDistanceY = renderViewY - 26;
-        int reflectionBouncesY = reflectionDistanceY - 26;
+        int rowY = 72;
 
-        this.reflectionBouncesButton = this.addRenderableWidget(
-                Button.builder(reflectionBouncesLabel(), ignored -> {
-                    RendererSettings.cycleReflectionBounces();
-                    refreshSettingsButtons();
-                }).bounds(left, reflectionBouncesY, contentWidth, BUTTON_HEIGHT).build()
+        this.giQualityButton = addSettingButton(
+                left, rowY, halfWidth, giQualityLabel(),
+                () -> RendererSettings.cycleGiQuality()
+        );
+        this.shadowQualityButton = addSettingButton(
+                left + halfWidth + 6, rowY, halfWidth, shadowQualityLabel(),
+                () -> RendererSettings.cycleShadowQuality()
+        );
+        rowY += ROW_GAP;
+
+        this.rayDistanceButton = addSettingButton(
+                left, rowY, halfWidth, rayDistanceLabel(),
+                () -> RendererSettings.cycleRayDistance()
+        );
+        this.internalResolutionButton = addSettingButton(
+                left + halfWidth + 6, rowY, halfWidth, internalResolutionLabel(),
+                () -> RendererSettings.cycleInternalResolution()
+        );
+        rowY += ROW_GAP;
+
+        this.reflectionsEnabledButton = addSettingButton(
+                left, rowY, halfWidth, reflectionsEnabledLabel(),
+                () -> RendererSettings.toggleReflectionsEnabled()
+        );
+        this.waterReflectionsButton = addSettingButton(
+                left + halfWidth + 6, rowY, halfWidth, waterReflectionsLabel(),
+                () -> RendererSettings.toggleWaterReflections()
+        );
+        rowY += ROW_GAP;
+
+        this.reflectionBouncesButton = addSettingButton(
+                left, rowY, halfWidth, reflectionBouncesLabel(),
+                () -> RendererSettings.cycleReflectionBounces()
+        );
+        this.reflectionDistanceButton = addSettingButton(
+                left + halfWidth + 6, rowY, halfWidth, reflectionDistanceLabel(),
+                () -> RendererSettings.cycleReflectionDistance()
+        );
+        rowY += ROW_GAP;
+
+        this.temporalQualityButton = addSettingButton(
+                left, rowY, halfWidth, temporalQualityLabel(),
+                () -> RendererSettings.cycleTemporalQuality()
+        );
+        this.denoiseQualityButton = addSettingButton(
+                left + halfWidth + 6, rowY, halfWidth, denoiseQualityLabel(),
+                () -> RendererSettings.cycleDenoiseQuality()
         );
 
-        this.reflectionDistanceButton = this.addRenderableWidget(
-                Button.builder(reflectionDistanceLabel(), ignored -> {
-                    RendererSettings.cycleReflectionDistance();
-                    refreshSettingsButtons();
-                }).bounds(left, reflectionDistanceY, contentWidth, BUTTON_HEIGHT).build()
-        );
-
-        this.renderViewButton = this.addRenderableWidget(
-                Button.builder(renderViewLabel(), ignored -> {
-                    P5StableLookupRenderer.cycleMode();
-                    refreshSettingsButtons();
-                }).bounds(left, renderViewY, contentWidth, BUTTON_HEIGHT).build()
-        );
-
+        int diagnosticsY = Math.min(rowY + 26, this.height - 52);
         this.addRenderableWidget(
-                Button.builder(Component.translatable("screen.totem-lumen.quick.gi"), ignored -> {
-                    P5StableLookupRenderer.setMode(P5StableLookupRenderer.DebugMode.GI_COMPOSITE);
-                    refreshSettingsButtons();
-                }).bounds(left, quickY, halfWidth, BUTTON_HEIGHT).build()
-        );
-
-        this.addRenderableWidget(
-                Button.builder(Component.translatable("screen.totem-lumen.quick.fluid"), ignored -> {
-                    P5StableLookupRenderer.setMode(P5StableLookupRenderer.DebugMode.FLUID_GEOMETRY);
-                    refreshSettingsButtons();
-                }).bounds(left + halfWidth + 6, quickY, halfWidth, BUTTON_HEIGHT).build()
+                Button.builder(
+                        Component.translatable("screen.totem-lumen.diagnostics"),
+                        ignored -> this.minecraft.gui.setScreen(new TotemLumenDiagnosticsScreen(this))
+                ).bounds(left, diagnosticsY, contentWidth, BUTTON_HEIGHT).build()
         );
 
         this.addRenderableWidget(
                 Button.builder(Component.translatable("gui.done"), ignored -> this.onClose())
-                        .bounds(left, doneY, contentWidth, BUTTON_HEIGHT)
+                        .bounds(left, this.height - 28, contentWidth, BUTTON_HEIGHT)
                         .build()
+        );
+    }
+
+    private Button addSettingButton(int x, int y, int width, Component label, Runnable action) {
+        return this.addRenderableWidget(
+                Button.builder(label, ignored -> {
+                    action.run();
+                    refreshSettingsButtons();
+                }).bounds(x, y, width, BUTTON_HEIGHT).build()
         );
     }
 
@@ -91,65 +124,27 @@ public final class TotemLumenVideoSettingsScreen extends Screen {
     ) {
         super.extractRenderState(graphics, mouseX, mouseY, delta);
 
-        int contentWidth = Math.min(CONTENT_WIDTH, Math.max(220, this.width - 32));
-        int left = (this.width - contentWidth) / 2;
-
-        graphics.centeredText(this.font, this.title, this.width / 2, 18, 0xFFFFFFFF);
+        graphics.centeredText(this.font, this.title, this.width / 2, 16, 0xFFFFFFFF);
         graphics.centeredText(
                 this.font,
                 Component.translatable("screen.totem-lumen.subtitle"),
                 this.width / 2,
-                36,
+                32,
                 0xFFAAAAAA
         );
-
-        drawStatusLine(
-                graphics,
-                left,
-                58,
-                Component.translatable("screen.totem-lumen.status.bootstrap"),
-                rendererStateComponent(RendererBootstrap.state())
+        graphics.centeredText(
+                this.font,
+                Component.translatable(
+                        "screen.totem-lumen.status.summary",
+                        compactState(RendererBootstrap.readyForRendering()),
+                        compactState(P12FullBasePipeline.ready()),
+                        compactState(P17EnhancedBasePipeline.ready()),
+                        compactState(P16MultipassReflection.ready())
+                ),
+                this.width / 2,
+                50,
+                0xFFD0D0D0
         );
-        drawStatusLine(
-                graphics,
-                left,
-                72,
-                Component.translatable("screen.totem-lumen.status.full"),
-                stageStateComponent(P12FullBasePipeline.ready(), P12FullBasePipeline.failure(), false)
-        );
-        drawStatusLine(
-                graphics,
-                left,
-                86,
-                Component.translatable("screen.totem-lumen.status.entities"),
-                stageStateComponent(
-                        P17EnhancedBasePipeline.ready(),
-                        P17EnhancedBasePipeline.failure(),
-                        !P12FullBasePipeline.ready()
-                )
-        );
-        drawStatusLine(
-                graphics,
-                left,
-                100,
-                Component.translatable("screen.totem-lumen.status.reflections"),
-                stageStateComponent(
-                        P16MultipassReflection.ready(),
-                        P16MultipassReflection.failure(),
-                        !P12FullBasePipeline.ready()
-                )
-        );
-
-        if (this.height >= 286) {
-            graphics.text(
-                    this.font,
-                    Component.translatable("screen.totem-lumen.footer_hint"),
-                    left,
-                    260,
-                    0xFF888888,
-                    false
-            );
-        }
     }
 
     @Override
@@ -157,41 +152,68 @@ public final class TotemLumenVideoSettingsScreen extends Screen {
         this.minecraft.gui.setScreen(this.parent);
     }
 
-    private void drawStatusLine(
-            GuiGraphicsExtractor graphics,
-            int x,
-            int y,
-            Component label,
-            Component value
-    ) {
-        graphics.text(
-                this.font,
-                Component.translatable("screen.totem-lumen.status.line", label, value),
-                x,
-                y,
-                0xFFE0E0E0,
-                true
+    private void refreshSettingsButtons() {
+        if (giQualityButton != null) giQualityButton.setMessage(giQualityLabel());
+        if (shadowQualityButton != null) shadowQualityButton.setMessage(shadowQualityLabel());
+        if (rayDistanceButton != null) rayDistanceButton.setMessage(rayDistanceLabel());
+        if (internalResolutionButton != null) internalResolutionButton.setMessage(internalResolutionLabel());
+        if (reflectionsEnabledButton != null) reflectionsEnabledButton.setMessage(reflectionsEnabledLabel());
+        if (waterReflectionsButton != null) waterReflectionsButton.setMessage(waterReflectionsLabel());
+        if (reflectionBouncesButton != null) reflectionBouncesButton.setMessage(reflectionBouncesLabel());
+        if (reflectionDistanceButton != null) reflectionDistanceButton.setMessage(reflectionDistanceLabel());
+        if (temporalQualityButton != null) temporalQualityButton.setMessage(temporalQualityLabel());
+        if (denoiseQualityButton != null) denoiseQualityButton.setMessage(denoiseQualityLabel());
+    }
+
+    private static Component giQualityLabel() {
+        return Component.translatable(
+                "screen.totem-lumen.gi_quality",
+                qualityComponent(RendererSettings.giQuality())
         );
     }
 
-    private void refreshSettingsButtons() {
-        if (this.reflectionBouncesButton != null) {
-            this.reflectionBouncesButton.setMessage(reflectionBouncesLabel());
-        }
-        if (this.reflectionDistanceButton != null) {
-            this.reflectionDistanceButton.setMessage(reflectionDistanceLabel());
-        }
-        if (this.renderViewButton != null) {
-            this.renderViewButton.setMessage(renderViewLabel());
-        }
+    private static Component shadowQualityLabel() {
+        return Component.translatable(
+                "screen.totem-lumen.shadow_quality",
+                qualityComponent(RendererSettings.shadowQuality())
+        );
+    }
+
+    private static Component rayDistanceLabel() {
+        return Component.translatable("screen.totem-lumen.ray_distance", RendererSettings.rayDistance());
+    }
+
+    private static Component internalResolutionLabel() {
+        RendererSettings.InternalResolution value = RendererSettings.internalResolution();
+        return Component.translatable(
+                "screen.totem-lumen.internal_resolution",
+                qualityName(value.name()),
+                value.width()
+        );
+    }
+
+    private static Component reflectionsEnabledLabel() {
+        return Component.translatable(
+                "screen.totem-lumen.reflections_enabled",
+                booleanComponent(RendererSettings.reflectionsEnabled())
+        );
+    }
+
+    private static Component waterReflectionsLabel() {
+        return Component.translatable(
+                "screen.totem-lumen.water_reflections",
+                booleanComponent(RendererSettings.waterReflections())
+        );
     }
 
     private static Component reflectionBouncesLabel() {
-        int bounces = RendererSettings.reflectionBounces();
-        Component value = bounces == 0
-                ? Component.translatable("screen.totem-lumen.value.off")
-                : Component.translatable("screen.totem-lumen.value.bounces", bounces);
-        return Component.translatable("screen.totem-lumen.reflection_bounces", value);
+        return Component.translatable(
+                "screen.totem-lumen.reflection_bounces",
+                Component.translatable(
+                        "screen.totem-lumen.value.bounces",
+                        RendererSettings.reflectionBounces()
+                )
+        );
     }
 
     private static Component reflectionDistanceLabel() {
@@ -201,29 +223,39 @@ public final class TotemLumenVideoSettingsScreen extends Screen {
         );
     }
 
-    private static Component renderViewLabel() {
+    private static Component temporalQualityLabel() {
         return Component.translatable(
-                "screen.totem-lumen.render_view",
-                modeComponent(P5StableLookupRenderer.mode())
+                "screen.totem-lumen.temporal_quality",
+                qualityName(RendererSettings.temporalQuality().name())
         );
     }
 
-    private static Component modeComponent(P5StableLookupRenderer.DebugMode mode) {
+    private static Component denoiseQualityLabel() {
         return Component.translatable(
-                "screen.totem-lumen.mode." + mode.name().toLowerCase(Locale.ROOT)
+                "screen.totem-lumen.denoise_quality",
+                qualityName(RendererSettings.denoiseQuality().name())
         );
     }
 
-    private static Component rendererStateComponent(RendererState state) {
+    private static Component qualityComponent(RendererSettings.Quality quality) {
+        return qualityName(quality.name());
+    }
+
+    private static Component qualityName(String name) {
         return Component.translatable(
-                "screen.totem-lumen.renderer_state." + state.name().toLowerCase(Locale.ROOT)
+                "screen.totem-lumen.quality." + name.toLowerCase(Locale.ROOT)
         );
     }
 
-    private static Component stageStateComponent(boolean ready, Throwable failure, boolean waiting) {
-        if (ready) return Component.translatable("screen.totem-lumen.stage.ready");
-        if (failure != null) return Component.translatable("screen.totem-lumen.stage.failed");
-        if (waiting) return Component.translatable("screen.totem-lumen.stage.waiting");
-        return Component.translatable("screen.totem-lumen.stage.compiling");
+    private static Component booleanComponent(boolean enabled) {
+        return Component.translatable(
+                enabled ? "screen.totem-lumen.value.on" : "screen.totem-lumen.value.off"
+        );
+    }
+
+    private static Component compactState(boolean ready) {
+        return Component.translatable(
+                ready ? "screen.totem-lumen.stage.ready_short" : "screen.totem-lumen.stage.pending_short"
+        );
     }
 }
