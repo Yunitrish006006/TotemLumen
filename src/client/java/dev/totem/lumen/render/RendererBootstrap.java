@@ -171,7 +171,7 @@ public final class RendererBootstrap {
             return;
         }
 
-        VulkanDevice device = MinecraftVulkanBridge.currentDevice();
+        var device = MinecraftVulkanBridge.currentDevice();
         if (device != null) {
             // Start the expensive production renderer while the player may still be in menus.
             // Scene storage is bound later after world resources exist.
