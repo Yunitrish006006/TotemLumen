@@ -168,7 +168,8 @@ final class P14EFluidOpticsPatch {
                     );
                     if (primaryTrace.hit.hit == 0u && p14eRawPrimary.hit == 0u) return;
 
-                    bool p14eReflectWater = p14eRawPrimary.hit != 0u
+                    bool p14eReflectWater = scene.data[47] != 0u
+                            && p14eRawPrimary.hit != 0u
                             && p14eRawPrimary.materialId == P14E_WATER_MATERIAL_ID;
                     HitResult p14eReflectionSurface = p14eReflectWater
                             ? p14eRawPrimary
