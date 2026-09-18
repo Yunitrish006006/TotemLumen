@@ -61,7 +61,7 @@ public final class P5StableLookupRenderer {
     private static final int HISTORY_RECORD_WORDS = 8;
     private static final int MAX_STEPS = 512;
     private static final float MAX_DISTANCE = 256.0f;
-    private static final int CAMERA_UPLOAD_WORDS = 53;
+    private static final int CAMERA_UPLOAD_WORDS = 54;
     private static final int SOFT_SHADOW_SAMPLES = 4;
     private static final float SOFT_SHADOW_ANGULAR_RADIUS = 0.055f;
     private static final float TEMPORAL_HISTORY_WEIGHT = 0.80f;
@@ -1365,6 +1365,10 @@ public final class P5StableLookupRenderer {
         putWord(buffer, 50, RendererSettings.denoiseQuality().radius());
         putWord(buffer, 51, resources.width);
         putWord(buffer, 52, resources.height);
+        long animationTick = Minecraft.getInstance().level == null
+                ? frame.frameIndex()
+                : Minecraft.getInstance().level.getGameTime();
+        putWord(buffer, 53, (int) animationTick);
     }
 
     private static void packLookupSectionsAndLights(ByteBuffer buffer, List<SectionSnapshot> sections) {
