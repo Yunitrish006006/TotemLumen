@@ -197,6 +197,21 @@ The fix keeps the dimension-wide capture cache as renderer-source data but filte
 
 **Revalidation result: PASS.** The corrected Alpha 43 build remained usable on Apple M4/MoltenVK and no longer hit the previous dimension-wide fluid-capacity shutdown. This closes the first P14E-B runtime blocker. Remaining acceptance work is visual/behavioral validation of fluid geometry and optics.
 
+## Runtime visual debug mode
+
+F8 includes a dedicated **`P14E Fluid Geometry`** mode for the remaining Alpha 43 visual gate. The mode is compiled only into the full P14E-aware base/P17 shaders; the tiny bootstrap remains unchanged.
+
+Color legend:
+
+- cyan — exact pure-water surface;
+- orange/red — exact lava surface;
+- yellow — other exact fluid surface;
+- magenta — exact fluid surface in a waterlogged/custom coexistence cell;
+- bright green — block geometry won the nearest-hit test inside a coexistence cell;
+- near-black — ordinary non-fluid geometry.
+
+This view is intended to validate exact slopes/corner heights, waterfalls, section boundaries, and waterlogged coexistence independently from P15/P16 optical shading. After geometry is confirmed, switch back to `GI Composite` for transmission/reflection/emission validation.
+
 ## CI build gate
 
 The accepted Alpha 43 head compiles/tests all Java scene/ABI code, verifies Minecraft 26.2 mixin descriptors, and shaderc-compiles all staged production variants at O0.
