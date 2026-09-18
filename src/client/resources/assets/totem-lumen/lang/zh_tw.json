@@ -68,7 +68,7 @@
   "screen.totem-lumen.gi_quality": "GI 品質：%s",
   "screen.totem-lumen.shadow_quality": "陰影品質：%s",
   "screen.totem-lumen.ray_distance": "Ray 距離：%s 格",
-  "screen.totem-lumen.internal_resolution": "內部解析度：%s（%s px）",
+  "screen.totem-lumen.internal_resolution": "內部解析度：%s（視窗 %s%%）",
   "screen.totem-lumen.reflections_enabled": "反射：%s",
   "screen.totem-lumen.water_reflections": "水面反射：%s",
   "screen.totem-lumen.temporal_quality": "時間累積：%s",

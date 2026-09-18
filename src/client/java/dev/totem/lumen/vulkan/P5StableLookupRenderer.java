@@ -913,9 +913,9 @@ public final class P5StableLookupRenderer {
 
         int windowWidth = Math.max(1, Minecraft.getInstance().getWindow().getWidth());
         int windowHeight = Math.max(1, Minecraft.getInstance().getWindow().getHeight());
-        int targetWidth = RendererSettings.internalResolution().width();
+        int targetWidth = RendererSettings.internalResolution().targetWidth(windowWidth);
         int targetHeight = Math.max(1, Math.round(targetWidth * (windowHeight / (float) windowWidth)));
-        int capacityWidth = RendererSettings.InternalResolution.HIGH.width();
+        int capacityWidth = RendererSettings.InternalResolution.HIGH.targetWidth(windowWidth);
         int capacityHeight = Math.max(1, Math.round(capacityWidth * (windowHeight / (float) windowWidth)));
 
         if (resources == null || resources.width != capacityWidth || resources.height != capacityHeight) {
@@ -1632,7 +1632,8 @@ public final class P5StableLookupRenderer {
             GpuTexture texture = null;
             GpuTextureView view = null;
             try {
-                upload = VulkanOwnedBuffer.createUpload(device, totalBytes);
+                int uploadBytes = STATIC_DATA_END_WORD * Integer.BYTES;
+                upload = VulkanOwnedBuffer.createUpload(device, uploadBytes);
                 scene = VulkanOwnedBuffer.createStorage(device, totalBytes);
                 program = VulkanComputeProgram.create(device, "totem_lumen_p12_one_bounce_gi.comp", SHADER, scene);
                 commandPool = new VulkanFrameCommandPool(device);

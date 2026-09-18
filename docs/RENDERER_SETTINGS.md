@@ -20,7 +20,7 @@ The main page contains user-facing renderer quality and feature controls. Pipeli
 | GI quality | Low / Balanced / High | Balanced | 1 / 2 / 4 one-bounce GI samples per frame |
 | Shadow quality | Low / Balanced / High | Balanced | 1 / 2 / 4 Sun/Moon soft-shadow transmission rays |
 | Ray distance | 64 / 128 / 256 blocks | 256 | Primary/shared scene trace distance |
-| Internal resolution | Low / Balanced / High | Balanced | 120 / 160 / 240 internal pixels wide; height follows window aspect |
+| Internal resolution | Low / Balanced / High | Balanced | 50% / 67% / 100% of viewport width; height follows window aspect. High is native through 2560 px wide and capped there above 1440p-class widths. |
 | Reflections | Off / On | On | Skips or records the P16 reflection compute pass |
 | Water reflections | Off / On | On | Includes/excludes exact P14E water surfaces as reflection interfaces |
 | Reflection bounces | 1 / 2 | 1 | Maximum iterative P16 reflection bounces |
@@ -74,7 +74,7 @@ The final GUI composite then samples the corresponding active UV rectangle from 
 
 Changing internal resolution must not cause the large MoltenVK pipelines to be recompiled.
 
-P5 therefore allocates its render/history resources once at the maximum **High** extent (240 pixels wide, aspect-correct height) for the current window aspect. The selected quality controls only the active render extent:
+P5 therefore allocates its render/history resources once at the maximum **High** extent for the current window, capped at 2560 pixels wide with aspect-correct height. The selected quality controls only the active render extent:
 
 - compute dispatch uses the active width/height;
 - pixel-buffer barriers/copies cover only the active area;

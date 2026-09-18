@@ -35,18 +35,32 @@ public final class RendererSettings {
     }
 
     public enum InternalResolution {
-        LOW(120),
-        BALANCED(160),
-        HIGH(240);
+        LOW(0.50f, 50),
+        BALANCED(0.67f, 67),
+        HIGH(1.00f, 100);
 
-        private final int width;
+        /**
+         * Full native 4K history buffers are disproportionately expensive because the renderer keeps
+         * two 8-word temporal records per pixel in addition to the output buffer. High therefore
+         * remains native through 1440p and uses 2560 pixels as the current safety ceiling above it.
+         */
+        private static final int MAX_RENDER_WIDTH = 2560;
 
-        InternalResolution(int width) {
-            this.width = width;
+        private final float scale;
+        private final int percent;
+
+        InternalResolution(float scale, int percent) {
+            this.scale = scale;
+            this.percent = percent;
         }
 
-        public int width() {
-            return width;
+        public int targetWidth(int viewportWidth) {
+            int safeViewportWidth = Math.max(1, viewportWidth);
+            return Math.max(1, Math.min(MAX_RENDER_WIDTH, Math.round(safeViewportWidth * scale)));
+        }
+
+        public int percent() {
+            return percent;
         }
 
         public InternalResolution next() {

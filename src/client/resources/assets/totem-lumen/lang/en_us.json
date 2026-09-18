@@ -68,7 +68,7 @@
   "screen.totem-lumen.gi_quality": "GI quality: %s",
   "screen.totem-lumen.shadow_quality": "Shadow quality: %s",
   "screen.totem-lumen.ray_distance": "Ray distance: %s blocks",
-  "screen.totem-lumen.internal_resolution": "Internal resolution: %s (%s px)",
+  "screen.totem-lumen.internal_resolution": "Internal resolution: %s (%s%% viewport)",
   "screen.totem-lumen.reflections_enabled": "Reflections: %s",
   "screen.totem-lumen.water_reflections": "Water reflections: %s",
   "screen.totem-lumen.temporal_quality": "Temporal: %s",
