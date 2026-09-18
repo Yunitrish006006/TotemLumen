@@ -34,7 +34,7 @@ Alpha 40 carries Minecraft 26.2's resolved eight-step lunar phase all the way fr
 The Alpha 40 star field is analytic shader math and deliberately does not allocate a texture, storage buffer or extra compute pass.
 
 - `p13StarHash()` generates a stable pseudo-random distribution from a quantized sky cell. It does not use the per-frame GI seed, so holding the camera still never causes random star shimmer.
-- `p13StarSkyUv()` rotates the star dome with the captured P13 day phase, so the star pattern moves with the celestial cycle instead of remaining fixed to the world.
+- `p13StarSkyUv()` uses the same Z-axis celestial motion as the Sun/Moon path and inverse sky sampling, so the visible star pattern advances in the same direction as the moon instead of rotating around the old Y-axis.
 - Stars fade in as the sun drops below the horizon and fade out near the horizon to avoid a hard band of bright points at ground level.
 - Star size, brightness and warm/cool color temperature vary deterministically per cell. There is no temporal twinkle in Alpha 40 because temporal instability would pollute GI and reflection history.
 - Exact world-up sky-ambient sampling is guarded from the procedural star points so stars remain visual celestial sources rather than becoming an accidental fake point light on ordinary upward-facing block surfaces.
@@ -58,7 +58,7 @@ On the Overworld in `GI Composite`:
 3. verify waning and waxing quarters illuminate opposite halves of the disk;
 4. compare exposed surfaces at full, quarter, crescent and new moon and confirm directional moonlight decreases with the phase factor and reaches zero at new moon;
 5. confirm the moon path remains opposite the daytime sun path and disappears below the horizon during daytime;
-6. confirm stars are absent in daylight, fade in through dusk, remain stable while the camera is still, and move gradually with the day/night cycle;
+6. confirm stars are absent in daylight, fade in through dusk, remain stable while the camera is still, and move gradually in the same sky direction as the moon;
 7. confirm the star distribution is sparse and non-grid-like at the current low internal render resolution, with no obvious seam or bright horizon band;
 8. confirm roofs/walls and P15 clear/stained glass still occlude/filter direct moonlight correctly, and that the star field is visible through the existing sky transmission path;
 9. confirm reflective surfaces pick up the phase-shaped moon and star field through the existing P16 reflection pass;
