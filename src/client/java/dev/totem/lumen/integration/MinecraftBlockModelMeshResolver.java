@@ -351,7 +351,12 @@ public final class MinecraftBlockModelMeshResolver {
 
             int faceIndex = constantAxis * 2 + side;
             if (faces[faceIndex] != null) return null;
-            faces[faceIndex] = surfaces[quad];
+            faces[faceIndex] = canonicalizeCubeFaceSurface(
+                    quads,
+                    base,
+                    constantAxis,
+                    surfaces[quad]
+            );
         }
 
         for (QuadSurface face : faces) {
@@ -361,6 +366,46 @@ public final class MinecraftBlockModelMeshResolver {
                 faces[0], faces[1], faces[2], faces[3], faces[4], faces[5],
                 fallbackRoughness,
                 fallbackMetallic
+        );
+    }
+
+    private static QuadSurface canonicalizeCubeFaceSurface(
+            float[] quads,
+            int base,
+            int constantAxis,
+            QuadSurface source
+    ) {
+        int axisA = (constantAxis + 1) % 3;
+        int axisB = (constantAxis + 2) % 3;
+        float[] cornerU = new float[4];
+        float[] cornerV = new float[4];
+        boolean[] seen = new boolean[4];
+
+        for (int vertex = 0; vertex < 4; vertex++) {
+            float a = quads[base + vertex * 3 + axisA];
+            float b = quads[base + vertex * 3 + axisB];
+            if (!nearBoundary(a) || !nearBoundary(b)) {
+                return source;
+            }
+            int corner = (a > 0.5f ? 1 : 0) | (b > 0.5f ? 2 : 0);
+            if (seen[corner]) return source;
+            seen[corner] = true;
+            cornerU[corner] = source.u(vertex);
+            cornerV[corner] = source.v(vertex);
+        }
+
+        for (boolean present : seen) {
+            if (!present) return source;
+        }
+
+        // Canonical winding: 00, 10, 11, 01. Shader-side bilerp can now use axisA/axisB
+        // coordinates without depending on Minecraft/Fabric emitted vertex order.
+        return new QuadSurface(
+                source.spriteId(),
+                cornerU[0], cornerV[0],
+                cornerU[1], cornerV[1],
+                cornerU[3], cornerV[3],
+                cornerU[2], cornerV[2]
         );
     }
 
