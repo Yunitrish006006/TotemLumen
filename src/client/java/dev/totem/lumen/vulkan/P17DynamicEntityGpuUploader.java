@@ -3,6 +3,8 @@ package dev.totem.lumen.vulkan;
 import dev.totem.lumen.TotemLumenClient;
 import dev.totem.lumen.gpu.GpuDynamicEntityScene;
 import dev.totem.lumen.integration.EntityRenderGeometryCache;
+import dev.totem.lumen.integration.SpiderEyeEmissiveTextureRegistry;
+import net.minecraft.client.Minecraft;
 
 import java.nio.ByteBuffer;
 
@@ -17,6 +19,7 @@ public final class P17DynamicEntityGpuUploader {
     private static volatile long lastBaseByteOffset = -1L;
     private static volatile long lastCopyBytes;
     private static long lastPackedRevision = Long.MIN_VALUE;
+    private static long lastPackedSpiderEyeRevision = Long.MIN_VALUE;
     private static boolean copyPending;
     private static int lastLoggedEntityCount = -1;
     private static int lastLoggedQuadCount = -1;
@@ -28,13 +31,17 @@ public final class P17DynamicEntityGpuUploader {
 
     /** Force-packs the current entity cache during a full scene rebuild. */
     public static synchronized void pack(ByteBuffer buffer) {
+        ensureSpiderEyeTexture();
         packState(buffer, EntityRenderGeometryCache.sceneState());
     }
 
     /** Packs only when entity movement/pose/lifecycle changed since the previous upload. */
     public static synchronized boolean packIfDirty(ByteBuffer buffer) {
+        ensureSpiderEyeTexture();
         EntityRenderGeometryCache.SceneState state = EntityRenderGeometryCache.sceneState();
-        if (state.revision() == lastPackedRevision) return false;
+        long spiderEyeRevision = SpiderEyeEmissiveTextureRegistry.revision();
+        if (state.revision() == lastPackedRevision
+                && spiderEyeRevision == lastPackedSpiderEyeRevision) return false;
         packState(buffer, state);
         invalidateHistoryRead(buffer);
         return true;
@@ -51,11 +58,13 @@ public final class P17DynamicEntityGpuUploader {
         GpuDynamicEntityScene.PackResult packed = GpuDynamicEntityScene.pack(
                 buffer,
                 entityBaseWord,
-                state.entities()
+                state.entities(),
+                SpiderEyeEmissiveTextureRegistry.image()
         );
         lastBaseByteOffset = (long) entityBaseWord * Integer.BYTES;
         lastCopyBytes = packed.usedBytes();
         lastPackedRevision = state.revision();
+        lastPackedSpiderEyeRevision = SpiderEyeEmissiveTextureRegistry.revision();
         copyPending = true;
 
         if (lastLoggedEntityCount != packed.entityCount()
@@ -84,6 +93,13 @@ public final class P17DynamicEntityGpuUploader {
                     packed.overflowAssignments(),
                     GpuDynamicEntityScene.MAX_ENTITIES_PER_SECTION
             );
+        }
+    }
+
+    private static void ensureSpiderEyeTexture() {
+        var minecraft = Minecraft.getInstance();
+        if (minecraft != null) {
+            SpiderEyeEmissiveTextureRegistry.ensureLoaded(minecraft.getResourceManager());
         }
     }
 
