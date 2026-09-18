@@ -39,6 +39,7 @@ final class VulkanPipelineCacheStore {
     private static long activePipelineCache;
     private static boolean activeLoadedFromDisk;
     private static boolean dirty;
+    private static boolean shuttingDown;
 
     private VulkanPipelineCacheStore() {
     }
@@ -50,6 +51,9 @@ final class VulkanPipelineCacheStore {
             String shaderName
     ) {
         synchronized (LOCK) {
+            if (shuttingDown) {
+                return createWithoutCache(device, pipelineInfo, pipelineOut, shaderName);
+            }
             try {
                 ensureSessionCache(device, shaderName);
             } catch (Throwable cacheFailure) {
@@ -97,6 +101,7 @@ final class VulkanPipelineCacheStore {
 
     static void shutdown() {
         synchronized (LOCK) {
+            shuttingDown = true;
             if (activePipelineCache == 0L) {
                 resetSessionState();
                 return;
