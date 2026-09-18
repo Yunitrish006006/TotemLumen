@@ -166,19 +166,39 @@ public final class P14ShaderCompileVerifier {
         );
         requireSourceMarker(
                 source,
-                "advance = candidate.distance + 0.002;",
-                label + " exact-interface advance"
+                "advance = candidate.distance + exitEpsilon;",
+                label + " runtime exact-interface advance"
         );
         requireSourceMarker(
                 source,
-                "if (materialId == P14E_LAVA_MATERIAL_ID) return vec4(1.00, 0.12, 0.015, 1.0);",
-                label + " lava emission"
+                "uintBitsToFloat(scene.data[64])",
+                label + " runtime water tint mix"
+        );
+        requireSourceMarker(
+                source,
+                "uintBitsToFloat(scene.data[65])",
+                label + " runtime water transmission"
+        );
+        requireSourceMarker(
+                source,
+                "uintBitsToFloat(scene.data[78])",
+                label + " runtime lava emission color"
+        );
+        requireSourceMarker(
+                source,
+                "uintBitsToFloat(scene.data[81])",
+                label + " runtime lava emission strength"
         );
         if (reflectionPass) {
             requireSourceMarker(
                     source,
-                    "if (hit.materialId == P14E_WATER_MATERIAL_ID) return vec2(0.025, 0.0);",
-                    label + " low-roughness water reflection"
+                    "clamp(uintBitsToFloat(scene.data[85]), 0.0, 1.0)",
+                    label + " runtime water reflection roughness"
+            );
+            requireSourceMarker(
+                    source,
+                    "max(uintBitsToFloat(scene.data[87]), 0.0)",
+                    label + " runtime water reflection scale"
             );
             requireSourceMarker(
                     source,
@@ -188,8 +208,8 @@ public final class P14ShaderCompileVerifier {
         }
         System.out.println(
                 "P14E fluid-optics verification PASS (" + label + "): "
-                        + "waterTransmission=true, unlitTint=true, lavaEmission=true, exactWaterReflection="
-                        + reflectionPass
+                        + "waterTransmission=runtime, unlitTint=true, lavaEmission=runtime, "
+                        + "exactWaterReflection=" + reflectionPass
         );
     }
 
@@ -198,6 +218,37 @@ public final class P14ShaderCompileVerifier {
         requireSourceMarker(source, "float configuredDistance = uintBitsToFloat(scene.data[43]);", "P16 runtime distance");
         requireSourceMarker(source, "for (uint bounce = 0u; bounce < 2u; bounce++)", "P16 iterative bounce loop");
         requireSourceMarker(source, "HitResult nextRawHit = traceRayLimited(", "P16 secondary raw surface trace");
+        requireSourceMarker(
+                source,
+                "max(uintBitsToFloat(scene.data[55]), 0.0)",
+                "P16 runtime rough-reflection spread"
+        );
+        requireSourceMarker(
+                source,
+                "clamp(uintBitsToFloat(scene.data[56]), 0.0, 1.0)",
+                "P16 runtime roughness energy"
+        );
+        requireSourceMarker(
+                source,
+                "max(uintBitsToFloat(scene.data[57]), 0.0)",
+                "P16 runtime dielectric energy"
+        );
+        requireSourceMarker(
+                source,
+                "max(uintBitsToFloat(scene.data[58]), 0.0)",
+                "P16 runtime metal energy"
+        );
+        requireSourceMarker(
+                source,
+                "max(uintBitsToFloat(scene.data[59]), 0.0)",
+                "P16 runtime normal bias"
+        );
+        requireSourceMarker(
+                source,
+                "max(uintBitsToFloat(scene.data[60]), 0.0)",
+                "P16 runtime direction bias"
+        );
+        requireSourceMarker(source, "* reflectionScale;", "P16 per-material reflection scale");
         requireSourceMarker(
                 source,
                 "if (scene.data[46] == 0u || scene.data[42] == 0u) return;",
@@ -210,6 +261,7 @@ public final class P14ShaderCompileVerifier {
         );
         System.out.println(
                 "P16 runtime-settings verification PASS: bounces=1..2, distance=runtime, "
+                        + "energy=runtime, spread=runtime, bias=runtime, materialScale=runtime, "
                         + "masterToggle=true, waterToggle=true, iterative=true"
         );
     }
@@ -295,8 +347,8 @@ public final class P14ShaderCompileVerifier {
         if (reflectionPass) {
             requireSourceMarker(
                     source,
-                    "return p18CubeFallbackSurfaceProperties(params);",
-                    label + " textured-cube fallback optics"
+                    "vec2 p18CubeFallbackSurfaceProperties(uint surfaceSetId)",
+                    label + " textured-cube fallback optics helper"
             );
         }
         System.out.println(
@@ -378,6 +430,16 @@ public final class P14ShaderCompileVerifier {
         );
         requireSourceMarker(
                 source,
+                "float textureReflectionScale = uintBitsToFloat(scene.data[descriptor + 16u]);",
+                label + " runtime texture reflection scale"
+        );
+        requireSourceMarker(
+                source,
+                "surface.reflectionScale *= textureReflectionScale;",
+                label + " composed texture/block reflection scale"
+        );
+        requireSourceMarker(
+                source,
                 "surface.emission = surface.albedo",
                 label + " LabPBR per-texel emission"
         );
@@ -425,9 +487,44 @@ public final class P14ShaderCompileVerifier {
         requireSourceMarker(source, "int denoiseRadius = int(min(scene.data[50], 2u));", "runtime denoise radius");
         requireSourceMarker(source, "for (int offsetY = -2; offsetY <= 2; offsetY++)", "5x5 denoise bound");
         requireSourceMarker(source, "vec3 tlRuntimeDirectionalTransmission(", "production soft-shadow helper");
+        requireSourceMarker(source, "const uint LOOKUP_BASE = 96u;", "stable 96-word header ABI");
+        requireSourceMarker(
+                source,
+                "const uint MATERIAL_EMISSION_WORDS_PER_RECORD = 16u;",
+                "stable 16-word runtime material record"
+        );
+        requireSourceMarker(
+                source,
+                "uintBitsToFloat(scene.data[54]) * intensity",
+                "runtime local-light gain"
+        );
+        requireSourceMarker(
+                source,
+                "uintBitsToFloat(scene.data[83])",
+                "runtime surface-emission gain"
+        );
+        requireSourceMarker(
+                source,
+                "vec4 p15MaterialTransmission(uint materialId, uint geometryCode)",
+                "material-table transmission"
+        );
+        requireSourceMarker(
+                source,
+                "uint maxLayers = clamp(scene.data[61], 1u, 8u);",
+                "runtime transmission layer cap"
+        );
+        requireSourceMarker(
+                source,
+                "float exitEpsilon = max(uintBitsToFloat(scene.data[62]), 0.00001);",
+                "runtime transmission epsilon"
+        );
+        if (source.contains("vec3 p15TintRgb(")) {
+            throw new IllegalStateException("runtime shader still contains hard-coded stained-glass tint table");
+        }
         System.out.println(
                 "Renderer quality-settings verification PASS: gi=1/2/4, shadows=1/2/4, "
-                        + "temporal=off/16/64, denoiseRadius=0/1/2"
+                        + "temporal=off/16/64, denoiseRadius=0/1/2, stableHeader=96, "
+                        + "materialRecord=16, transmission=data, localLight=data"
         );
     }
 
