@@ -34,8 +34,10 @@ final class P18TexturedSurfaceShaderPatch {
                 const uint P18_TEXTURE_ABI_VERSION = %du;
                 const uint P18_TEXTURE_DESCRIPTOR_WORDS = %du;
                 const uint P18_TEXTURE_DESCRIPTOR_BASE = %du;
+                const uint P18_TEXTURE_ANIMATION_POOL_BASE = %du;
                 const uint P18_TEXTURE_TEXEL_POOL_BASE = %du;
                 const uint P18_TEXTURE_TEXEL_WORDS = %du;
+                const uint P18_TEXTURE_FLAG_ANIMATED = %du;
                 const uint P18_P14_MAX_STORAGE_WORDS = %du;
                 const uint P18_P17_MAX_STORAGE_WORDS = %du;
                 const uint P18_P14E_MAX_STORAGE_WORDS = %du;
@@ -56,6 +58,25 @@ final class P18TexturedSurfaceShaderPatch {
                     return p18SurfaceSceneBase() + P18_SURFACE_MAX_STORAGE_WORDS;
                 }
 
+                uint p18CurrentFrameTexelOffset(uint textureBase, uint descriptor) {
+                    uint texelOffset = scene.data[descriptor];
+                    uint width = scene.data[descriptor + 1u];
+                    uint height = scene.data[descriptor + 2u];
+                    uint flags = scene.data[descriptor + 3u];
+                    uint timelineLength = scene.data[descriptor + 10u];
+                    if ((flags & P18_TEXTURE_FLAG_ANIMATED) == 0u || timelineLength == 0u) {
+                        return texelOffset;
+                    }
+
+                    uint timelineOffset = scene.data[descriptor + 9u];
+                    uint timelineIndex = scene.data[53] % timelineLength;
+                    uint packedFrame = scene.data[
+                        textureBase + P18_TEXTURE_ANIMATION_POOL_BASE
+                        + timelineOffset + timelineIndex
+                    ];
+                    return texelOffset + packedFrame * width * height;
+                }
+
                 uint p18SampleAlbedoArgb(uint textureHandle, vec2 uv) {
                     if (textureHandle == 0u || textureHandle > 4095u) return 0xFFFFFFFFu;
                     uint textureBase = p18TextureSceneBase();
@@ -63,11 +84,11 @@ final class P18TexturedSurfaceShaderPatch {
 
                     uint descriptor = textureBase + P18_TEXTURE_DESCRIPTOR_BASE
                             + textureHandle * P18_TEXTURE_DESCRIPTOR_WORDS;
-                    uint texelOffset = scene.data[descriptor];
                     uint width = scene.data[descriptor + 1u];
                     uint height = scene.data[descriptor + 2u];
                     if (width == 0u || height == 0u) return 0xFFFFFFFFu;
 
+                    uint texelOffset = p18CurrentFrameTexelOffset(textureBase, descriptor);
                     vec2 wrapped = fract(uv);
                     uint x = min(width - 1u, uint(floor(wrapped.x * float(width))));
                     uint y = min(height - 1u, uint(floor(wrapped.y * float(height))));
@@ -217,8 +238,10 @@ final class P18TexturedSurfaceShaderPatch {
                 GpuPbrTextureScene.ABI_VERSION,
                 GpuPbrTextureScene.DESCRIPTOR_WORDS_PER_RECORD,
                 GpuPbrTextureScene.DESCRIPTOR_BASE_WORD,
+                GpuPbrTextureScene.ANIMATION_POOL_BASE_WORD,
                 GpuPbrTextureScene.TEXEL_POOL_BASE_WORD,
                 GpuPbrTextureScene.TEXEL_WORDS_PER_RECORD,
+                GpuPbrTextureScene.FLAG_ANIMATED,
                 P14ModelMeshGpuLayout.MAX_STORAGE_WORDS,
                 GpuDynamicEntityScene.MAX_STORAGE_WORDS,
                 GpuFluidScene.MAX_STORAGE_WORDS,
