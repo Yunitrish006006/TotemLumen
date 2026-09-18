@@ -27,7 +27,9 @@ final class QuadSurfaceRegistryTest {
                 "minecraft:block/test",
                 0, 0, 1, 0, 1, 1, 0, 1
         );
-        var set = new BlockSurfaceSetRegistry.CubeSurfaceSet(x, x, x, x, x, x);
+        var set = new BlockSurfaceSetRegistry.CubeSurfaceSet(
+                x, x, x, x, x, x, 0.8f, 0.0f
+        );
 
         int first = BlockSurfaceSetRegistry.register(set);
         int second = BlockSurfaceSetRegistry.register(set);
