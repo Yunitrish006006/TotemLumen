@@ -147,38 +147,6 @@ final class P12GiShaderPatch {
                     return vec3(0.032, 0.042, 0.060) * (0.82 + 0.18 * up);
                 }
 
-                float p13DirectionalVisibility(
-                        vec3 hitPoint,
-                        vec3 normal,
-                        vec3 lightDirection
-                ) {
-                    uint shadowSamples = clamp(scene.data[45], 1u, 4u);
-                    vec3 helper = abs(lightDirection.y) < 0.95
-                            ? vec3(0.0, 1.0, 0.0)
-                            : vec3(1.0, 0.0, 0.0);
-                    vec3 tangent = normalize(cross(helper, lightDirection));
-                    vec3 bitangent = normalize(cross(lightDirection, tangent));
-                    float visible = 0.0;
-                    float valid = 0.0;
-
-                    for (uint sampleIndex = 0u; sampleIndex < 4u; sampleIndex++) {
-                        if (sampleIndex >= shadowSamples) break;
-                        vec2 offset = SOFT_SHADOW_OFFSETS[int(sampleIndex)];
-                        vec3 sampleDirection = normalize(
-                            lightDirection
-                            + tangent * (offset.x * SOFT_SHADOW_ANGULAR_RADIUS)
-                            + bitangent * (offset.y * SOFT_SHADOW_ANGULAR_RADIUS)
-                        );
-                        if (dot(normal, sampleDirection) <= 0.0) continue;
-                        valid += 1.0;
-                        vec3 shadowOrigin = hitPoint + normal * 0.025 + sampleDirection * 0.01;
-                        HitResult blocker = traceRay(shadowOrigin, sampleDirection);
-                        if (blocker.hit == 0u) visible += 1.0;
-                    }
-
-                    return valid > 0.0 ? visible / valid : 0.0;
-                }
-
                 vec3 p13EnvironmentSurfaceRadiance(
                         HitResult hit,
                         vec3 rayOrigin,
@@ -197,7 +165,9 @@ final class P12GiShaderPatch {
                         float sunStrength = p13SunStrength(sunDirection);
                         float visibility = 0.0;
                         if (nDotL > 0.0 && sunStrength > 0.0001) {
-                            visibility = p13DirectionalVisibility(hitPoint, normal, sunDirection);
+                            vec3 shadowOrigin = hitPoint + normal * 0.025 + sunDirection * 0.01;
+                            HitResult blocker = traceRay(shadowOrigin, sunDirection);
+                            visibility = blocker.hit == 0u ? 1.0 : 0.0;
                         }
 
                         vec3 moonDirection = p13MoonDirection();
@@ -205,7 +175,9 @@ final class P12GiShaderPatch {
                         float moonStrength = p13MoonStrength(moonDirection);
                         float moonVisibility = 0.0;
                         if (moonNDotL > 0.0 && moonStrength > 0.0001) {
-                            moonVisibility = p13DirectionalVisibility(hitPoint, normal, moonDirection);
+                            vec3 moonShadowOrigin = hitPoint + normal * 0.025 + moonDirection * 0.01;
+                            HitResult moonBlocker = traceRay(moonShadowOrigin, moonDirection);
+                            moonVisibility = moonBlocker.hit == 0u ? 1.0 : 0.0;
                         }
 
                         vec3 skyAmbient = p13SkyRadiance(normal) * 0.62;
