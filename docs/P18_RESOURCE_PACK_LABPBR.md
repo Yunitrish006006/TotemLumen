@@ -161,6 +161,27 @@ This alpha test occurs after geometric triangle/AABB intersection but before the
 accepted, so primary rays, Sun/Moon shadows, local-light shadows, GI and P16 reflection see the same
 coverage silhouette. True glass/water volume/interface transmission remains owned by P15/P14E.
 
+## Animated textures
+
+Animated Minecraft textures are part of the P18 texture scene rather than a per-frame CPU upload.
+
+For any observed albedo, normal, or specular resource with a `.png.mcmeta` animation section, Totem Lumen now retains:
+
+- frame width/height;
+- default `frametime`;
+- explicit `frames` ordering;
+- per-frame `time` overrides;
+- the `interpolate` request for diagnostics;
+- independent timelines for albedo, normal and specular/emission maps.
+
+If a LabPBR `_n` or `_s` map has no sidecar metadata but matches the albedo frame grid, it inherits the albedo animation. This covers packs where auxiliary maps rely on the base texture animation.
+
+GPU residency stores unique frame combinations once plus a bounded per-tick lookup timeline. The current world game tick is sent in scene header word 53, so alpha cutout, albedo, normal, roughness/metal and LabPBR emission all select the same current animation state without re-uploading the whole P18 texture tail every tick.
+
+The current baseline uses discrete frame selection. Minecraft `interpolate: true` is detected and retained but sub-tick blending is deferred; frame order and timing are still preserved.
+
+This path is intended to cover animated block/model surfaces such as campfire/flame-style textures as long as Minecraft's resolved model geometry exposes the sprite to the existing P14/P18 capture path.
+
 ## P18D — fidelity follow-up
 
 After static blocks are correct:
