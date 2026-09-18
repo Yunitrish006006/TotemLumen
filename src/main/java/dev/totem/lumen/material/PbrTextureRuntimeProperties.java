@@ -12,10 +12,28 @@ public record PbrTextureRuntimeProperties(
         float labPbrEmissionScale,
         float roughnessScale,
         float normalStrength,
-        float alphaCutoff
+        float alphaCutoff,
+        float reflectionScale
 ) {
     public static final PbrTextureRuntimeProperties DEFAULT =
-            new PbrTextureRuntimeProperties(1.0f, 1.0f, 1.0f, 1.0f, 0.0f);
+            new PbrTextureRuntimeProperties(1.0f, 1.0f, 1.0f, 1.0f, 0.0f, 1.0f);
+
+    public PbrTextureRuntimeProperties(
+            float baselineEmissionScale,
+            float labPbrEmissionScale,
+            float roughnessScale,
+            float normalStrength,
+            float alphaCutoff
+    ) {
+        this(
+                baselineEmissionScale,
+                labPbrEmissionScale,
+                roughnessScale,
+                normalStrength,
+                alphaCutoff,
+                1.0f
+        );
+    }
 
     public PbrTextureRuntimeProperties {
         baselineEmissionScale = finiteRange(
@@ -27,6 +45,7 @@ public record PbrTextureRuntimeProperties(
         roughnessScale = finiteRange(roughnessScale, 0.0f, 4.0f, "roughnessScale");
         normalStrength = finiteRange(normalStrength, 0.0f, 4.0f, "normalStrength");
         alphaCutoff = finiteRange(alphaCutoff, 0.0f, 1.0f, "alphaCutoff");
+        reflectionScale = finiteRange(reflectionScale, 0.0f, 4.0f, "reflectionScale");
     }
 
     private static float finiteRange(float value, float min, float max, String name) {
