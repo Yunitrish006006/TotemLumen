@@ -2,6 +2,8 @@ package dev.totem.lumen.vulkan;
 
 import dev.totem.lumen.TotemLumenClient;
 import dev.totem.lumen.geometry.BlockModelMeshRegistry;
+import dev.totem.lumen.geometry.QuadSurface;
+import dev.totem.lumen.material.PbrTextureHandleRegistry;
 
 import java.nio.ByteBuffer;
 
@@ -36,9 +38,9 @@ public final class P14ModelMeshGpuUploader {
 
     private static void packSnapshot(ByteBuffer buffer, BlockModelMeshRegistry.Snapshot snapshot) {
         int pixelBaseWord = buffer.getInt(3 * Integer.BYTES);
-        int width = buffer.getInt(4 * Integer.BYTES);
-        int height = buffer.getInt(5 * Integer.BYTES);
-        int pixelCount = Math.multiplyExact(width, height);
+        int capacityWidth = buffer.getInt(51 * Integer.BYTES);
+        int capacityHeight = buffer.getInt(52 * Integer.BYTES);
+        int pixelCount = Math.multiplyExact(capacityWidth, capacityHeight);
         int modelBaseWord = Math.addExact(pixelBaseWord, pixelCount);
         int descriptorBaseWord = modelBaseWord;
         int quadBaseWord = Math.addExact(descriptorBaseWord, P14ModelMeshGpuLayout.MESH_DESCRIPTOR_WORDS);
@@ -67,10 +69,45 @@ public final class P14ModelMeshGpuUploader {
             putWord(buffer, descriptor, mesh.firstQuad());
             putWord(buffer, descriptor + 1, mesh.quadCount());
 
-            int quadWord = quadBaseWord
-                    + mesh.firstQuad() * P14ModelMeshGpuLayout.QUAD_WORDS_PER_RECORD;
-            for (float position : mesh.positions()) {
-                putWord(buffer, quadWord++, Float.floatToRawIntBits(position));
+            float[] positions = mesh.positions();
+            QuadSurface[] surfaces = mesh.surfaces();
+            for (int quad = 0; quad < mesh.quadCount(); quad++) {
+                int quadWord = quadBaseWord
+                        + (mesh.firstQuad() + quad)
+                        * P14ModelMeshGpuLayout.QUAD_WORDS_PER_RECORD;
+                int positionOffset = quad * BlockModelMeshRegistry.FLOATS_PER_QUAD;
+                for (int word = 0; word < P14ModelMeshGpuLayout.QUAD_POSITION_WORDS; word++) {
+                    putWord(
+                            buffer,
+                            quadWord + word,
+                            Float.floatToRawIntBits(positions[positionOffset + word])
+                    );
+                }
+
+                QuadSurface surface = surfaces[quad];
+                int uvWord = quadWord + P14ModelMeshGpuLayout.QUAD_UV_BASE_WORD;
+                for (int vertex = 0; vertex < 4; vertex++) {
+                    putWord(
+                            buffer,
+                            uvWord + vertex * 2,
+                            Float.floatToRawIntBits(surface.u(vertex))
+                    );
+                    putWord(
+                            buffer,
+                            uvWord + vertex * 2 + 1,
+                            Float.floatToRawIntBits(surface.v(vertex))
+                    );
+                }
+
+                int textureHandle = surface.textured()
+                        ? PbrTextureHandleRegistry.handleFor(surface.spriteId())
+                        : 0;
+                if (textureHandle < 0) textureHandle = 0;
+                putWord(
+                        buffer,
+                        quadWord + P14ModelMeshGpuLayout.QUAD_TEXTURE_HANDLE_WORD,
+                        textureHandle
+                );
             }
         }
 

@@ -6,6 +6,7 @@ import dev.totem.lumen.vulkan.P14EFluidGpuUploader;
 import dev.totem.lumen.vulkan.P14ModelMeshGpuUploader;
 import dev.totem.lumen.vulkan.P16MultipassReflection;
 import dev.totem.lumen.vulkan.P17DynamicEntityGpuUploader;
+import dev.totem.lumen.vulkan.P18PbrTextureGpuUploader;
 import dev.totem.lumen.vulkan.resource.VulkanOwnedBuffer;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.vulkan.VK10;
@@ -34,6 +35,7 @@ public abstract class P5StableLookupRendererMixin {
         P14ModelMeshGpuUploader.pack(buffer);
         P17DynamicEntityGpuUploader.pack(buffer);
         P14EFluidGpuUploader.pack(buffer, sections);
+        P18PbrTextureGpuUploader.pack(buffer);
     }
 
     @Redirect(
@@ -51,6 +53,7 @@ public abstract class P5StableLookupRendererMixin {
         boolean modelChanged = P14ModelMeshGpuUploader.packIfDirty(upload.mappedView());
         boolean entityChanged = P17DynamicEntityGpuUploader.packIfDirty(upload.mappedView());
         boolean fluidChanged = P14EFluidGpuUploader.packIfDirty(upload.mappedView());
+        boolean pbrChanged = P18PbrTextureGpuUploader.packIfDirty(upload.mappedView());
         upload.flush(offset, length);
 
         boolean fullSceneUpload = length > CAMERA_UPLOAD_MAX_BYTES;
@@ -73,6 +76,13 @@ public abstract class P5StableLookupRendererMixin {
                     upload,
                     P14EFluidGpuUploader.lastBaseByteOffset(),
                     P14EFluidGpuUploader.lastCopyBytes()
+            );
+        }
+        if (fullSceneUpload || pbrChanged) {
+            flushTail(
+                    upload,
+                    P18PbrTextureGpuUploader.lastBaseByteOffset(),
+                    P18PbrTextureGpuUploader.lastCopyBytes()
             );
         }
     }
@@ -117,6 +127,15 @@ public abstract class P5StableLookupRendererMixin {
                     destinationBuffer,
                     P14EFluidGpuUploader.lastBaseByteOffset(),
                     P14EFluidGpuUploader.lastCopyBytes()
+            );
+        }
+        if (P18PbrTextureGpuUploader.consumeCopyPending()) {
+            copyTail(
+                    commandBuffer,
+                    sourceBuffer,
+                    destinationBuffer,
+                    P18PbrTextureGpuUploader.lastBaseByteOffset(),
+                    P18PbrTextureGpuUploader.lastCopyBytes()
             );
         }
     }

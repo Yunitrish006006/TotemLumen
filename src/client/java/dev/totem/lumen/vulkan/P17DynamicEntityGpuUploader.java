@@ -42,9 +42,9 @@ public final class P17DynamicEntityGpuUploader {
 
     private static void packState(ByteBuffer buffer, EntityRenderGeometryCache.SceneState state) {
         int pixelBaseWord = buffer.getInt(3 * Integer.BYTES);
-        int width = buffer.getInt(4 * Integer.BYTES);
-        int height = buffer.getInt(5 * Integer.BYTES);
-        int pixelCount = Math.multiplyExact(width, height);
+        int capacityWidth = buffer.getInt(51 * Integer.BYTES);
+        int capacityHeight = buffer.getInt(52 * Integer.BYTES);
+        int pixelCount = Math.multiplyExact(capacityWidth, capacityHeight);
         int p14BaseWord = Math.addExact(pixelBaseWord, pixelCount);
         int entityBaseWord = Math.addExact(p14BaseWord, P14ModelMeshGpuLayout.MAX_STORAGE_WORDS);
 

@@ -86,6 +86,9 @@ final class P16ReflectionPassShader {
                         float metallic = float((params >> 4u) & 0xFu) / 15.0;
                         return vec2(roughness, metallic);
                     }
+                    if (family == 0xB000u) {
+                        return p18CubeFallbackSurfaceProperties(params);
+                    }
                     if (family == 0x8000u) {
                         return vec2(0.05, 0.0);
                     }
@@ -147,10 +150,21 @@ final class P16ReflectionPassShader {
                     for (uint bounce = 0u; bounce < 2u; bounce++) {
                         if (bounce >= maxBounces) break;
 
-                        vec2 surface = p16SurfaceProperties(currentHit);
-                        float roughness = surface.x;
-                        float metallic = surface.y;
-                        vec3 normal = resolvedSurfaceNormal(currentHit, currentDirection);
+                        P18SurfaceSample p18Surface = p18ResolveSurface(
+                            currentHit,
+                            currentOrigin,
+                            currentDirection
+                        );
+                        vec2 fallbackSurface = p16SurfaceProperties(currentHit);
+                        float roughness = p18Surface.textured != 0u
+                                ? p18Surface.roughness
+                                : fallbackSurface.x;
+                        float metallic = p18Surface.textured != 0u
+                                ? p18Surface.metallic
+                                : fallbackSurface.y;
+                        vec3 normal = p18Surface.textured != 0u
+                                ? p18Surface.normal
+                                : resolvedSurfaceNormal(currentHit, currentDirection);
                         vec3 hitPoint = currentOrigin + currentDirection * currentHit.distance;
                         vec3 reflectionDirection = p16RoughReflectionDirection(
                             currentHit,
@@ -160,8 +174,12 @@ final class P16ReflectionPassShader {
                         );
                         vec3 reflectionOrigin = hitPoint + normal * 0.035 + reflectionDirection * 0.01;
 
-                        vec3 baseColor = materialColor(currentHit.materialId);
-                        vec3 f0 = mix(vec3(0.04), baseColor, metallic);
+                        vec3 baseColor = p18Surface.textured != 0u
+                                ? p18Surface.albedo
+                                : materialColor(currentHit.materialId);
+                        vec3 f0 = p18Surface.textured != 0u
+                                ? p18Surface.f0
+                                : mix(vec3(0.04), baseColor, metallic);
                         float viewCosine = clamp(
                             dot(normal, -normalize(currentDirection)),
                             0.0,
@@ -287,7 +305,8 @@ final class P16ReflectionPassShader {
             source = P14CommonGeometryPatch.apply(source);
             source = P14GeometryCorrectionPatch.apply(source);
             source = P13SkyOcclusionPatch.apply(source);
-            return RendererQualityShaderPatch.apply(source);
+            source = RendererQualityShaderPatch.apply(source);
+            return P18LabPbrShadingPatch.apply(source);
         } catch (ReflectiveOperationException failure) {
             throw new IllegalStateException("Failed to access P5 base shader for P16 split pass", failure);
         }

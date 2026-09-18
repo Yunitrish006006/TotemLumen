@@ -40,7 +40,7 @@ final class P14EFluidShaderPatch {
                 const uint P14E_INVALID_INDEX = 0xFFFFFFFFu;
 
                 uint p14eFluidSceneBase() {
-                    uint pixelCount = scene.data[4] * scene.data[5];
+                    uint pixelCount = scene.data[51] * scene.data[52];
                     return scene.data[3] + pixelCount
                             + P14E_P14_MAX_STORAGE_WORDS
                             + P14E_P17_MAX_STORAGE_WORDS;

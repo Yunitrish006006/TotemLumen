@@ -5,6 +5,7 @@ import dev.totem.lumen.gui.TotemLumenVideoSettingsIntegration;
 import dev.totem.lumen.integration.ClientLightingWorldRules;
 import dev.totem.lumen.integration.EntityRenderGeometryCache;
 import dev.totem.lumen.integration.FluidRenderGeometryCache;
+import dev.totem.lumen.integration.LabPbrTextureRegistry;
 import dev.totem.lumen.integration.MinecraftBlockModelMeshResolver;
 import dev.totem.lumen.integration.P13EnvironmentCapture;
 import dev.totem.lumen.integration.SceneExtractionBridge;
@@ -102,6 +103,7 @@ public final class TotemLumenClient implements ClientModInitializer {
             // P14C watches Minecraft's model-set identity independently of block updates so a
             // resource-pack reload schedules bounded section re-extraction even in a static world.
             MinecraftBlockModelMeshResolver.checkModelSetReload();
+            LabPbrTextureRegistry.tick(client);
             SceneExtractionBridge.tick();
             P5StableLookupRenderer.tickLifecycle(client);
             RendererCompileProgressNotifier.tick(client);

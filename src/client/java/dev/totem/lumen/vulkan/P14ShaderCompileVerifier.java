@@ -21,12 +21,18 @@ public final class P14ShaderCompileVerifier {
         verifyP14EFluidDebugView(baseSource, "full base pass");
         verifyP14EFluidOptics(baseSource, "full base pass", false);
         verifyRuntimeQualitySettings(baseSource);
+        verifyFixedCapacitySceneTails(baseSource, "full base pass");
+        verifyP18TexturedSurfaces(baseSource, "full base pass", false);
+        verifyP18LabPbrShading(baseSource, "full base pass", false);
 
         String p17Source = P17EnhancedBasePipeline.buildSourceForVerification();
         verifyP14EFluidSource(p17Source, "P17 enhanced base pass");
         verifyP14EFluidDebugView(p17Source, "P17 enhanced base pass");
         verifyP14EFluidOptics(p17Source, "P17 enhanced base pass", false);
         verifyP17DynamicEntitySource(p17Source, "enhanced base pass");
+        verifyFixedCapacitySceneTails(p17Source, "P17 enhanced base pass");
+        verifyP18TexturedSurfaces(p17Source, "P17 enhanced base pass", false);
+        verifyP18LabPbrShading(p17Source, "P17 enhanced base pass", false);
 
         String reflectionGeometry = P14EFluidShaderPatch.apply(P16ReflectionPassShader.build());
         String reflectionEntity = P17ShaderIntegration.apply(reflectionGeometry);
@@ -36,6 +42,9 @@ public final class P14ShaderCompileVerifier {
         verifyP14EFluidOptics(reflectionSource, "P16 reflection pass", true);
         verifyP16RuntimeSettings(reflectionSource);
         verifyP17DynamicEntitySource(reflectionSource, "P16 reflection pass");
+        verifyFixedCapacitySceneTails(reflectionSource, "P16 reflection pass");
+        verifyP18TexturedSurfaces(reflectionSource, "P16 reflection pass", true);
+        verifyP18LabPbrShading(reflectionSource, "P16 reflection pass", true);
 
         long compiler = Shaderc.shaderc_compiler_initialize();
         if (compiler == 0L) {
@@ -65,7 +74,8 @@ public final class P14ShaderCompileVerifier {
                 || source.contains("P14E_FLUID_ABI_VERSION")
                 || source.contains("P17_ENTITY_MATERIAL_ID")
                 || source.contains("p16ReflectionRgb")
-                || source.contains("temporalHistoryColor")) {
+                || source.contains("temporalHistoryColor")
+                || source.contains("P18_TEXTURE_ABI_VERSION")) {
             throw new IllegalStateException("Bootstrap shader accidentally contains staged renderer features");
         }
         if (source.length() > 16_000) {
@@ -200,6 +210,163 @@ public final class P14ShaderCompileVerifier {
         System.out.println(
                 "P16 runtime-settings verification PASS: bounces=1..2, distance=runtime, "
                         + "masterToggle=true, waterToggle=true, iterative=true"
+        );
+    }
+
+    private static void verifyFixedCapacitySceneTails(String source, String label) {
+        requireSourceMarker(
+                source,
+                "uint pixelCount = scene.data[51] * scene.data[52];",
+                label + " fixed-capacity scene-tail base"
+        );
+        if (source.contains("uint pixelCount = scene.data[4] * scene.data[5];")) {
+            throw new IllegalStateException(
+                    label + " still derives a scene tail from active render extent"
+            );
+        }
+        System.out.println(
+                "Fixed-capacity scene-tail verification PASS (" + label
+                        + "): capacityWords=51/52, activeExtentTailBase=false"
+        );
+    }
+
+    private static void verifyP18TexturedSurfaces(
+            String source,
+            String label,
+            boolean reflectionPass
+    ) {
+        requireSourceMarker(
+                source,
+                "const uint P18_TEXTURE_ABI_VERSION = 1u;",
+                label + " P18 texture ABI"
+        );
+        requireSourceMarker(
+                source,
+                "uint p18TextureSceneBase()",
+                label + " P18 texture scene base"
+        );
+        requireSourceMarker(
+                source,
+                "uint textureHandle = scene.data[quadWord + 20u];",
+                label + " P14 quad texture handle"
+        );
+        requireSourceMarker(
+                source,
+                "if (!p18AlphaAccept(textureHandle, surfaceUv, alphaSalt)) return;",
+                label + " mesh alpha coverage rejection"
+        );
+        requireSourceMarker(
+                source,
+                "if ((geometryCode & 0xF000u) == 0xB000u)",
+                label + " textured-cube fast path"
+        );
+        requireSourceMarker(
+                source,
+                "if (alpha == 0u) return false;",
+                label + " exact zero-alpha hole"
+        );
+        requireSourceMarker(
+                source,
+                "return coverageSample < float(alpha) / 255.0;",
+                label + " stochastic partial-alpha coverage"
+        );
+        requireSourceMarker(
+                source,
+                "if (!p18AlphaAccept(textureHandle, uv, alphaSalt))",
+                label + " textured-cube alpha coverage rejection"
+        );
+        if (reflectionPass) {
+            requireSourceMarker(
+                    source,
+                    "return p18CubeFallbackSurfaceProperties(params);",
+                    label + " textured-cube fallback optics"
+            );
+        }
+        System.out.println(
+                "P18 textured-surface verification PASS (" + label + "): "
+                        + "meshUv=true, cubeFastPath=true, alphaZeroReject=true, partialAlpha=stochastic, reflectionFallback="
+                        + reflectionPass
+        );
+    }
+
+    private static void verifyP18LabPbrShading(
+            String source,
+            String label,
+            boolean reflectionPass
+    ) {
+        requireSourceMarker(
+                source,
+                "struct P18SurfaceSample {",
+                label + " shared P18 surface sample"
+        );
+        requireSourceMarker(
+                source,
+                "P18SurfaceSample p18ResolveSurface(",
+                label + " P18 surface resolver"
+        );
+        requireSourceMarker(
+                source,
+                "surface.albedo = p18ArgbRgb(albedoArgb);",
+                label + " resource-pack albedo"
+        );
+        requireSourceMarker(
+                source,
+                "float normalZ = sqrt(max(",
+                label + " LabPBR normal Z reconstruction"
+        );
+        requireSourceMarker(
+                source,
+                "surface.ao = float(normalArgb & 255u) / 255.0;",
+                label + " LabPBR AO"
+        );
+        requireSourceMarker(
+                source,
+                "surface.roughness = (1.0 - smoothness) * (1.0 - smoothness);",
+                label + " LabPBR perceptual smoothness"
+        );
+        requireSourceMarker(
+                source,
+                "surface.f0 = vec3(float(reflectance) / 255.0);",
+                label + " LabPBR linear dielectric F0"
+        );
+        requireSourceMarker(
+                source,
+                "vec3 p18HardcodedMetalF0(uint metalCode, vec3 albedo)",
+                label + " LabPBR hardcoded metals"
+        );
+        requireSourceMarker(
+                source,
+                "surface.emission += surface.albedo * (emissionStrength * 1.6);",
+                label + " LabPBR emission"
+        );
+        if (!reflectionPass) {
+            requireSourceMarker(
+                    source,
+                    "vec3 p18Diffuse = p18Surface.albedo * (1.0 - p18Surface.metallic);",
+                    label + " local-light metal diffuse suppression"
+            );
+        }
+        if (reflectionPass) {
+            requireSourceMarker(
+                    source,
+                    "P18SurfaceSample p18Surface = p18ResolveSurface(",
+                    label + " P16 shared PBR sample"
+            );
+            requireSourceMarker(
+                    source,
+                    "? p18Surface.f0",
+                    label + " P16 LabPBR F0"
+            );
+            requireSourceMarker(
+                    source,
+                    "? p18Surface.normal",
+                    label + " P16 normal-map reflection normal"
+            );
+        }
+        System.out.println(
+                "P18 LabPBR shading verification PASS (" + label + "): "
+                        + "albedo=true, normal=true, ao=true, roughness=true, f0=true, "
+                        + "metal=true, emission=true, reflectionShared=" + reflectionPass
         );
     }
 

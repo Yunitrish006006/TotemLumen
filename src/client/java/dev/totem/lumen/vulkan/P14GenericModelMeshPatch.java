@@ -29,7 +29,7 @@ final class P14GenericModelMeshPatch {
 
         String helpers = """
                 uint p14ModelDescriptorBase() {
-                    uint pixelCount = scene.data[4] * scene.data[5];
+                    uint pixelCount = scene.data[51] * scene.data[52];
                     return scene.data[3] + pixelCount;
                 }
 
@@ -107,7 +107,7 @@ final class P14GenericModelMeshPatch {
                     vec3 blockOrigin = vec3(voxel);
                     uint quadPool = p14ModelQuadBase();
                     for (uint quadIndex = 0u; quadIndex < quadCount; quadIndex++) {
-                        uint quadWord = quadPool + (firstQuad + quadIndex) * 12u;
+                        uint quadWord = quadPool + (firstQuad + quadIndex) * 21u;
                         vec3 v0 = blockOrigin + p14ModelVertex(quadWord);
                         vec3 v1 = blockOrigin + p14ModelVertex(quadWord + 3u);
                         vec3 v2 = blockOrigin + p14ModelVertex(quadWord + 6u);
