@@ -22,6 +22,7 @@ public final class P14ShaderCompileVerifier {
         verifyP14EFluidOptics(baseSource, "full base pass", false);
         verifyRuntimeQualitySettings(baseSource);
         verifyFixedCapacitySceneTails(baseSource, "full base pass");
+        verifyP18TexturedSurfaces(baseSource, "full base pass", false);
 
         String p17Source = P17EnhancedBasePipeline.buildSourceForVerification();
         verifyP14EFluidSource(p17Source, "P17 enhanced base pass");
@@ -29,6 +30,7 @@ public final class P14ShaderCompileVerifier {
         verifyP14EFluidOptics(p17Source, "P17 enhanced base pass", false);
         verifyP17DynamicEntitySource(p17Source, "enhanced base pass");
         verifyFixedCapacitySceneTails(p17Source, "P17 enhanced base pass");
+        verifyP18TexturedSurfaces(p17Source, "P17 enhanced base pass", false);
 
         String reflectionGeometry = P14EFluidShaderPatch.apply(P16ReflectionPassShader.build());
         String reflectionEntity = P17ShaderIntegration.apply(reflectionGeometry);
@@ -39,6 +41,7 @@ public final class P14ShaderCompileVerifier {
         verifyP16RuntimeSettings(reflectionSource);
         verifyP17DynamicEntitySource(reflectionSource, "P16 reflection pass");
         verifyFixedCapacitySceneTails(reflectionSource, "P16 reflection pass");
+        verifyP18TexturedSurfaces(reflectionSource, "P16 reflection pass", true);
 
         long compiler = Shaderc.shaderc_compiler_initialize();
         if (compiler == 0L) {
@@ -68,7 +71,8 @@ public final class P14ShaderCompileVerifier {
                 || source.contains("P14E_FLUID_ABI_VERSION")
                 || source.contains("P17_ENTITY_MATERIAL_ID")
                 || source.contains("p16ReflectionRgb")
-                || source.contains("temporalHistoryColor")) {
+                || source.contains("temporalHistoryColor")
+                || source.contains("P18_TEXTURE_ABI_VERSION")) {
             throw new IllegalStateException("Bootstrap shader accidentally contains staged renderer features");
         }
         if (source.length() > 16_000) {
@@ -220,6 +224,55 @@ public final class P14ShaderCompileVerifier {
         System.out.println(
                 "Fixed-capacity scene-tail verification PASS (" + label
                         + "): capacityWords=51/52, activeExtentTailBase=false"
+        );
+    }
+
+    private static void verifyP18TexturedSurfaces(
+            String source,
+            String label,
+            boolean reflectionPass
+    ) {
+        requireSourceMarker(
+                source,
+                "const uint P18_TEXTURE_ABI_VERSION = 1u;",
+                label + " P18 texture ABI"
+        );
+        requireSourceMarker(
+                source,
+                "uint p18TextureSceneBase()",
+                label + " P18 texture scene base"
+        );
+        requireSourceMarker(
+                source,
+                "uint textureHandle = scene.data[quadWord + 20u];",
+                label + " P14 quad texture handle"
+        );
+        requireSourceMarker(
+                source,
+                "if (p18AlbedoAlpha(textureHandle, surfaceUv) == 0u) return;",
+                label + " mesh alpha-zero rejection"
+        );
+        requireSourceMarker(
+                source,
+                "if ((geometryCode & 0xF000u) == 0xB000u)",
+                label + " textured-cube fast path"
+        );
+        requireSourceMarker(
+                source,
+                "if (p18AlbedoAlpha(textureHandle, uv) == 0u)",
+                label + " textured-cube alpha-zero rejection"
+        );
+        if (reflectionPass) {
+            requireSourceMarker(
+                    source,
+                    "return p18CubeFallbackSurfaceProperties(params);",
+                    label + " textured-cube fallback optics"
+            );
+        }
+        System.out.println(
+                "P18 textured-surface verification PASS (" + label + "): "
+                        + "meshUv=true, cubeFastPath=true, alphaZeroReject=true, reflectionFallback="
+                        + reflectionPass
         );
     }
 
