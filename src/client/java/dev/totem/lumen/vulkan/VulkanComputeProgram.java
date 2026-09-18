@@ -193,6 +193,10 @@ public final class VulkanComputeProgram implements AutoCloseable {
         return mainGiPipelinePrewarmFailure;
     }
 
+    public static void shutdownPipelineCaches() {
+        VulkanPipelineCacheStore.shutdown();
+    }
+
     public static VulkanComputeProgram create(VulkanDevice device, String name, String glsl, VulkanOwnedBuffer storage) {
         if (MAIN_GI_SHADER.equals(name)) {
             PreparedPipeline prepared = mainGiPreparedPipeline;

@@ -114,6 +114,26 @@ Totem Lumen no longer exposes the simplified bootstrap renderer as a player-visi
 
 This provides the intended "ordinary Minecraft first, advanced lighting when ready" startup path without an expensive resource reload.
 
+### Compile acceleration
+
+Renderer compilation is split into **preparation** and **scene binding**:
+
+- the tiny Vulkan bootstrap is prepared first so Minecraft remains responsive;
+- as soon as the Vulkan device/bootstrap are ready, the full GI / sky / geometry / material pipeline begins compiling even if the player is still in menus;
+- after the full pipeline is prepared, player/entity ray tracing and reflections begin their own background prewarm;
+- entering a world allocates the scene storage buffer and binds already-prepared pipelines to it instead of starting their expensive driver compilation from scratch.
+
+Two persistent caches are used across launches:
+
+```text
+cache/totem-lumen/spirv/v1/<source-hash>.spv
+cache/totem-lumen/vulkan-pipelines/<gpu-driver-identity>.bin
+```
+
+The SPIR-V cache is keyed by the complete generated GLSL source, target environment and optimization mode, so any shader change invalidates only the affected entry automatically. The Vulkan pipeline cache is keyed by vendor/device/driver/pipeline-cache UUID and is shared by all Totem compute pipelines for the lifetime of the client session.
+
+Logs report SPIR-V HIT/MISS, Vulkan pipeline-cache session HIT/MISS and per-pipeline driver creation time. These timings are the baseline for deciding whether later work should target shader generation, MoltenVK/Metal compilation or pipeline concurrency.
+
 ### Compile progress HUD
 
 While compilation is active, a compact top-left HUD shows the current real pipeline stage and an overall 0–100% staged progress value. The percentage is deliberately stage-based because shaderc/Vulkan/MoltenVK do not expose a trustworthy intra-pipeline percentage callback.

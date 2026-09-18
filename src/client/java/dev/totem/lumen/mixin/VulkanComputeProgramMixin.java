@@ -16,10 +16,11 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 /**
  * Keeps renderer readiness independent from expensive MoltenVK pipelines.
  *
- * <p>The early TotemLumen-ShaderPrewarm thread receives a tiny bootstrap shader. Once that program
- * is bound to the real scene buffer, P12FullBasePipeline starts the full P12-P15 pipeline on a
- * daemon worker. P17 and P16 start only after the full base completes. All large optional shaders
- * stay on shaderc O0 and all shaderc source buffers remain off LWJGL's bounded MemoryStack.</p>
+ * <p>The early TotemLumen-ShaderPrewarm thread receives a tiny bootstrap shader. The production
+ * full-lighting pipeline is now prewarmed as soon as the Vulkan bootstrap is ready, before a world
+ * scene buffer exists. This mixin's create hook only attaches that prepared pipeline to the live
+ * scene storage. Large shaders stay on shaderc O0 and source buffers remain off LWJGL's bounded
+ * MemoryStack.</p>
  */
 @Mixin(value = VulkanComputeProgram.class, remap = false)
 public abstract class VulkanComputeProgramMixin {

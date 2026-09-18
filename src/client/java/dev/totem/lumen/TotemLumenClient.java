@@ -157,6 +157,7 @@ public final class TotemLumenClient implements ClientModInitializer {
             FluidRenderGeometryCache.clear();
             EntityRenderGeometryCache.clear();
             P5StableLookupRenderer.shutdown();
+            VulkanComputeProgram.shutdownPipelineCaches();
         });
     }
 }
