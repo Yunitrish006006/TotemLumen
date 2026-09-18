@@ -2,6 +2,7 @@ package dev.totem.lumen.gui;
 
 import dev.totem.lumen.render.RendererBootstrap;
 import dev.totem.lumen.render.RendererState;
+import dev.totem.lumen.render.RendererSettings;
 import dev.totem.lumen.vulkan.P12FullBasePipeline;
 import dev.totem.lumen.vulkan.P16MultipassReflection;
 import dev.totem.lumen.vulkan.P17EnhancedBasePipeline;
@@ -19,6 +20,8 @@ public final class TotemLumenVideoSettingsScreen extends Screen {
     private static final int BUTTON_HEIGHT = 20;
 
     private final Screen parent;
+    private Button reflectionBouncesButton;
+    private Button reflectionDistanceButton;
     private Button renderViewButton;
 
     public TotemLumenVideoSettingsScreen(Screen parent) {
@@ -31,31 +34,50 @@ public final class TotemLumenVideoSettingsScreen extends Screen {
         int contentWidth = Math.min(CONTENT_WIDTH, Math.max(220, this.width - 32));
         int left = (this.width - contentWidth) / 2;
         int halfWidth = (contentWidth - 6) / 2;
+        int doneY = Math.min(this.height - 28, 246);
+        int quickY = doneY - 26;
+        int renderViewY = quickY - 26;
+        int reflectionDistanceY = renderViewY - 26;
+        int reflectionBouncesY = reflectionDistanceY - 26;
+
+        this.reflectionBouncesButton = this.addRenderableWidget(
+                Button.builder(reflectionBouncesLabel(), ignored -> {
+                    RendererSettings.cycleReflectionBounces();
+                    refreshSettingsButtons();
+                }).bounds(left, reflectionBouncesY, contentWidth, BUTTON_HEIGHT).build()
+        );
+
+        this.reflectionDistanceButton = this.addRenderableWidget(
+                Button.builder(reflectionDistanceLabel(), ignored -> {
+                    RendererSettings.cycleReflectionDistance();
+                    refreshSettingsButtons();
+                }).bounds(left, reflectionDistanceY, contentWidth, BUTTON_HEIGHT).build()
+        );
 
         this.renderViewButton = this.addRenderableWidget(
                 Button.builder(renderViewLabel(), ignored -> {
                     P5StableLookupRenderer.cycleMode();
-                    refreshRenderViewButton();
-                }).bounds(left, 122, contentWidth, BUTTON_HEIGHT).build()
+                    refreshSettingsButtons();
+                }).bounds(left, renderViewY, contentWidth, BUTTON_HEIGHT).build()
         );
 
         this.addRenderableWidget(
                 Button.builder(Component.translatable("screen.totem-lumen.quick.gi"), ignored -> {
                     P5StableLookupRenderer.setMode(P5StableLookupRenderer.DebugMode.GI_COMPOSITE);
-                    refreshRenderViewButton();
-                }).bounds(left, 148, halfWidth, BUTTON_HEIGHT).build()
+                    refreshSettingsButtons();
+                }).bounds(left, quickY, halfWidth, BUTTON_HEIGHT).build()
         );
 
         this.addRenderableWidget(
                 Button.builder(Component.translatable("screen.totem-lumen.quick.fluid"), ignored -> {
                     P5StableLookupRenderer.setMode(P5StableLookupRenderer.DebugMode.FLUID_GEOMETRY);
-                    refreshRenderViewButton();
-                }).bounds(left + halfWidth + 6, 148, halfWidth, BUTTON_HEIGHT).build()
+                    refreshSettingsButtons();
+                }).bounds(left + halfWidth + 6, quickY, halfWidth, BUTTON_HEIGHT).build()
         );
 
         this.addRenderableWidget(
                 Button.builder(Component.translatable("gui.done"), ignored -> this.onClose())
-                        .bounds(left, this.height - 28, contentWidth, BUTTON_HEIGHT)
+                        .bounds(left, doneY, contentWidth, BUTTON_HEIGHT)
                         .build()
         );
     }
@@ -118,14 +140,16 @@ public final class TotemLumenVideoSettingsScreen extends Screen {
                 )
         );
 
-        graphics.text(
-                this.font,
-                Component.translatable("screen.totem-lumen.footer_hint"),
-                left,
-                176,
-                0xFF888888,
-                false
-        );
+        if (this.height >= 286) {
+            graphics.text(
+                    this.font,
+                    Component.translatable("screen.totem-lumen.footer_hint"),
+                    left,
+                    260,
+                    0xFF888888,
+                    false
+            );
+        }
     }
 
     @Override
@@ -150,10 +174,31 @@ public final class TotemLumenVideoSettingsScreen extends Screen {
         );
     }
 
-    private void refreshRenderViewButton() {
+    private void refreshSettingsButtons() {
+        if (this.reflectionBouncesButton != null) {
+            this.reflectionBouncesButton.setMessage(reflectionBouncesLabel());
+        }
+        if (this.reflectionDistanceButton != null) {
+            this.reflectionDistanceButton.setMessage(reflectionDistanceLabel());
+        }
         if (this.renderViewButton != null) {
             this.renderViewButton.setMessage(renderViewLabel());
         }
+    }
+
+    private static Component reflectionBouncesLabel() {
+        int bounces = RendererSettings.reflectionBounces();
+        Component value = bounces == 0
+                ? Component.translatable("screen.totem-lumen.value.off")
+                : Component.translatable("screen.totem-lumen.value.bounces", bounces);
+        return Component.translatable("screen.totem-lumen.reflection_bounces", value);
+    }
+
+    private static Component reflectionDistanceLabel() {
+        return Component.translatable(
+                "screen.totem-lumen.reflection_distance",
+                RendererSettings.reflectionDistance()
+        );
     }
 
     private static Component renderViewLabel() {
