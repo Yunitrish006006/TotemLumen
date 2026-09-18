@@ -68,7 +68,7 @@ public final class GpuPbrTextureScene {
 
         List<PbrTextureData> sorted = new ArrayList<>(textures);
         sorted.sort(
-                Comparator.comparingInt(
+                Comparator.<PbrTextureData>comparingInt(
                         texture -> {
                             int handle = PbrTextureHandleRegistry.existingHandle(texture.spriteId());
                             return handle <= 0 ? Integer.MAX_VALUE : handle;
