@@ -82,5 +82,6 @@
   "screen.totem-lumen.quality.fast": "快速",
   "screen.totem-lumen.quality.stable": "穩定",
   "screen.totem-lumen.quality.off": "關閉",
-  "screen.totem-lumen.quality.quality": "高品質"
+  "screen.totem-lumen.quality.quality": "高品質",
+  "screen.totem-lumen.renderer_enabled": "啟用 Totem Lumen：%s"
 }
