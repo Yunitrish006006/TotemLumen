@@ -112,6 +112,21 @@ class BlockGeometryCodeTest {
     }
 
     @Test
+    void texturedCubeUsesFullSurfaceSetIdSpace() {
+        int first = BlockGeometryCode.texturedCube(1);
+        int highest = BlockGeometryCode.texturedCube(BlockGeometryCode.PARAM_MASK);
+
+        assertEquals(BlockGeometryCode.TEXTURED_CUBE, BlockGeometryCode.family(first));
+        assertEquals(1, BlockGeometryCode.texturedCubeSurfaceSetId(first));
+        assertEquals(
+                BlockGeometryCode.PARAM_MASK,
+                BlockGeometryCode.texturedCubeSurfaceSetId(highest)
+        );
+        assertTrue(BlockGeometryCode.isKnown(first));
+        assertTrue(BlockGeometryCode.isKnown(highest));
+    }
+
+    @Test
     void invalidPackedParametersFailFast() {
         assertThrows(IllegalArgumentException.class, () -> BlockGeometryCode.stairs(4, false, 0));
         assertThrows(IllegalArgumentException.class, () -> BlockGeometryCode.wall(3, 0, 0, 0, false));
@@ -120,5 +135,11 @@ class BlockGeometryCodeTest {
         assertThrows(IllegalArgumentException.class, () -> BlockGeometryCode.modelMesh(-1));
         assertThrows(IllegalArgumentException.class, () -> BlockGeometryCode.modelMesh(0x1000));
         assertThrows(IllegalArgumentException.class, () -> BlockGeometryCode.modelMeshId(BlockGeometryCode.FULL_CUBE));
+        assertThrows(IllegalArgumentException.class, () -> BlockGeometryCode.texturedCube(0));
+        assertThrows(IllegalArgumentException.class, () -> BlockGeometryCode.texturedCube(0x1000));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> BlockGeometryCode.texturedCubeSurfaceSetId(BlockGeometryCode.FULL_CUBE)
+        );
     }
 }
