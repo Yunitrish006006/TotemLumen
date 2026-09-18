@@ -86,5 +86,10 @@
   "screen.totem-lumen.quality.stable": "Stable",
   "screen.totem-lumen.quality.off": "Off",
   "screen.totem-lumen.quality.quality": "Quality",
-  "screen.totem-lumen.renderer_enabled": "Totem Lumen renderer: %s"
+  "screen.totem-lumen.renderer_enabled": "Totem Lumen renderer: %s",
+  "screen.totem-lumen.compile_hud": "Totem Lumen compiling: %s  %s%%",
+  "screen.totem-lumen.compile_hud.backend": "Vulkan backend",
+  "screen.totem-lumen.compile_hud.bootstrap": "Bootstrap",
+  "screen.totem-lumen.compile_hud.full": "Full lighting",
+  "screen.totem-lumen.compile_hud.advanced": "Entities / reflections"
 }
