@@ -48,7 +48,7 @@ final class P17DynamicEntityShaderPatch {
                 const uint P17_P14_MAX_STORAGE_WORDS = %du;
 
                 uint p17EntitySceneBase() {
-                    uint pixelCount = scene.data[4] * scene.data[5];
+                    uint pixelCount = scene.data[51] * scene.data[52];
                     return scene.data[3] + pixelCount + P17_P14_MAX_STORAGE_WORDS;
                 }
 
