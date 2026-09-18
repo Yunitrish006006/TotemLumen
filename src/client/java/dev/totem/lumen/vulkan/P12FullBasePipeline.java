@@ -8,13 +8,11 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
 /**
- * Optional full P12-P15 replacement for the tiny renderer-readiness bootstrap pipeline.
+ * Full material-aware base pipeline.
  *
- * <p>MoltenVK cold compilation for the full base shader has measured in minutes on Apple Silicon.
- * The bootstrap pipeline therefore becomes ready first. This class compiles the full renderer on a
- * daemon worker and atomically substitutes it for frame dispatch only after the complete Vulkan
- * program exists. P17/P16 compilation begins only after this full base is ready, avoiding competing
- * long-running pipeline-cache builds during startup.</p>
+ * <p>The expensive shader/pipeline build is prewarmed as soon as Minecraft's Vulkan device is
+ * available. World entry only binds the already-prepared pipeline to the live scene storage buffer,
+ * so pipeline compilation no longer has to wait for scene allocation.</p>
  */
 public final class P12FullBasePipeline {
     public static final String SHADER_NAME = "totem_lumen_p12_full_gi.comp";
@@ -25,83 +23,203 @@ public final class P12FullBasePipeline {
 
     private static volatile VulkanOwnedBuffer attachedScene;
     private static volatile VulkanComputeProgram activeProgram;
+    private static volatile VulkanComputeProgram.PreparedPipeline preparedPipeline;
+    private static volatile VulkanDevice preparedDevice;
     private static volatile Throwable failure;
+    private static volatile Throwable prewarmFailure;
     private static volatile long generation;
+    private static volatile boolean prewarmStarted;
     private static volatile boolean firstDispatchLogged;
 
     private P12FullBasePipeline() {
     }
 
-    public static void attach(VulkanDevice device, VulkanOwnedBuffer scene) {
-        if (device == null || scene == null) return;
+    /**
+     * Starts expensive GLSL -> SPIR-V -> Vulkan pipeline preparation without requiring a world.
+     */
+    public static void prewarm(VulkanDevice device) {
+        if (device == null) return;
 
-        VulkanComputeProgram staleProgram;
+        VulkanComputeProgram.PreparedPipeline stalePrepared = null;
         long workerGeneration;
         synchronized (LOCK) {
-            if (attachedScene == scene && (activeProgram != null || failure == null)) return;
-            staleProgram = activeProgram;
-            activeProgram = null;
-            attachedScene = scene;
-            failure = null;
-            firstDispatchLogged = false;
-            workerGeneration = ++generation;
+            if (preparedDevice != null && preparedDevice.vkDevice() != device.vkDevice()) {
+                ++generation;
+                stalePrepared = preparedPipeline;
+                preparedPipeline = null;
+                preparedDevice = null;
+                prewarmStarted = false;
+                prewarmFailure = null;
+                LOCK.notifyAll();
+            }
+
+            if (preparedPipeline != null || prewarmStarted) {
+                closePreparedAsync(stalePrepared, "TotemLumen-P12FullOldPreparedCleanup");
+                return;
+            }
+
+            preparedDevice = device;
+            prewarmStarted = true;
+            prewarmFailure = null;
+            workerGeneration = generation;
         }
-        closeAsync(staleProgram, "TotemLumen-P12FullOldPipelineCleanup");
+        closePreparedAsync(stalePrepared, "TotemLumen-P12FullOldPreparedCleanup");
 
         Thread worker = new Thread(
-                () -> buildPipeline(device, scene, workerGeneration),
+                () -> buildPreparedPipeline(device, workerGeneration),
                 WORKER_NAME
         );
         worker.setDaemon(true);
         worker.start();
     }
 
-    private static void buildPipeline(VulkanDevice device, VulkanOwnedBuffer scene, long workerGeneration) {
-        VulkanComputeProgram created = null;
+    private static void buildPreparedPipeline(VulkanDevice device, long workerGeneration) {
+        VulkanComputeProgram.PreparedPipeline created = null;
         long startedAt = System.nanoTime();
         try {
             String source = buildSourceForVerification();
             TotemLumenClient.LOGGER.info(
-                    "P12-P15 full pipeline creation START: shader={}, sourceChars={}; bootstrap renderer remains available during compile",
+                    "Full lighting pipeline prewarm START: shader={}, sourceChars={}",
                     SHADER_NAME,
                     source.length()
             );
-            created = VulkanComputeProgram.create(device, SHADER_NAME, source, scene);
+            created = VulkanComputeProgram.preparePipeline(device, SHADER_NAME, source);
 
+            synchronized (LOCK) {
+                if (workerGeneration != generation
+                        || preparedDevice == null
+                        || preparedDevice.vkDevice() != device.vkDevice()) {
+                    VulkanComputeProgram.PreparedPipeline stale = created;
+                    created = null;
+                    closePreparedAsync(stale, "TotemLumen-P12FullStalePreparedCleanup");
+                    return;
+                }
+                preparedPipeline = created;
+                created = null;
+                prewarmStarted = false;
+                LOCK.notifyAll();
+            }
+
+            long elapsedMs = (System.nanoTime() - startedAt) / 1_000_000L;
+            TotemLumenClient.LOGGER.info(
+                    "Full lighting pipeline prewarm COMPLETE: shader={}, elapsed={} ms",
+                    SHADER_NAME,
+                    elapsedMs
+            );
+
+            // These shaders also do not require a world. Start their expensive compilation while
+            // the player is still in menus/loading screens; descriptor binding happens later.
+            P17EnhancedBasePipeline.prewarm(device);
+            P16MultipassReflection.prewarm(device);
+        } catch (Throwable buildFailure) {
+            synchronized (LOCK) {
+                if (workerGeneration == generation) {
+                    prewarmFailure = buildFailure;
+                    prewarmStarted = false;
+                    LOCK.notifyAll();
+                }
+            }
+            TotemLumenClient.LOGGER.error(
+                    "Full lighting pipeline prewarm FAILED",
+                    buildFailure
+            );
+        } finally {
+            closePreparedAsync(created, "TotemLumen-P12FullFailedPreparedCleanup");
+        }
+    }
+
+    /**
+     * Binds the prewarmed pipeline to the live world scene. If prewarm is still running this waits
+     * only on a daemon worker; the render thread remains on Minecraft's normal presentation.
+     */
+    public static void attach(VulkanDevice device, VulkanOwnedBuffer scene) {
+        if (device == null || scene == null) return;
+        prewarm(device);
+
+        VulkanComputeProgram staleProgram;
+        long workerGeneration;
+        synchronized (LOCK) {
+            if (attachedScene == scene && activeProgram != null) return;
+            staleProgram = activeProgram;
+            activeProgram = null;
+            attachedScene = scene;
+            failure = null;
+            firstDispatchLogged = false;
+            workerGeneration = generation;
+        }
+        closeAsync(staleProgram, "TotemLumen-P12FullOldBindingCleanup");
+
+        Thread worker = new Thread(
+                () -> bindPreparedPipeline(device, scene, workerGeneration),
+                "TotemLumen-P12FullBind"
+        );
+        worker.setDaemon(true);
+        worker.start();
+    }
+
+    private static void bindPreparedPipeline(
+            VulkanDevice device,
+            VulkanOwnedBuffer scene,
+            long workerGeneration
+    ) {
+        VulkanComputeProgram created = null;
+        try {
+            VulkanComputeProgram.PreparedPipeline prepared;
+            synchronized (LOCK) {
+                while (workerGeneration == generation
+                        && attachedScene == scene
+                        && preparedPipeline == null
+                        && prewarmFailure == null) {
+                    LOCK.wait();
+                }
+                if (workerGeneration != generation || attachedScene != scene) {
+                    return;
+                }
+                if (prewarmFailure != null) {
+                    throw new IllegalStateException(
+                            "Full lighting pipeline prewarm failed",
+                            prewarmFailure
+                    );
+                }
+                prepared = preparedPipeline;
+            }
+
+            created = prepared.bind(device, scene);
             synchronized (LOCK) {
                 if (workerGeneration != generation || attachedScene != scene) {
                     VulkanComputeProgram stale = created;
                     created = null;
-                    closeAsync(stale, "TotemLumen-P12FullStalePipelineCleanup");
+                    closeAsync(stale, "TotemLumen-P12FullStaleBindingCleanup");
                     return;
                 }
                 activeProgram = created;
                 created = null;
             }
 
-            long elapsedMs = (System.nanoTime() - startedAt) / 1_000_000L;
             TotemLumenClient.LOGGER.info(
-                    "P12-P15 full pipeline creation COMPLETE: shader={}, elapsed={} ms; full GI/environment renderer can now replace bootstrap",
-                    SHADER_NAME,
-                    elapsedMs
+                    "Full lighting scene binding READY; prewarmed pipeline is available for frame dispatch"
             );
-
-            // Large optional enhancements start only after the full base is usable. This keeps
-            // MoltenVK pipeline-cache creation serialized in useful dependency order.
             P17EnhancedBasePipeline.attach(device, scene);
             P16MultipassReflection.attach(device, scene);
-        } catch (Throwable buildFailure) {
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
             synchronized (LOCK) {
                 if (workerGeneration == generation && attachedScene == scene) {
-                    failure = buildFailure;
+                    failure = interrupted;
+                }
+            }
+        } catch (Throwable bindFailure) {
+            synchronized (LOCK) {
+                if (workerGeneration == generation && attachedScene == scene) {
+                    failure = bindFailure;
                 }
             }
             TotemLumenClient.LOGGER.error(
-                    "P12-P15 full pipeline FAILED; keeping the bootstrap renderer active",
-                    buildFailure
+                    "Full lighting scene binding FAILED; Minecraft presentation remains active",
+                    bindFailure
             );
         } finally {
-            if (created != null) closeAsync(created, "TotemLumen-P12FullFailedPipelineCleanup");
+            closeAsync(created, "TotemLumen-P12FullFailedBindingCleanup");
         }
     }
 
@@ -128,6 +246,7 @@ public final class P12FullBasePipeline {
     static String buildSourceForVerification() {
         return P14EFluidOpticsPatch.apply(buildGeometrySourceForVerification());
     }
+
 
     public static void beginDispatch() {
         DISPATCH_PROGRAM.set(activeProgram);
@@ -157,12 +276,12 @@ public final class P12FullBasePipeline {
         return failure;
     }
 
+
     /**
-     * Rebuilds the staged full-renderer pipelines for the currently attached scene.
+     * Rebuilds the full renderer pipelines for the currently attached scene.
      *
-     * <p>The small bootstrap pipeline remains an internal compilation fallback while P12-P15
-     * recompiles, but it is not composited to the player. Minecraft's normal world render remains
-     * visible until the new full base succeeds. P17 and P16 are then restarted in normal order.</p>
+     * <p>Manual recompilation invalidates both prepared pipelines and scene bindings. Minecraft's
+     * normal presentation remains visible while a fresh prewarm is produced.</p>
      *
      * @return true when a rebuild was started; false when no live Vulkan scene is attached
      */
@@ -177,9 +296,10 @@ public final class P12FullBasePipeline {
         }
 
         TotemLumenClient.LOGGER.info(
-                "Manual renderer pipeline recompile requested; Minecraft vanilla/resource-pack presentation remains visible until full base is ready"
+                "Manual renderer pipeline recompile requested; Minecraft presentation remains visible until full lighting is ready"
         );
         shutdown();
+        prewarm(device);
         attach(device, scene);
         return true;
     }
@@ -189,16 +309,24 @@ public final class P12FullBasePipeline {
         P16MultipassReflection.shutdown();
 
         VulkanComputeProgram program;
+        VulkanComputeProgram.PreparedPipeline prepared;
         synchronized (LOCK) {
             ++generation;
             attachedScene = null;
             program = activeProgram;
             activeProgram = null;
+            prepared = preparedPipeline;
+            preparedPipeline = null;
+            preparedDevice = null;
             failure = null;
+            prewarmFailure = null;
+            prewarmStarted = false;
             firstDispatchLogged = false;
+            LOCK.notifyAll();
         }
         DISPATCH_PROGRAM.remove();
-        closeAsync(program, "TotemLumen-P12FullShutdownCleanup");
+        closeAsync(program, "TotemLumen-P12FullShutdownBindingCleanup");
+        closePreparedAsync(prepared, "TotemLumen-P12FullShutdownPreparedCleanup");
     }
 
     private static void closeAsync(VulkanComputeProgram program, String threadName) {
@@ -207,7 +335,23 @@ public final class P12FullBasePipeline {
             try {
                 program.close();
             } catch (Throwable closeFailure) {
-                TotemLumenClient.LOGGER.warn("Failed to close stale full-base pipeline cleanly", closeFailure);
+                TotemLumenClient.LOGGER.warn("Failed to close stale full-base binding cleanly", closeFailure);
+            }
+        }, threadName);
+        cleanup.setDaemon(true);
+        cleanup.start();
+    }
+
+    private static void closePreparedAsync(
+            VulkanComputeProgram.PreparedPipeline prepared,
+            String threadName
+    ) {
+        if (prepared == null) return;
+        Thread cleanup = new Thread(() -> {
+            try {
+                prepared.close();
+            } catch (Throwable closeFailure) {
+                TotemLumenClient.LOGGER.warn("Failed to close prepared full-base pipeline cleanly", closeFailure);
             }
         }, threadName);
         cleanup.setDaemon(true);
