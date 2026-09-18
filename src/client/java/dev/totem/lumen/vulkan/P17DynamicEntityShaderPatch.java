@@ -465,8 +465,38 @@ final class P17DynamicEntityShaderPatch {
                 "P15 entity opaque baseline"
         );
 
+        String p18SyntheticMarker = """
+                    // P14E/P17 synthetic materials intentionally keep their dedicated optics.
+                    if (hit.materialId >= 0xFFF0u) return surface;
+                """;
+        String p18SpiderEmission = """
+                    if (hit.materialId == P17_SPIDER_ENTITY_MATERIAL_ID) {
+                        surface.albedo = materialColor(P17_ENTITY_MATERIAL_ID);
+                        uint eyeArgb = p17SpiderEyeArgb(
+                            p17EntitySceneBase(),
+                            p17UnpackUv(hit.steps)
+                        );
+                        float eyeAlpha = float((eyeArgb >> 24u) & 255u) / 255.0;
+                        surface.emission = eyeAlpha > 0.0
+                                ? p17ArgbRgb(eyeArgb)
+                                        * eyeAlpha
+                                        * max(uintBitsToFloat(scene.data[89]), 0.0)
+                                : vec3(0.0);
+                        return surface;
+                    }
+
+                    // P14E/P17 synthetic materials intentionally keep their dedicated optics.
+                    if (hit.materialId >= 0xFFF0u) return surface;
+                """;
+        source = replaceRequiredOnce(
+                source,
+                p18SyntheticMarker,
+                p18SpiderEmission,
+                "P18 spider eye emissive surface"
+        );
+
         TotemLumenClient.LOGGER.info(
-                "P17 dynamic entity shader tracing active: sectionBroadPhase={} buckets, candidatesPerSection={}, maxEntities={}, maxQuads={}, materialId=0x{}",
+                "P17 dynamic entity shader tracing active: sectionBroadPhase={} buckets, candidatesPerSection={}, maxEntities={}, maxQuads={}, uv=true, spiderEyes=true, materialId=0x{}",
                 GpuDynamicEntityScene.SECTION_LOOKUP_CAPACITY,
                 GpuDynamicEntityScene.MAX_ENTITIES_PER_SECTION,
                 GpuDynamicEntityScene.MAX_ENTITIES,
