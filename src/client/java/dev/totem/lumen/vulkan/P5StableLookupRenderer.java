@@ -864,6 +864,8 @@ public final class P5StableLookupRenderer {
     private static DebugMode lastCompletedMode;
     private static String dimensionId;
     private static long lastSettingsRevision = Long.MIN_VALUE;
+    private static int activeRenderWidth;
+    private static int activeRenderHeight;
 
     private P5StableLookupRenderer() {
     }
@@ -909,14 +911,18 @@ public final class P5StableLookupRenderer {
         int windowHeight = Math.max(1, Minecraft.getInstance().getWindow().getHeight());
         int targetWidth = RendererSettings.internalResolution().width();
         int targetHeight = Math.max(1, Math.round(targetWidth * (windowHeight / (float) windowWidth)));
+        int capacityWidth = RendererSettings.InternalResolution.HIGH.width();
+        int capacityHeight = Math.max(1, Math.round(capacityWidth * (windowHeight / (float) windowWidth)));
 
-        if (resources == null || resources.width != targetWidth || resources.height != targetHeight) {
+        if (resources == null || resources.width != capacityWidth || resources.height != capacityHeight) {
             destroyResourcesIfSafe();
-            resources = Resources.create(device, targetWidth, targetHeight);
+            resources = Resources.create(device, capacityWidth, capacityHeight);
             sceneUploadRequired = true;
             sceneSignature = Long.MIN_VALUE;
             ready = false;
         }
+        activeRenderWidth = targetWidth;
+        activeRenderHeight = targetHeight;
 
         if (!frame.dimensionId().equals(dimensionId)) {
             resetSceneSlots();
@@ -953,7 +959,9 @@ public final class P5StableLookupRenderer {
                 submittedMode,
                 canReuseHistory ? lastCompletedFrame : null,
                 canReuseHistory ? historyReadIndex : -1,
-                historyWriteIndex
+                historyWriteIndex,
+                activeRenderWidth,
+                activeRenderHeight
         );
 
         int uploadBytes;
@@ -971,7 +979,13 @@ public final class P5StableLookupRenderer {
 
         try {
             VulkanFrameComputeBatch batch = VulkanFrameComputeBatch.begin(device, capabilities, r.commandPool);
-            recordCommands(batch.commandBuffer(), r, uploadBytes);
+            recordCommands(
+                    batch.commandBuffer(),
+                    r,
+                    uploadBytes,
+                    activeRenderWidth,
+                    activeRenderHeight
+            );
             batch.finishAndEnqueue(() -> onFrameComplete(
                     fullSceneUpload,
                     frame,
@@ -1032,9 +1046,9 @@ public final class P5StableLookupRenderer {
                 graphics.guiWidth(),
                 graphics.guiHeight(),
                 0.0f,
-                1.0f,
+                activeRenderWidth / (float) r.width,
                 0.0f,
-                1.0f
+                activeRenderHeight / (float) r.height
         );
     }
 
@@ -1217,13 +1231,15 @@ public final class P5StableLookupRenderer {
             DebugMode debugMode,
             FrameSnapshot previousFrame,
             int historyReadIndex,
-            int historyWriteIndex
+            int historyWriteIndex,
+            int renderWidth,
+            int renderHeight
     ) {
         putWord(buffer, 1, sectionCount);
         putWord(buffer, 2, LOOKUP_CAPACITY);
         putWord(buffer, 3, resources.pixelBaseWord);
-        putWord(buffer, 4, resources.width);
-        putWord(buffer, 5, resources.height);
+        putWord(buffer, 4, renderWidth);
+        putWord(buffer, 5, renderHeight);
         putWord(buffer, 6, MAX_STEPS);
         putWord(buffer, 7, Float.floatToRawIntBits((float) RendererSettings.rayDistance()));
         putWord(buffer, 8, Float.floatToRawIntBits((float) frame.cameraX()));
@@ -1235,7 +1251,7 @@ public final class P5StableLookupRenderer {
         putVec3(buffer, 14, basis[1]);
         putVec3(buffer, 17, basis[2]);
         putWord(buffer, 20, Float.floatToRawIntBits((float) Math.tan(Math.toRadians(frame.fovDegrees()) * 0.5)));
-        putWord(buffer, 21, Float.floatToRawIntBits(resources.width / (float) resources.height));
+        putWord(buffer, 21, Float.floatToRawIntBits(renderWidth / (float) renderHeight));
         putWord(buffer, 22, debugMode.shaderValue);
         putWord(buffer, 24, historyReadIndex < 0 ? 0 : resources.historyBaseWord(historyReadIndex));
         putWord(buffer, 25, resources.historyBaseWord(historyWriteIndex));
@@ -1256,7 +1272,7 @@ public final class P5StableLookupRenderer {
                     39,
                     Float.floatToRawIntBits((float) Math.tan(Math.toRadians(previousFrame.fovDegrees()) * 0.5))
             );
-            putWord(buffer, 40, Float.floatToRawIntBits(resources.width / (float) resources.height));
+            putWord(buffer, 40, Float.floatToRawIntBits(renderWidth / (float) renderHeight));
         }
         putWord(buffer, 41, (int) frame.frameIndex());
         putWord(buffer, 42, RendererSettings.reflectionBounces());
@@ -1395,7 +1411,13 @@ public final class P5StableLookupRenderer {
         buffer.putInt(wordIndex * Integer.BYTES, value);
     }
 
-    private static void recordCommands(VkCommandBuffer commandBuffer, Resources r, int uploadBytes) {
+    private static void recordCommands(
+            VkCommandBuffer commandBuffer,
+            Resources r,
+            int uploadBytes,
+            int renderWidth,
+            int renderHeight
+    ) {
         try (MemoryStack stack = MemoryStack.stackPush()) {
             VkBufferCopy.Buffer uploadCopy = VkBufferCopy.calloc(1, stack);
             uploadCopy.get(0).srcOffset(0).dstOffset(0).size(uploadBytes);
@@ -1427,7 +1449,7 @@ public final class P5StableLookupRenderer {
                     stack.longs(r.program.descriptorSet()),
                     null
             );
-            VK10.vkCmdDispatch(commandBuffer, (r.width + 7) / 8, (r.height + 7) / 8, 1);
+            VK10.vkCmdDispatch(commandBuffer, (renderWidth + 7) / 8, (renderHeight + 7) / 8, 1);
 
             long pixelOffset = (long) r.pixelBaseWord * Integer.BYTES;
             VkBufferMemoryBarrier.Buffer computeToCopy = VkBufferMemoryBarrier.calloc(1, stack);
@@ -1439,7 +1461,7 @@ public final class P5StableLookupRenderer {
                     .dstQueueFamilyIndex(VK10.VK_QUEUE_FAMILY_IGNORED)
                     .buffer(r.scene.vkBuffer())
                     .offset(pixelOffset)
-                    .size(r.pixelBytes);
+                    .size((long) renderWidth * renderHeight * Integer.BYTES);
             VK10.vkCmdPipelineBarrier(
                     commandBuffer,
                     VK10.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
@@ -1518,6 +1540,8 @@ public final class P5StableLookupRenderer {
         lastSubmittedFrame = -1;
         dimensionId = null;
         lastSettingsRevision = Long.MIN_VALUE;
+        activeRenderWidth = 0;
+        activeRenderHeight = 0;
     }
 
     private static void closeQuietly(AutoCloseable closeable) {
