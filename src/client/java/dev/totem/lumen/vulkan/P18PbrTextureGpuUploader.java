@@ -4,7 +4,9 @@ import dev.totem.lumen.TotemLumenClient;
 import dev.totem.lumen.gpu.GpuDynamicEntityScene;
 import dev.totem.lumen.gpu.GpuFluidScene;
 import dev.totem.lumen.gpu.GpuPbrTextureScene;
+import dev.totem.lumen.gpu.GpuPbrSurfaceSetScene;
 import dev.totem.lumen.integration.LabPbrTextureRegistry;
+import dev.totem.lumen.geometry.BlockSurfaceSetRegistry;
 import dev.totem.lumen.material.PbrTextureData;
 
 import java.nio.ByteBuffer;
@@ -14,7 +16,8 @@ import java.util.List;
 public final class P18PbrTextureGpuUploader {
     private static volatile long lastBaseByteOffset = -1L;
     private static volatile long lastCopyBytes;
-    private static long lastPackedRevision = Long.MIN_VALUE;
+    private static long lastPackedTextureRevision = Long.MIN_VALUE;
+    private static long lastPackedSurfaceRevision = Long.MIN_VALUE;
     private static boolean copyPending;
     private static int lastLoggedTextureCount = -1;
     private static int lastLoggedTexelCount = -1;
@@ -26,21 +29,39 @@ public final class P18PbrTextureGpuUploader {
 
     /** Force-pack current decoded texture state during a full scene rebuild. */
     public static synchronized void pack(ByteBuffer buffer) {
-        packSnapshot(buffer, LabPbrTextureRegistry.revision(), LabPbrTextureRegistry.snapshot());
+        packSnapshot(
+                buffer,
+                LabPbrTextureRegistry.revision(),
+                BlockSurfaceSetRegistry.revision(),
+                LabPbrTextureRegistry.snapshot(),
+                BlockSurfaceSetRegistry.snapshot()
+        );
     }
 
     /** Pack only when resource-pack decode/reload changed the P18 texture payload. */
     public static synchronized boolean packIfDirty(ByteBuffer buffer) {
-        long revision = LabPbrTextureRegistry.revision();
-        if (revision == lastPackedRevision) return false;
-        packSnapshot(buffer, revision, LabPbrTextureRegistry.snapshot());
+        long textureRevision = LabPbrTextureRegistry.revision();
+        long surfaceRevision = BlockSurfaceSetRegistry.revision();
+        if (textureRevision == lastPackedTextureRevision
+                && surfaceRevision == lastPackedSurfaceRevision) {
+            return false;
+        }
+        packSnapshot(
+                buffer,
+                textureRevision,
+                surfaceRevision,
+                LabPbrTextureRegistry.snapshot(),
+                BlockSurfaceSetRegistry.snapshot()
+        );
         return true;
     }
 
     private static void packSnapshot(
             ByteBuffer buffer,
-            long revision,
-            List<PbrTextureData> textures
+            long textureRevision,
+            long surfaceRevision,
+            List<PbrTextureData> textures,
+            BlockSurfaceSetRegistry.Snapshot surfaceSets
     ) {
         int pixelBaseWord = buffer.getInt(3 * Integer.BYTES);
         int capacityWidth = buffer.getInt(51 * Integer.BYTES);
@@ -61,12 +82,21 @@ public final class P18PbrTextureGpuUploader {
                 GpuFluidScene.MAX_STORAGE_WORDS
         );
 
+        GpuPbrSurfaceSetScene.PackResult surfaces =
+                GpuPbrSurfaceSetScene.pack(buffer, p18BaseWord, surfaceSets);
+        int textureBaseWord = Math.addExact(
+                p18BaseWord,
+                GpuPbrSurfaceSetScene.MAX_STORAGE_WORDS
+        );
         GpuPbrTextureScene.PackResult packed =
-                GpuPbrTextureScene.pack(buffer, p18BaseWord, textures);
+                GpuPbrTextureScene.pack(buffer, textureBaseWord, textures);
 
         lastBaseByteOffset = (long) p18BaseWord * Integer.BYTES;
-        lastCopyBytes = packed.usedBytes();
-        lastPackedRevision = revision;
+        lastCopyBytes = (long) (
+                GpuPbrSurfaceSetScene.MAX_STORAGE_WORDS + packed.usedWords()
+        ) * Integer.BYTES;
+        lastPackedTextureRevision = textureRevision;
+        lastPackedSurfaceRevision = surfaceRevision;
         copyPending = true;
 
         if (lastLoggedTextureCount != packed.textureCount()
@@ -79,15 +109,19 @@ public final class P18PbrTextureGpuUploader {
             lastLoggedAlphaTextures = packed.alphaTextures();
 
             TotemLumenClient.LOGGER.info(
-                    "P18 PBR GPU texture scene: textures={}, texels={}, alphaTextures={}, "
-                            + "downsampled={}, dropped={}, bytes={}, maxBytes={}, format={}",
+                    "P18 PBR GPU scene: surfaceSets={}, texturedCubeFaces={}, textures={}, "
+                            + "texels={}, alphaTextures={}, downsampled={}, dropped={}, "
+                            + "bytes={}, maxBytes={}, format={}",
+                    surfaces.surfaceSetCount(),
+                    surfaces.texturedFaces(),
                     packed.textureCount(),
                     packed.texelCount(),
                     packed.alphaTextures(),
                     packed.downsampledTextures(),
                     packed.droppedTextures(),
                     lastCopyBytes,
-                    GpuPbrTextureScene.MAX_STORAGE_BYTES,
+                    GpuPbrSurfaceSetScene.MAX_STORAGE_BYTES
+                            + GpuPbrTextureScene.MAX_STORAGE_BYTES,
                     LabPbrTextureRegistry.declaredFormat()
             );
             if (packed.droppedTextures() > 0) {
