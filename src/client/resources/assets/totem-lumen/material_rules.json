@@ -1,0 +1,13 @@
+{
+  "textures": {
+    "minecraft:block/campfire_log": {
+      "baseline_emission_scale": 0.0
+    },
+    "minecraft:block/campfire_log_lit": {
+      "baseline_emission_scale": 0.0
+    },
+    "minecraft:block/soul_campfire_log_lit": {
+      "baseline_emission_scale": 0.0
+    }
+  }
+}

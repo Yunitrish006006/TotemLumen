@@ -161,6 +161,59 @@ This alpha test occurs after geometric triangle/AABB intersection but before the
 accepted, so primary rays, Sun/Moon shadows, local-light shadows, GI and P16 reflection see the same
 coverage silhouette. True glass/water volume/interface transmission remains owned by P15/P14E.
 
+## Stable material ABI
+
+P18 texture/material tuning is data-driven after ABI v3. The generated production GLSL reads a
+fixed 16-word descriptor per texture. Runtime material values occupy the final five words:
+
+```text
++11 baseline_emission_scale
++12 labpbr_emission_scale
++13 roughness_scale
++14 normal_strength
++15 alpha_cutoff
+```
+
+These values are uploaded as GPU data. Editing texture rules therefore does **not** change the
+generated GLSL source, SPIR-V cache key or MoltenVK pipeline identity.
+
+Built-in defaults live at:
+
+```text
+assets/totem-lumen/material_rules.json
+```
+
+A resource pack may override that resource. Example:
+
+```json
+{
+  "textures": {
+    "minecraft:block/campfire_log_lit": {
+      "baseline_emission_scale": 0.0
+    },
+    "minecraft:block/example_emissive": {
+      "labpbr_emission_scale": 1.5,
+      "roughness_scale": 0.8,
+      "normal_strength": 1.2,
+      "alpha_cutoff": 0.5
+    }
+  }
+}
+```
+
+Semantics:
+
+- `baseline_emission_scale`: multiplies coarse Minecraft/BlockState surface self-emission while
+  leaving the block's local-light contribution untouched;
+- `labpbr_emission_scale`: multiplies the LabPBR specular alpha emissive channel;
+- `roughness_scale`: adjusts resolved roughness after baseline/LabPBR decoding;
+- `normal_strength`: scales tangent-space normal-map X/Y before Z reconstruction;
+- `alpha_cutoff`: `0` keeps stochastic partial-alpha coverage; values above zero use a fixed
+  threshold.
+
+Changing only these rules must not require shader or Metal pipeline recompilation. ABI layout
+changes still require a one-time shader rebuild and must increment the P18 texture ABI version.
+
 ## Surface emission separation
 
 Block light emission and visible surface self-emission are separate concerns.
@@ -168,7 +221,7 @@ Block light emission and visible surface self-emission are separate concerns.
 The voxel/material table still keeps a block's Minecraft light-emission level so campfires, lamps and other light sources continue to illuminate nearby geometry. P18 surface shading then resolves self-emission per textured surface:
 
 - when a LabPBR specular map exists, its per-texel emissive channel is authoritative and coarse BlockState emission is not added underneath;
-- vanilla campfire wood sprites (`campfire_log`, `campfire_log_lit`, `soul_campfire_log_lit`) explicitly suppress coarse BlockState self-emission;
+- built-in `material_rules.json` assigns `baseline_emission_scale: 0` to vanilla campfire wood sprites; this is data, not a shader special case;
 - campfire flame sprites remain eligible for the vanilla block-emission fallback when no LabPBR emissive map is present.
 
 This prevents the entire campfire model from glowing while preserving its local-light contribution and animated flame emission.
