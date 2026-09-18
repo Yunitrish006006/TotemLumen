@@ -69,7 +69,7 @@ final class P18TexturedSurfaceShaderPatch {
                     }
 
                     uint timelineOffset = scene.data[descriptor + 9u];
-                    uint timelineIndex = scene.data[53] % timelineLength;
+                    uint timelineIndex = scene.data[53] %% timelineLength;
                     uint packedFrame = scene.data[
                         textureBase + P18_TEXTURE_ANIMATION_POOL_BASE
                         + timelineOffset + timelineIndex
