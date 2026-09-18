@@ -33,6 +33,7 @@ public final class P14ShaderCompileVerifier {
         verifyP13NightSkySource(reflectionSource);
         verifyP14EFluidSource(reflectionSource, "P16 reflection pass");
         verifyP14EFluidOptics(reflectionSource, "P16 reflection pass", true);
+        verifyP16RuntimeSettings(reflectionSource);
         verifyP17DynamicEntitySource(reflectionSource, "P16 reflection pass");
 
         long compiler = Shaderc.shaderc_compiler_initialize();
@@ -177,6 +178,17 @@ public final class P14ShaderCompileVerifier {
                 "P14E fluid-optics verification PASS (" + label + "): "
                         + "waterTransmission=true, unlitTint=true, lavaEmission=true, exactWaterReflection="
                         + reflectionPass
+        );
+    }
+
+    private static void verifyP16RuntimeSettings(String source) {
+        requireSourceMarker(source, "uint maxBounces = min(scene.data[42], 2u);", "P16 runtime bounce count");
+        requireSourceMarker(source, "float configuredDistance = uintBitsToFloat(scene.data[43]);", "P16 runtime distance");
+        requireSourceMarker(source, "for (uint bounce = 0u; bounce < 2u; bounce++)", "P16 iterative bounce loop");
+        requireSourceMarker(source, "HitResult nextRawHit = traceRayLimited(", "P16 secondary raw surface trace");
+        requireSourceMarker(source, "if (scene.data[42] == 0u) return;", "P16 runtime disable");
+        System.out.println(
+                "P16 runtime-settings verification PASS: bounces=0..2, distance=runtime, iterative=true"
         );
     }
 
