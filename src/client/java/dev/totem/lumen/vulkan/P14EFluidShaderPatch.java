@@ -296,6 +296,7 @@ final class P14EFluidShaderPatch {
                 GpuFluidScene.MAX_FLUID_QUADS
         );
         return source;
+    }
 
     private static String patchFluidDebugView(String source) {
         String debugMarker = "uint debugColor(HitResult hit, vec3 primaryOrigin, vec3 primaryDirection) {";
@@ -360,6 +361,5 @@ final class P14EFluidShaderPatch {
             throw new IllegalStateException("P14E fluid debug-view marker missing: debugColor fallback");
         }
         return source.replace(modeMarker, modeReplacement);
-    }
     }
 }
