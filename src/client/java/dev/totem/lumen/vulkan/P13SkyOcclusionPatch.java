@@ -16,6 +16,7 @@ final class P13SkyOcclusionPatch {
 
     static String apply(String source) {
         source = P14GenericModelMeshPatch.apply(source);
+        source = P18TexturedSurfaceShaderPatch.apply(source);
 
         String functionMarker = "vec3 p13EnvironmentSurfaceRadiance(\n";
         if (!source.contains(functionMarker)) {
