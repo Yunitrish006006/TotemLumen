@@ -122,49 +122,89 @@ final class P16ReflectionPassShader {
                         vec3 primaryOrigin,
                         vec3 primaryDirection
                 ) {
-                    vec2 surface = p16SurfaceProperties(primaryHit);
-                    float roughness = surface.x;
-                    float metallic = surface.y;
-                    vec3 normal = resolvedSurfaceNormal(primaryHit, primaryDirection);
-                    vec3 hitPoint = primaryOrigin + primaryDirection * primaryHit.distance;
-                    vec3 reflectionDirection = p16RoughReflectionDirection(
-                        primaryHit,
-                        primaryDirection,
-                        normal,
-                        roughness
-                    );
-                    vec3 reflectionOrigin = hitPoint + normal * 0.035 + reflectionDirection * 0.01;
-                    float reflectionDistance = min(uintBitsToFloat(scene.data[7]), 64.0);
-                    P15TraceResult reflectionTrace = p15TraceFiltered(
-                        reflectionOrigin,
-                        reflectionDirection,
-                        reflectionDistance
+                    uint maxBounces = min(scene.data[42], 2u);
+                    if (maxBounces == 0u) return vec3(0.0);
+
+                    float configuredDistance = uintBitsToFloat(scene.data[43]);
+                    float reflectionDistance = min(
+                        uintBitsToFloat(scene.data[7]),
+                        clamp(configuredDistance, 1.0, 64.0)
                     );
 
-                    vec3 incomingRadiance;
-                    if (reflectionTrace.hit.hit == 0u) {
-                        incomingRadiance = p13SkyRadiance(reflectionDirection)
-                                * reflectionTrace.transmission;
-                    } else {
-                        incomingRadiance = p13EnvironmentSurfaceRadiance(
-                            reflectionTrace.hit,
+                    vec3 accumulatedRadiance = vec3(0.0);
+                    vec3 throughput = vec3(1.0);
+                    HitResult currentHit = primaryHit;
+                    vec3 currentOrigin = primaryOrigin;
+                    vec3 currentDirection = primaryDirection;
+
+                    for (uint bounce = 0u; bounce < 2u; bounce++) {
+                        if (bounce >= maxBounces) break;
+
+                        vec2 surface = p16SurfaceProperties(currentHit);
+                        float roughness = surface.x;
+                        float metallic = surface.y;
+                        vec3 normal = resolvedSurfaceNormal(currentHit, currentDirection);
+                        vec3 hitPoint = currentOrigin + currentDirection * currentHit.distance;
+                        vec3 reflectionDirection = p16RoughReflectionDirection(
+                            currentHit,
+                            currentDirection,
+                            normal,
+                            roughness
+                        );
+                        vec3 reflectionOrigin = hitPoint + normal * 0.035 + reflectionDirection * 0.01;
+
+                        vec3 baseColor = materialColor(currentHit.materialId);
+                        vec3 f0 = mix(vec3(0.04), baseColor, metallic);
+                        float viewCosine = clamp(
+                            dot(normal, -normalize(currentDirection)),
+                            0.0,
+                            1.0
+                        );
+                        vec3 fresnel = f0
+                                + (vec3(1.0) - f0) * pow(1.0 - viewCosine, 5.0);
+                        float roughnessEnergy = mix(1.0, 0.18, roughness * roughness);
+                        float materialEnergy = mix(0.85, 1.0, metallic);
+                        throughput *= fresnel * roughnessEnergy * materialEnergy;
+
+                        P15TraceResult filteredTrace = p15TraceFiltered(
                             reflectionOrigin,
-                            reflectionDirection
-                        ) * reflectionTrace.transmission;
+                            reflectionDirection,
+                            reflectionDistance
+                        );
+
+                        if (bounce + 1u >= maxBounces) {
+                            vec3 terminalRadiance;
+                            if (filteredTrace.hit.hit == 0u) {
+                                terminalRadiance = p13SkyRadiance(reflectionDirection)
+                                        * filteredTrace.transmission;
+                            } else {
+                                terminalRadiance = p13EnvironmentSurfaceRadiance(
+                                    filteredTrace.hit,
+                                    reflectionOrigin,
+                                    reflectionDirection
+                                ) * filteredTrace.transmission;
+                            }
+                            accumulatedRadiance += throughput * terminalRadiance;
+                            break;
+                        }
+
+                        HitResult nextRawHit = traceRayLimited(
+                            reflectionOrigin,
+                            reflectionDirection,
+                            reflectionDistance
+                        );
+                        if (nextRawHit.hit == 0u) {
+                            accumulatedRadiance += throughput
+                                    * p13SkyRadiance(reflectionDirection);
+                            break;
+                        }
+
+                        currentHit = nextRawHit;
+                        currentOrigin = reflectionOrigin;
+                        currentDirection = reflectionDirection;
                     }
 
-                    vec3 baseColor = materialColor(primaryHit.materialId);
-                    vec3 f0 = mix(vec3(0.04), baseColor, metallic);
-                    float viewCosine = clamp(
-                        dot(normal, -normalize(primaryDirection)),
-                        0.0,
-                        1.0
-                    );
-                    vec3 fresnel = f0
-                            + (vec3(1.0) - f0) * pow(1.0 - viewCosine, 5.0);
-                    float roughnessEnergy = mix(1.0, 0.18, roughness * roughness);
-                    float materialEnergy = mix(0.85, 1.0, metallic);
-                    return incomingRadiance * fresnel * roughnessEnergy * materialEnergy;
+                    return accumulatedRadiance;
                 }
 
                 void main() {
@@ -175,6 +215,7 @@ final class P16ReflectionPassShader {
 
                     // P16 historically affected only the final GI composite debug mode.
                     if (scene.data[22] != 11u) return;
+                    if (scene.data[42] == 0u) return;
 
                     vec3 origin = vec3(
                         uintBitsToFloat(scene.data[8]),
