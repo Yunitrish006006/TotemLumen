@@ -18,7 +18,7 @@ The main page contains user-facing renderer quality and feature controls. Pipeli
 | --- | --- | --- | --- |
 | Totem Lumen renderer | Off / On | On | Stops/starts Totem Lumen compute submission and final composite; Minecraft Vulkan rendering remains active |
 | GI quality | Low / Balanced / High | Balanced | 1 / 2 / 4 one-bounce GI samples per frame |
-| Shadow quality | Low / Balanced / High | Balanced | 1 / 2 / 4 Sun/Moon soft-shadow transmission rays |
+| Shadow quality | Low / Balanced / High | Balanced | 1 / 2 / 4 Sun/Moon soft-shadow rays and 1 / 2 / 4 samples across each local emissive face |
 | Ray distance | 64 / 128 / 256 blocks | 256 | Primary/shared scene trace distance |
 | Internal resolution | Low / Balanced / High | Balanced | 50% / 67% / 100% of viewport width; height follows window aspect. High is native through 2560 px wide and capped there above 1440p-class widths. |
 | Reflections | Off / On | On | Skips or records the P16 reflection compute pass |
@@ -98,7 +98,7 @@ P12/P13 lighting
 
 This preserves P15's colored-glass source markers and averages RGB transmission across the selected 1/2/4 directional samples instead of replacing glass with binary visibility.
 
-Local point lights remain point emitters and therefore keep a single exact visibility/transmission ray per light. The shadow-quality setting controls the area-like Sun/Moon directional sampling path.
+Local emissive blocks are no longer shaded as center-point emitters. For each receiver, the renderer selects the block face oriented toward that receiver and evaluates 1 / 2 / 4 samples across the face. Each sample has its own receiver cosine, emitter cosine, range attenuation and P15 RGB visibility/transmission ray. The same Shadow Quality setting controls both Sun/Moon soft-shadow sampling and local emissive-face sampling.
 
 ## Renderer master toggle
 
