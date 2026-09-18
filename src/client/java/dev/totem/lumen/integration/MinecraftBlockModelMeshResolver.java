@@ -2,6 +2,8 @@ package dev.totem.lumen.integration;
 
 import dev.totem.lumen.TotemLumenClient;
 import dev.totem.lumen.geometry.BlockModelMeshRegistry;
+import dev.totem.lumen.geometry.BlockSurfaceSetRegistry;
+import dev.totem.lumen.geometry.QuadSurface;
 import dev.totem.lumen.material.BaselineSurfaceProperties;
 import dev.totem.lumen.material.SurfaceProperties;
 import dev.totem.lumen.scene.BlockGeometryCode;
@@ -9,9 +11,12 @@ import net.fabricmc.fabric.api.client.renderer.v1.Renderer;
 import net.fabricmc.fabric.api.client.renderer.v1.mesh.MutableQuadView;
 import net.fabricmc.fabric.api.client.renderer.v1.mesh.QuadEmitter;
 import net.fabricmc.fabric.api.client.renderer.v1.model.FabricBlockStateModel;
+import net.fabricmc.fabric.api.client.renderer.v1.sprite.FabricTextureAtlas;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.renderer.block.dispatch.BlockStateModel;
+import net.minecraft.client.renderer.texture.TextureAtlas;
+import net.minecraft.client.renderer.texture.TextureAtlasSprite;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.util.RandomSource;
@@ -81,13 +86,18 @@ public final class MinecraftBlockModelMeshResolver {
         boolean hadStaticGeometry = false;
         boolean registryCapacityFallback = false;
 
-        float[] modelQuads = emitModelQuads(state, level, pos);
-        if (modelQuads.length > 0) {
+        EmittedModelQuads model = emitModelQuads(state, level, pos);
+        if (model.positions().length > 0) {
             hadStaticGeometry = true;
-            if (isCanonicalUnitCube(modelQuads)) {
+            if (isCanonicalUnitCube(model.positions())) {
+                BlockSurfaceSetRegistry.CubeSurfaceSet surfaceSet =
+                        canonicalCubeSurfaceSet(model.positions(), model.surfaces());
+                if (surfaceSet != null) {
+                    BlockSurfaceSetRegistry.register(surfaceSet);
+                }
                 return BlockGeometryCode.surfaceCube(surface.roughness(), surface.metallic());
             }
-            int meshId = BlockModelMeshRegistry.register(modelQuads);
+            int meshId = BlockModelMeshRegistry.register(model.positions(), model.surfaces());
             if (meshId >= 0) {
                 return BlockGeometryCode.modelMesh(meshId);
             }
@@ -119,7 +129,11 @@ public final class MinecraftBlockModelMeshResolver {
         return BlockGeometryCode.modelMesh(0);
     }
 
-    private static float[] emitModelQuads(BlockState state, ClientLevel level, BlockPos pos) {
+    private static EmittedModelQuads emitModelQuads(
+            BlockState state,
+            ClientLevel level,
+            BlockPos pos
+    ) {
         try {
             var modelSet = Minecraft.getInstance().getModelManager().getBlockStateModelSet();
             observeModelSet(modelSet);
@@ -127,20 +141,26 @@ public final class MinecraftBlockModelMeshResolver {
             FabricBlockStateModel fabricModel = (FabricBlockStateModel) model;
 
             List<Float> positions = new ArrayList<>();
+            List<QuadSurface> surfaces = new ArrayList<>();
             Renderer renderer = Renderer.get();
-            QuadEmitter emitter = renderer.quadEmitter(quad -> appendQuad(positions, quad));
+            QuadEmitter emitter = renderer.quadEmitter(
+                    quad -> appendQuad(positions, surfaces, quad)
+            );
             RandomSource random = RandomSource.create(state.getSeed(pos));
             fabricModel.emitQuads(emitter, level, pos, state, random, direction -> false);
-            return toFloatArray(positions);
+            return new EmittedModelQuads(
+                    toFloatArray(positions),
+                    surfaces.toArray(QuadSurface[]::new)
+            );
         } catch (Throwable failure) {
             if (!extractionFailureLogged) {
                 extractionFailureLogged = true;
                 TotemLumenClient.LOGGER.warn(
-                        "P14C block-model quad extraction failed; affected blocks use outline-shape fallback",
+                        "P14C/P18A block-model quad extraction failed; affected blocks use outline-shape fallback",
                         failure
                 );
             }
-            return new float[0];
+            return EmittedModelQuads.EMPTY;
         }
     }
 
@@ -160,7 +180,11 @@ public final class MinecraftBlockModelMeshResolver {
         }
     }
 
-    private static void appendQuad(List<Float> positions, MutableQuadView quad) {
+    private static void appendQuad(
+            List<Float> positions,
+            List<QuadSurface> surfaces,
+            MutableQuadView quad
+    ) {
         Vector3f scratch = new Vector3f();
         for (int vertex = 0; vertex < 4; vertex++) {
             quad.copyPos(vertex, scratch);
@@ -168,6 +192,54 @@ public final class MinecraftBlockModelMeshResolver {
             positions.add(canonicalFloat(scratch.y));
             positions.add(canonicalFloat(scratch.z));
         }
+        surfaces.add(resolveSurface(quad));
+    }
+
+    private static QuadSurface resolveSurface(MutableQuadView quad) {
+        try {
+            Object texture = Minecraft.getInstance()
+                    .getTextureManager()
+                    .getTexture(quad.atlas().getTextureLocation());
+            if (!(texture instanceof TextureAtlas atlas)) {
+                return QuadSurface.UNTEXTURED;
+            }
+
+            TextureAtlasSprite sprite = ((FabricTextureAtlas) (Object) atlas)
+                    .spriteFinder()
+                    .find(quad);
+            if (sprite == null) return QuadSurface.UNTEXTURED;
+
+            float u0 = sprite.getU0();
+            float u1 = sprite.getU1();
+            float v0 = sprite.getV0();
+            float v1 = sprite.getV1();
+            float uSpan = u1 - u0;
+            float vSpan = v1 - v0;
+            if (Math.abs(uSpan) < 0.0000001f || Math.abs(vSpan) < 0.0000001f) {
+                return QuadSurface.UNTEXTURED;
+            }
+
+            return new QuadSurface(
+                    sprite.contents().name().toString(),
+                    normalizeSpriteUv(quad.u(0), u0, uSpan),
+                    normalizeSpriteUv(quad.v(0), v0, vSpan),
+                    normalizeSpriteUv(quad.u(1), u0, uSpan),
+                    normalizeSpriteUv(quad.v(1), v0, vSpan),
+                    normalizeSpriteUv(quad.u(2), u0, uSpan),
+                    normalizeSpriteUv(quad.v(2), v0, vSpan),
+                    normalizeSpriteUv(quad.u(3), u0, uSpan),
+                    normalizeSpriteUv(quad.v(3), v0, vSpan)
+            );
+        } catch (Throwable ignored) {
+            return QuadSurface.UNTEXTURED;
+        }
+    }
+
+    private static float normalizeSpriteUv(float atlasUv, float minimum, float span) {
+        float local = (atlasUv - minimum) / span;
+        if (Math.abs(local) < 0.000001f) return 0.0f;
+        if (Math.abs(local - 1.0f) < 0.000001f) return 1.0f;
+        return local;
     }
 
     private static float canonicalFloat(float value) {
@@ -231,6 +303,50 @@ public final class MinecraftBlockModelMeshResolver {
             faceMask |= faceBit;
         }
         return faceMask == 0x3F;
+    }
+
+    private static BlockSurfaceSetRegistry.CubeSurfaceSet canonicalCubeSurfaceSet(
+            float[] quads,
+            QuadSurface[] surfaces
+    ) {
+        if (quads.length != 6 * BlockModelMeshRegistry.FLOATS_PER_QUAD
+                || surfaces.length != 6) {
+            return null;
+        }
+
+        QuadSurface[] faces = new QuadSurface[6];
+        for (int quad = 0; quad < 6; quad++) {
+            int base = quad * BlockModelMeshRegistry.FLOATS_PER_QUAD;
+            int constantAxis = -1;
+            int side = -1;
+            for (int axis = 0; axis < 3; axis++) {
+                float first = quads[base + axis];
+                boolean constant = true;
+                for (int vertex = 1; vertex < 4; vertex++) {
+                    if (Math.abs(quads[base + vertex * 3 + axis] - first) > CUBE_EPSILON) {
+                        constant = false;
+                        break;
+                    }
+                }
+                if (constant && nearBoundary(first)) {
+                    constantAxis = axis;
+                    side = first > 0.5f ? 1 : 0;
+                    break;
+                }
+            }
+            if (constantAxis < 0) return null;
+
+            int faceIndex = constantAxis * 2 + side;
+            if (faces[faceIndex] != null) return null;
+            faces[faceIndex] = surfaces[quad];
+        }
+
+        for (QuadSurface face : faces) {
+            if (face == null) return null;
+        }
+        return new BlockSurfaceSetRegistry.CubeSurfaceSet(
+                faces[0], faces[1], faces[2], faces[3], faces[4], faces[5]
+        );
     }
 
     private static boolean nearBoundary(float value) {
@@ -313,4 +429,22 @@ public final class MinecraftBlockModelMeshResolver {
         if (sourceId.startsWith("minecraft:black_")) return BlockGeometryCode.TINT_BLACK;
         return BlockGeometryCode.TINT_CLEAR;
     }
+    private record EmittedModelQuads(
+            float[] positions,
+            QuadSurface[] surfaces
+    ) {
+        private static final EmittedModelQuads EMPTY =
+                new EmittedModelQuads(new float[0], new QuadSurface[0]);
+
+        private EmittedModelQuads {
+            if (positions.length % BlockModelMeshRegistry.FLOATS_PER_QUAD != 0) {
+                throw new IllegalArgumentException("invalid emitted model position count");
+            }
+            if (surfaces.length
+                    != positions.length / BlockModelMeshRegistry.FLOATS_PER_QUAD) {
+                throw new IllegalArgumentException("surface count must match emitted quads");
+            }
+        }
+    }
+
 }
