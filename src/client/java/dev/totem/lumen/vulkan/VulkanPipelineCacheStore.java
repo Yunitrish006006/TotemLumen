@@ -21,19 +21,24 @@ import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 
 /**
- * Persistent host-side Vulkan pipeline cache used by Totem Lumen compute pipelines.
+ * Persistent session-wide Vulkan pipeline cache used by all Totem Lumen compute pipelines.
  *
- * <p>Each pipeline build opens a short-lived VkPipelineCache from the last persisted blob, passes it
- * to vkCreateComputePipelines, writes the updated opaque cache data atomically, and destroys the
- * cache object before returning. This keeps cache lifetime independent from Minecraft's VkDevice
- * shutdown order while still allowing the base and P16 pipelines to accumulate into one driver
- * cache file.</p>
+ * <p>The previous implementation recreated a VkPipelineCache from disk for every individual
+ * pipeline. This store now loads one driver cache per VkDevice, keeps it alive across bootstrap,
+ * full lighting, entity and reflection compilation, and persists the accumulated blob after each
+ * successful pipeline plus once at shutdown.</p>
  */
 final class VulkanPipelineCacheStore {
     private static final Object LOCK = new Object();
-    private static final int CACHE_SCHEMA_VERSION = 1;
+    private static final int CACHE_SCHEMA_VERSION = 2;
     private static final long MAX_CACHE_BYTES = 64L * 1024L * 1024L;
     private static final int PIPELINE_CACHE_UUID_BYTES = 16;
+
+    private static VulkanDevice activeDevice;
+    private static Path activeCacheFile;
+    private static long activePipelineCache;
+    private static boolean activeLoadedFromDisk;
+    private static boolean dirty;
 
     private VulkanPipelineCacheStore() {
     }
@@ -45,85 +50,165 @@ final class VulkanPipelineCacheStore {
             String shaderName
     ) {
         synchronized (LOCK) {
-            Path cacheFile;
             try {
-                cacheFile = cacheFile(device);
-            } catch (Throwable identityFailure) {
-                TotemLumenClient.LOGGER.warn(
-                        "Persistent Vulkan pipeline cache identity lookup failed for {}; compiling without cache",
-                        shaderName,
-                        identityFailure
-                );
-                return VK10.vkCreateComputePipelines(device.vkDevice(), 0L, pipelineInfo, null, pipelineOut);
-            }
-
-            ByteBuffer initialData = null;
-            long pipelineCache = 0L;
-            boolean loaded = false;
-            try {
-                initialData = loadCache(cacheFile, shaderName);
-                loaded = initialData != null && initialData.hasRemaining();
-
-                try {
-                    pipelineCache = createPipelineCache(device, initialData);
-                } catch (Throwable cachedCreateFailure) {
-                    if (!loaded) {
-                        throw cachedCreateFailure;
-                    }
-                    TotemLumenClient.LOGGER.warn(
-                            "Persistent Vulkan pipeline cache rejected by driver for {}; discarding {} and retrying empty",
-                            shaderName,
-                            cacheFile.getFileName(),
-                            cachedCreateFailure
-                    );
-                    deleteQuietly(cacheFile);
-                    pipelineCache = createPipelineCache(device, null);
-                    loaded = false;
-                }
-
-                TotemLumenClient.LOGGER.info(
-                        "Vulkan pipeline cache {}: shader={}, file={}, bytes={}",
-                        loaded ? "HIT" : "MISS",
-                        shaderName,
-                        cacheFile.getFileName(),
-                        initialData == null ? 0 : initialData.remaining()
-                );
-
-                int result = VK10.vkCreateComputePipelines(
-                        device.vkDevice(),
-                        pipelineCache,
-                        pipelineInfo,
-                        null,
-                        pipelineOut
-                );
-                if (result == VK10.VK_SUCCESS) {
-                    try {
-                        persistCache(device, pipelineCache, cacheFile, shaderName);
-                    } catch (Throwable persistFailure) {
-                        TotemLumenClient.LOGGER.warn(
-                                "Failed to persist Vulkan pipeline cache after {}; renderer remains usable",
-                                shaderName,
-                                persistFailure
-                        );
-                    }
-                }
-                return result;
+                ensureSessionCache(device, shaderName);
             } catch (Throwable cacheFailure) {
                 TotemLumenClient.LOGGER.warn(
                         "Persistent Vulkan pipeline cache unavailable for {}; compiling without cache",
                         shaderName,
                         cacheFailure
                 );
-                return VK10.vkCreateComputePipelines(device.vkDevice(), 0L, pipelineInfo, null, pipelineOut);
-            } finally {
-                if (pipelineCache != 0L) {
-                    VK10.vkDestroyPipelineCache(device.vkDevice(), pipelineCache, null);
-                }
-                if (initialData != null) {
-                    MemoryUtil.memFree(initialData);
+                return createWithoutCache(device, pipelineInfo, pipelineOut, shaderName);
+            }
+
+            long startedAt = System.nanoTime();
+            int result = VK10.vkCreateComputePipelines(
+                    device.vkDevice(),
+                    activePipelineCache,
+                    pipelineInfo,
+                    null,
+                    pipelineOut
+            );
+            long elapsedMs = (System.nanoTime() - startedAt) / 1_000_000L;
+
+            TotemLumenClient.LOGGER.info(
+                    "Vulkan pipeline creation {}: shader={}, sessionCache={}, elapsed={} ms",
+                    result == VK10.VK_SUCCESS ? "COMPLETE" : "FAILED(" + result + ")",
+                    shaderName,
+                    activeLoadedFromDisk ? "warm" : "cold",
+                    elapsedMs
+            );
+
+            if (result == VK10.VK_SUCCESS) {
+                dirty = true;
+                try {
+                    persistActiveCache(shaderName);
+                } catch (Throwable persistFailure) {
+                    TotemLumenClient.LOGGER.warn(
+                            "Failed to persist shared Vulkan pipeline cache after {}; renderer remains usable",
+                            shaderName,
+                            persistFailure
+                    );
                 }
             }
+            return result;
         }
+    }
+
+    static void shutdown() {
+        synchronized (LOCK) {
+            if (activePipelineCache == 0L) {
+                resetSessionState();
+                return;
+            }
+
+            if (dirty) {
+                try {
+                    persistActiveCache("session shutdown");
+                } catch (Throwable persistFailure) {
+                    TotemLumenClient.LOGGER.warn(
+                            "Failed to persist shared Vulkan pipeline cache during shutdown",
+                            persistFailure
+                    );
+                }
+            }
+
+            VK10.vkDestroyPipelineCache(activeDevice.vkDevice(), activePipelineCache, null);
+            TotemLumenClient.LOGGER.info(
+                    "Vulkan pipeline cache session CLOSED: file={}",
+                    activeCacheFile == null ? "<none>" : activeCacheFile.getFileName()
+            );
+            resetSessionState();
+        }
+    }
+
+    private static void ensureSessionCache(VulkanDevice device, String shaderName) throws IOException {
+        if (activePipelineCache != 0L
+                && activeDevice != null
+                && activeDevice.vkDevice() == device.vkDevice()) {
+            return;
+        }
+
+        if (activePipelineCache != 0L) {
+            if (dirty) {
+                try {
+                    persistActiveCache("device switch");
+                } catch (Throwable persistFailure) {
+                    TotemLumenClient.LOGGER.warn(
+                            "Failed to persist old Vulkan pipeline cache before device switch",
+                            persistFailure
+                    );
+                }
+            }
+            VK10.vkDestroyPipelineCache(activeDevice.vkDevice(), activePipelineCache, null);
+            resetSessionState();
+        }
+
+        Path cacheFile = cacheFile(device);
+        ByteBuffer initialData = null;
+        long pipelineCache;
+        boolean loaded = false;
+        try {
+            initialData = loadCache(cacheFile, shaderName);
+            loaded = initialData != null && initialData.hasRemaining();
+            try {
+                pipelineCache = createPipelineCache(device, initialData);
+            } catch (Throwable cachedCreateFailure) {
+                if (!loaded) {
+                    throw cachedCreateFailure;
+                }
+                TotemLumenClient.LOGGER.warn(
+                        "Persistent Vulkan pipeline cache rejected by driver for {}; discarding {} and retrying empty",
+                        shaderName,
+                        cacheFile.getFileName(),
+                        cachedCreateFailure
+                );
+                deleteQuietly(cacheFile);
+                pipelineCache = createPipelineCache(device, null);
+                loaded = false;
+            }
+        } finally {
+            if (initialData != null) {
+                MemoryUtil.memFree(initialData);
+            }
+        }
+
+        activeDevice = device;
+        activeCacheFile = cacheFile;
+        activePipelineCache = pipelineCache;
+        activeLoadedFromDisk = loaded;
+        dirty = false;
+
+        TotemLumenClient.LOGGER.info(
+                "Vulkan pipeline cache SESSION {}: shader={}, file={}",
+                loaded ? "HIT" : "MISS",
+                shaderName,
+                cacheFile.getFileName()
+        );
+    }
+
+    private static int createWithoutCache(
+            VulkanDevice device,
+            VkComputePipelineCreateInfo.Buffer pipelineInfo,
+            LongBuffer pipelineOut,
+            String shaderName
+    ) {
+        long startedAt = System.nanoTime();
+        int result = VK10.vkCreateComputePipelines(
+                device.vkDevice(),
+                0L,
+                pipelineInfo,
+                null,
+                pipelineOut
+        );
+        long elapsedMs = (System.nanoTime() - startedAt) / 1_000_000L;
+        TotemLumenClient.LOGGER.info(
+                "Vulkan pipeline creation without cache {}: shader={}, elapsed={} ms",
+                result == VK10.VK_SUCCESS ? "COMPLETE" : "FAILED(" + result + ")",
+                shaderName,
+                elapsedMs
+        );
+        return result;
     }
 
     private static long createPipelineCache(VulkanDevice device, ByteBuffer initialData) {
@@ -163,11 +248,19 @@ final class VulkanPipelineCacheStore {
         return data;
     }
 
+    private static void persistActiveCache(String reason) throws IOException {
+        if (activePipelineCache == 0L || activeDevice == null || activeCacheFile == null) {
+            return;
+        }
+        persistCache(activeDevice, activePipelineCache, activeCacheFile, reason);
+        dirty = false;
+    }
+
     private static void persistCache(
             VulkanDevice device,
             long pipelineCache,
             Path cacheFile,
-            String shaderName
+            String reason
     ) throws IOException {
         long size;
         try (MemoryStack stack = MemoryStack.stackPush()) {
@@ -182,7 +275,7 @@ final class VulkanPipelineCacheStore {
         if (size <= 0L || size > MAX_CACHE_BYTES || size > Integer.MAX_VALUE) {
             TotemLumenClient.LOGGER.warn(
                     "Skipping Vulkan pipeline cache write after {} because driver returned {} bytes",
-                    shaderName,
+                    reason,
                     size
             );
             return;
@@ -225,8 +318,8 @@ final class VulkanPipelineCacheStore {
             }
 
             TotemLumenClient.LOGGER.info(
-                    "Vulkan pipeline cache SAVED: shader={}, file={}, bytes={}",
-                    shaderName,
+                    "Vulkan pipeline cache SAVED: reason={}, file={}, bytes={}",
+                    reason,
                     cacheFile.getFileName(),
                     bytes.length
             );
@@ -256,6 +349,14 @@ final class VulkanPipelineCacheStore {
                     .resolve("vulkan-pipelines")
                     .resolve(fileName);
         }
+    }
+
+    private static void resetSessionState() {
+        activeDevice = null;
+        activeCacheFile = null;
+        activePipelineCache = 0L;
+        activeLoadedFromDisk = false;
+        dirty = false;
     }
 
     private static void deleteQuietly(Path path) {
