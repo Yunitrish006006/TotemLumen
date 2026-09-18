@@ -368,7 +368,7 @@ final class P17DynamicEntityShaderPatch {
 
         String p15Marker = """
                         uint geometryCode = geometryAt(candidate.voxel);
-                        vec4 optical = p15GeometryTransmission(geometryCode);
+                        vec4 optical = p15MaterialTransmission(candidate.materialId, geometryCode);
                 """;
         String p15EntityOpaque = """
                         if (candidate.materialId == P17_ENTITY_MATERIAL_ID) {
@@ -378,7 +378,7 @@ final class P17DynamicEntityShaderPatch {
                         }
 
                         uint geometryCode = geometryAt(candidate.voxel);
-                        vec4 optical = p15GeometryTransmission(geometryCode);
+                        vec4 optical = p15MaterialTransmission(candidate.materialId, geometryCode);
                 """;
         source = replaceRequiredOnce(
                 source,

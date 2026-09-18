@@ -106,7 +106,8 @@ public final class PbrTextureMaterialRuleRegistry {
                 readFloat(object, "labpbr_emission_scale", 1.0f),
                 readFloat(object, "roughness_scale", 1.0f),
                 readFloat(object, "normal_strength", 1.0f),
-                readFloat(object, "alpha_cutoff", 0.0f)
+                readFloat(object, "alpha_cutoff", 0.0f),
+                readFloat(object, "reflection_scale", 1.0f)
         );
     }
 

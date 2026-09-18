@@ -39,7 +39,7 @@ public final class GpuSectionLightLists {
                 slotResolver,
                 (EmissionResolver) materialId -> {
                     int level = emissionForMaterialId.applyAsInt(materialId);
-                    return new Emission(level, 1.0f, 1.0f, 1.0f);
+                    return new Emission(level, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f);
                 }
         );
     }
@@ -126,13 +126,16 @@ public final class GpuSectionLightLists {
                         int blockX = section.key().x() * SectionVoxelData.SIZE + localX;
                         int blockY = section.key().y() * SectionVoxelData.SIZE + localY;
                         int blockZ = section.key().z() * SectionVoxelData.SIZE + localZ;
-                        float radius = Math.max(2.0f, emission.level() + 0.5f);
+                        float radius = Math.max(
+                                0.5f,
+                                Math.max(2.0f, emission.level() + 0.5f) * emission.radiusScale()
+                        );
                         lights.add(new PointLight(
                                 blockX + 0.5f,
                                 blockY + 0.5f,
                                 blockZ + 0.5f,
                                 radius,
-                                emission.level() / 15.0f,
+                                emission.level() / 15.0f * emission.intensityScale(),
                                 emission.r(),
                                 emission.g(),
                                 emission.b(),
@@ -175,10 +178,27 @@ public final class GpuSectionLightLists {
         Emission resolve(int materialId);
     }
 
-    public record Emission(int level, float r, float g, float b) {
+    public record Emission(
+            int level,
+            float r,
+            float g,
+            float b,
+            float radiusScale,
+            float intensityScale
+    ) {
+        public Emission(int level, float r, float g, float b) {
+            this(level, r, g, b, 1.0f, 1.0f);
+        }
+
         public Emission {
             if (level < 0 || level > 15) {
                 throw new IllegalArgumentException("emission level must be in [0, 15]");
+            }
+            if (!Float.isFinite(radiusScale) || radiusScale < 0.0f || radiusScale > 8.0f) {
+                throw new IllegalArgumentException("radiusScale must be finite and in [0, 8]");
+            }
+            if (!Float.isFinite(intensityScale) || intensityScale < 0.0f || intensityScale > 8.0f) {
+                throw new IllegalArgumentException("intensityScale must be finite and in [0, 8]");
             }
         }
     }

@@ -163,8 +163,8 @@ coverage silhouette. True glass/water volume/interface transmission remains owne
 
 ## Stable material ABI
 
-P18 texture/material tuning is data-driven after ABI v3. The generated production GLSL reads a
-fixed 16-word descriptor per texture. Runtime material values occupy the final five words:
+P18 texture/material tuning is data-driven after ABI v4. The generated production GLSL reads a
+fixed 24-word descriptor per texture. Runtime material values use the stable descriptor slots below:
 
 ```text
 +11 baseline_emission_scale
@@ -172,6 +172,8 @@ fixed 16-word descriptor per texture. Runtime material values occupy the final f
 +13 roughness_scale
 +14 normal_strength
 +15 alpha_cutoff
++16 reflection_scale
++17..+23 reserved
 ```
 
 These values are uploaded as GPU data. Editing texture rules therefore does **not** change the
@@ -213,6 +215,41 @@ Semantics:
 
 Changing only these rules must not require shader or Metal pipeline recompilation. ABI layout
 changes still require a one-time shader rebuild and must increment the P18 texture ABI version.
+
+## Stable renderer runtime data
+
+Common renderer tuning is now uploaded through a reserved 96-word frame header and a 16-word
+material runtime record. Values live in:
+
+```text
+assets/totem-lumen/renderer_runtime.json
+assets/totem-lumen/block_material_rules.json
+```
+
+The runtime header covers local-light gain, reflection spread/energy/bias, transmission layer and
+epsilon controls, water/lava optical colors, fluid reflection properties, surface-emission gain,
+and GI display gain. Header words 89 through 95 are reserved for future numeric controls.
+
+The per-material runtime record contains emission RGB/strength, transmission RGB, opacity, IOR,
+roughness, metallic, feature flags, local-light radius/intensity scales, reflection scale, and one
+reserved word.
+
+Block rules support ordered `exact`, `prefix`, `suffix`, and `contains` matchers. A resource
+pack can therefore tune individual blocks or families without changing generated GLSL. Numeric rule
+changes require scene/material data refresh only; they do not change the SPIR-V or MoltenVK pipeline
+cache identity.
+
+This is the intended invalidation boundary:
+
+```text
+material_rules.json / block_material_rules.json / renderer_runtime.json
+    -> GPU data changes
+    -> shader binary unchanged
+
+ray-tracing algorithm / control flow / ABI layout
+    -> shader source changes
+    -> one-time SPIR-V / driver pipeline rebuild
+```
 
 ## Surface emission separation
 

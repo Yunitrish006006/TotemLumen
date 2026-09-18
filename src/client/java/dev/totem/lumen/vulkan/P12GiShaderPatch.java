@@ -155,7 +155,7 @@ final class P12GiShaderPatch {
                     vec3 normal = resolvedSurfaceNormal(hit, rayDirection);
                     vec3 albedo = materialColor(hit.materialId);
                     vec4 emission = materialEmission(hit.materialId);
-                    vec3 emitted = emission.rgb * emission.a * 1.6;
+                    vec3 emitted = emission.rgb * emission.a * uintBitsToFloat(scene.data[83]);
                     uint environment = p13EnvironmentCode();
 
                     if (environment == 0u) {
@@ -303,8 +303,8 @@ final class P12GiShaderPatch {
                     );
                     vec3 localWithBase = unpackRgb(localLightColor(hit, primaryOrigin, primaryDirection, true));
                     vec4 emission = materialEmission(hit.materialId);
-                    vec3 emitted = emission.rgb * emission.a * 1.6;
-                    vec3 localBase = materialColor(hit.materialId) * 0.045 + emitted;
+                    vec3 emitted = emission.rgb * emission.a * uintBitsToFloat(scene.data[83]);
+                    vec3 localBase = materialColor(hit.materialId) * uintBitsToFloat(scene.data[82]) + emitted;
                     vec3 localContribution = max(localWithBase - localBase, vec3(0.0));
                     return packRgba(environmentDirect + localContribution + unpackRgb(indirectColor), 255u);
                 }
@@ -336,7 +336,7 @@ final class P12GiShaderPatch {
                         );
                         writeHistory(pixel, width, primaryHit, indirectColor, giHistorySamples);
                         if (mode == 10u) {
-                            color = packRgba(unpackRgb(indirectColor) * 1.6, 255u);
+                            color = packRgba(unpackRgb(indirectColor) * uintBitsToFloat(scene.data[84]), 255u);
                         } else {
                             color = giCompositeFromIndirect(
                                 primaryHit, origin, direction, indirectColor

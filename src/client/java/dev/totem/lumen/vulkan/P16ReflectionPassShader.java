@@ -45,14 +45,14 @@ final class P16ReflectionPassShader {
                     uint data[];
                 } scene;
 
-                const uint LOOKUP_BASE = 64u;
+                const uint LOOKUP_BASE = 96u;
                 const uint LOOKUP_CAPACITY = 128u;
                 const uint LOOKUP_MASK = 127u;
                 const uint LOOKUP_WORDS_PER_BUCKET = 4u;
-                const uint VOXEL_BASE = 576u;
+                const uint VOXEL_BASE = 608u;
                 const uint VOXELS_PER_SECTION = 4096u;
-                const uint MATERIAL_EMISSION_BASE = 265344u;
-                const uint MATERIAL_EMISSION_WORDS_PER_RECORD = 4u;
+                const uint MATERIAL_EMISSION_BASE = 265376u;
+                const uint MATERIAL_EMISSION_WORDS_PER_RECORD = 16u;
                 const float SOFT_SHADOW_ANGULAR_RADIUS = 0.055;
                 const vec2 SOFT_SHADOW_OFFSETS[4] = vec2[4](
                     vec2(0.32, 0.08),
@@ -76,26 +76,26 @@ final class P16ReflectionPassShader {
                 + environment
                 + """
 
-                vec2 p16SurfaceProperties(HitResult hit) {
+                vec3 p16SurfaceProperties(HitResult hit) {
+                    if (hit.materialId < scene.data[23]) {
+                        uint materialBase = MATERIAL_EMISSION_BASE
+                                + hit.materialId * MATERIAL_EMISSION_WORDS_PER_RECORD;
+                        return vec3(
+                            clamp(uintBitsToFloat(scene.data[materialBase + 9u]), 0.0, 1.0),
+                            clamp(uintBitsToFloat(scene.data[materialBase + 10u]), 0.0, 1.0),
+                            max(uintBitsToFloat(scene.data[materialBase + 14u]), 0.0)
+                        );
+                    }
+
                     uint geometryCode = geometryAt(hit.voxel);
                     uint family = geometryCode & 0xF000u;
                     uint params = geometryCode & 0x0FFFu;
-
                     if (family == 0x9000u) {
                         float roughness = float(params & 0xFu) / 15.0;
                         float metallic = float((params >> 4u) & 0xFu) / 15.0;
-                        return vec2(roughness, metallic);
+                        return vec3(roughness, metallic, 1.0);
                     }
-                    if (family == 0xB000u) {
-                        return p18CubeFallbackSurfaceProperties(params);
-                    }
-                    if (family == 0x8000u) {
-                        return vec2(0.05, 0.0);
-                    }
-                    if (family == 0x4000u && (params & 0x10u) != 0u) {
-                        return vec2(0.07, 0.0);
-                    }
-                    return vec2(0.80, 0.0);
+                    return vec3(0.80, 0.0, 1.0);
                 }
 
                 vec3 p16RoughReflectionDirection(
@@ -111,7 +111,8 @@ final class P16ReflectionPassShader {
                         ^ uint(hit.voxel.z) * 0xC2B2AE3Du
                         ^ hit.materialId * 0x27D4EB2Du
                     );
-                    float spread = roughness * roughness * 0.75;
+                    float spread = roughness * roughness
+                            * max(uintBitsToFloat(scene.data[55]), 0.0);
                     float radius = sqrt(max(random01(state), 0.0)) * spread;
                     float phi = 6.28318530718 * random01(state);
                     vec3 helper = abs(mirrorDirection.y) < 0.95
@@ -155,13 +156,16 @@ final class P16ReflectionPassShader {
                             currentOrigin,
                             currentDirection
                         );
-                        vec2 fallbackSurface = p16SurfaceProperties(currentHit);
+                        vec3 fallbackSurface = p16SurfaceProperties(currentHit);
                         float roughness = p18Surface.textured != 0u
                                 ? p18Surface.roughness
                                 : fallbackSurface.x;
                         float metallic = p18Surface.textured != 0u
                                 ? p18Surface.metallic
                                 : fallbackSurface.y;
+                        float reflectionScale = p18Surface.textured != 0u
+                                ? p18Surface.reflectionScale
+                                : fallbackSurface.z;
                         vec3 normal = p18Surface.textured != 0u
                                 ? p18Surface.normal
                                 : resolvedSurfaceNormal(currentHit, currentDirection);
@@ -172,7 +176,9 @@ final class P16ReflectionPassShader {
                             normal,
                             roughness
                         );
-                        vec3 reflectionOrigin = hitPoint + normal * 0.035 + reflectionDirection * 0.01;
+                        vec3 reflectionOrigin = hitPoint
+                                + normal * max(uintBitsToFloat(scene.data[59]), 0.0)
+                                + reflectionDirection * max(uintBitsToFloat(scene.data[60]), 0.0);
 
                         vec3 baseColor = p18Surface.textured != 0u
                                 ? p18Surface.albedo
@@ -187,9 +193,20 @@ final class P16ReflectionPassShader {
                         );
                         vec3 fresnel = f0
                                 + (vec3(1.0) - f0) * pow(1.0 - viewCosine, 5.0);
-                        float roughnessEnergy = mix(1.0, 0.18, roughness * roughness);
-                        float materialEnergy = mix(0.85, 1.0, metallic);
-                        throughput *= fresnel * roughnessEnergy * materialEnergy;
+                        float roughnessEnergy = mix(
+                            1.0,
+                            clamp(uintBitsToFloat(scene.data[56]), 0.0, 1.0),
+                            roughness * roughness
+                        );
+                        float materialEnergy = mix(
+                            max(uintBitsToFloat(scene.data[57]), 0.0),
+                            max(uintBitsToFloat(scene.data[58]), 0.0),
+                            metallic
+                        );
+                        throughput *= fresnel
+                                * roughnessEnergy
+                                * materialEnergy
+                                * reflectionScale;
 
                         P15TraceResult filteredTrace = p15TraceFiltered(
                             reflectionOrigin,

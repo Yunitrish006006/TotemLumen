@@ -27,8 +27,12 @@ public final class GpuMaterialPacker {
             buffer.putFloat(material.emissionR());
             buffer.putFloat(material.emissionG());
             buffer.putFloat(material.emissionB());
-            buffer.putInt(0);
-            buffer.putInt(0);
+            buffer.putFloat(material.transmissionR());
+            buffer.putFloat(material.transmissionG());
+            buffer.putFloat(material.transmissionB());
+            buffer.putFloat(material.lightRadiusScale());
+            buffer.putFloat(material.lightIntensityScale());
+            buffer.putFloat(material.reflectionScale());
             buffer.putInt(0);
 
             if (buffer.position() - base != GpuSceneAbi.MATERIAL_STRIDE_BYTES) {

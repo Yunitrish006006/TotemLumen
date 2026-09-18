@@ -114,6 +114,37 @@ final class GpuSectionLightListsTest {
         assertEquals(12.0f / 15.0f, light.intensity());
     }
 
+    @Test
+    void appliesDataDrivenRadiusAndIntensityScales() {
+        SectionSnapshot source = sectionWithLights(
+                new SectionKey("minecraft:overworld", 0, 0, 0),
+                new int[][]{{8, 8, 8, 3}}
+        );
+
+        var result = GpuSectionLightLists.build(
+                List.of(source),
+                1,
+                key -> 0,
+                (GpuSectionLightLists.EmissionResolver) materialId -> materialId == 3
+                        ? new GpuSectionLightLists.Emission(
+                                12,
+                                1.0f,
+                                0.5f,
+                                0.25f,
+                                0.5f,
+                                2.0f
+                        )
+                        : new GpuSectionLightLists.Emission(0, 0.0f, 0.0f, 0.0f)
+        );
+
+        var light = result.lights().getFirst();
+        assertEquals(6.25f, light.radius());
+        assertEquals(1.6f, light.intensity());
+        assertEquals(1.0f, light.r());
+        assertEquals(0.5f, light.g());
+        assertEquals(0.25f, light.b());
+    }
+
     private static SectionSnapshot sectionWithLights(SectionKey key, int[][] lightVoxels) {
         int[] ids = new int[SectionVoxelData.VOXEL_COUNT];
         for (int[] light : lightVoxels) {

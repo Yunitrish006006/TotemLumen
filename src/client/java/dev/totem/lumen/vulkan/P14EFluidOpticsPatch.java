@@ -24,9 +24,12 @@ final class P14EFluidOpticsPatch {
                 source,
                 colorMarker,
                 colorMarker + "\n"
-                        + "    if (materialId == P14E_WATER_MATERIAL_ID) return vec3(0.18, 0.42, 0.68);\n"
-                        + "    if (materialId == P14E_LAVA_MATERIAL_ID) return vec3(1.00, 0.24, 0.025);\n"
-                        + "    if (materialId == P14E_OTHER_FLUID_MATERIAL_ID) return vec3(0.45, 0.55, 0.62);",
+                        + "    if (materialId == P14E_WATER_MATERIAL_ID) return vec3("
+                        + "uintBitsToFloat(scene.data[69]), uintBitsToFloat(scene.data[70]), uintBitsToFloat(scene.data[71]));\n"
+                        + "    if (materialId == P14E_LAVA_MATERIAL_ID) return vec3("
+                        + "uintBitsToFloat(scene.data[72]), uintBitsToFloat(scene.data[73]), uintBitsToFloat(scene.data[74]));\n"
+                        + "    if (materialId == P14E_OTHER_FLUID_MATERIAL_ID) return vec3("
+                        + "uintBitsToFloat(scene.data[75]), uintBitsToFloat(scene.data[76]), uintBitsToFloat(scene.data[77]));",
                 "fluid material colors"
         );
 
@@ -35,7 +38,9 @@ final class P14EFluidOpticsPatch {
                 source,
                 emissionMarker,
                 emissionMarker + "\n"
-                        + "    if (materialId == P14E_LAVA_MATERIAL_ID) return vec4(1.00, 0.12, 0.015, 1.0);\n"
+                        + "    if (materialId == P14E_LAVA_MATERIAL_ID) return vec4("
+                        + "uintBitsToFloat(scene.data[78]), uintBitsToFloat(scene.data[79]), "
+                        + "uintBitsToFloat(scene.data[80]), uintBitsToFloat(scene.data[81]));\n"
                         + "    if (materialId == P14E_WATER_MATERIAL_ID || materialId == P14E_OTHER_FLUID_MATERIAL_ID) return vec4(0.0);",
                 "fluid material emission"
         );
@@ -52,7 +57,11 @@ final class P14EFluidOpticsPatch {
                 vec3 p14eResolvedFluidTint(HitResult hit) {
                     uint fluidBase = p14eFluidSceneBase();
                     uint fluidIndex = p14eFindFluidCell(fluidBase, hit.voxel);
-                    if (fluidIndex == P14E_INVALID_INDEX) return vec3(0.25, 0.50, 0.78);
+                    if (fluidIndex == P14E_INVALID_INDEX) return vec3(
+                        uintBitsToFloat(scene.data[66]),
+                        uintBitsToFloat(scene.data[67]),
+                        uintBitsToFloat(scene.data[68])
+                    );
                     uint descriptor = fluidBase + P14E_CELL_DESCRIPTOR_BASE
                             + fluidIndex * P14E_CELL_DESCRIPTOR_WORDS;
                     // Descriptor word 8 is the unlit FluidModel tint captured before Minecraft
@@ -71,8 +80,15 @@ final class P14EFluidOpticsPatch {
                     // Baseline is interface tint/attenuation, not volumetric Beer-Lambert absorption.
                     // Two boundary crossings therefore attenuate more than one underwater->air exit.
                     vec3 resolvedTint = p14eResolvedFluidTint(hit);
-                    vec3 gentleTint = mix(vec3(1.0), resolvedTint, 0.30);
-                    return vec4(gentleTint, 0.94);
+                    vec3 gentleTint = mix(
+                        vec3(1.0),
+                        resolvedTint,
+                        clamp(uintBitsToFloat(scene.data[64]), 0.0, 1.0)
+                    );
+                    return vec4(
+                        gentleTint,
+                        clamp(uintBitsToFloat(scene.data[65]), 0.0, 1.0)
+                    );
                 }
 
                 """;
@@ -80,8 +96,8 @@ final class P14EFluidOpticsPatch {
 
         String oldOptical = """
                         uint geometryCode = geometryAt(candidate.voxel);
-                        vec4 optical = p15GeometryTransmission(geometryCode);
-                        if (optical.a <= 0.0001) {
+                        vec4 optical = p15MaterialTransmission(candidate.materialId, geometryCode);
+                        if (optical.a <= minTransmission) {
                             candidate.distance += traveled;
                             result.hit = candidate;
                             return result;
@@ -94,15 +110,15 @@ final class P14EFluidOpticsPatch {
                             dir,
                             candidate.voxel
                         );
-                        float advance = candidate.distance + exitDistance + 0.002;
+                        float advance = candidate.distance + exitDistance + exitEpsilon;
                 """;
         String newOptical = """
                         bool p14eWaterSurface = candidate.materialId == P14E_WATER_MATERIAL_ID;
                         uint geometryCode = geometryAt(candidate.voxel);
                         vec4 optical = p14eWaterSurface
                                 ? p14eWaterTransmission(candidate)
-                                : p15GeometryTransmission(geometryCode);
-                        if (optical.a <= 0.0001) {
+                                : p15MaterialTransmission(candidate.materialId, geometryCode);
+                        if (optical.a <= minTransmission) {
                             candidate.distance += traveled;
                             result.hit = candidate;
                             return result;
@@ -113,7 +129,7 @@ final class P14EFluidOpticsPatch {
                         if (p14eWaterSurface) {
                             // Advance only through the exact interface. Jumping to the voxel exit
                             // would incorrectly skip waterlogged block geometry in the same cell.
-                            advance = candidate.distance + 0.002;
+                            advance = candidate.distance + exitEpsilon;
                         } else {
                             vec3 hitPoint = cursorOrigin + dir * candidate.distance;
                             float exitDistance = p15VoxelExitDistance(
@@ -121,7 +137,7 @@ final class P14EFluidOpticsPatch {
                                 dir,
                                 candidate.voxel
                             );
-                            advance = candidate.distance + exitDistance + 0.002;
+                            advance = candidate.distance + exitDistance + exitEpsilon;
                         }
                 """;
         return replaceRequiredOnce(source, oldOptical, newOptical, "P15 exact-water interface filtering");
@@ -129,17 +145,29 @@ final class P14EFluidOpticsPatch {
 
     /** Applies only to the extracted P16 pass, where these markers exist. */
     private static String patchP16WaterReflection(String source) {
-        if (!source.contains("vec2 p16SurfaceProperties(HitResult hit) {")) return source;
+        if (!source.contains("vec3 p16SurfaceProperties(HitResult hit) {")) return source;
 
         String propertyMarker = """
-                vec2 p16SurfaceProperties(HitResult hit) {
-                    uint geometryCode = geometryAt(hit.voxel);
+                vec3 p16SurfaceProperties(HitResult hit) {
+                    if (hit.materialId < scene.data[23]) {
                 """;
         String propertyReplacement = """
-                vec2 p16SurfaceProperties(HitResult hit) {
-                    if (hit.materialId == P14E_WATER_MATERIAL_ID) return vec2(0.025, 0.0);
-                    if (hit.materialId == P14E_LAVA_MATERIAL_ID) return vec2(0.32, 0.0);
-                    uint geometryCode = geometryAt(hit.voxel);
+                vec3 p16SurfaceProperties(HitResult hit) {
+                    if (hit.materialId == P14E_WATER_MATERIAL_ID) {
+                        return vec3(
+                            clamp(uintBitsToFloat(scene.data[85]), 0.0, 1.0),
+                            0.0,
+                            max(uintBitsToFloat(scene.data[87]), 0.0)
+                        );
+                    }
+                    if (hit.materialId == P14E_LAVA_MATERIAL_ID) {
+                        return vec3(
+                            clamp(uintBitsToFloat(scene.data[86]), 0.0, 1.0),
+                            0.0,
+                            max(uintBitsToFloat(scene.data[88]), 0.0)
+                        );
+                    }
+                    if (hit.materialId < scene.data[23]) {
                 """;
         source = replaceRequiredOnce(
                 source,

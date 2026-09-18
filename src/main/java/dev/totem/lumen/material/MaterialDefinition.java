@@ -3,9 +3,9 @@ package dev.totem.lumen.material;
 /**
  * Minecraft-independent material definition owned by Totem Lumen.
  *
- * <p>P15 adds a compact RGB transmission tint. Opacity remains the scalar absorption/coverage
- * control and IOR remains reserved for the later refraction path. Keeping transmission metadata in
- * the material definition avoids hard-coding Minecraft block identifiers in Vulkan shaders.</p>
+ * <p>Renderer-facing tuning is intentionally data driven. Light radius/intensity and reflection
+ * scale are CPU/GPU data fields rather than shader-specialized constants, so changing block rules
+ * does not alter generated GLSL.</p>
  */
 public record MaterialDefinition(
         String sourceId,
@@ -20,14 +20,54 @@ public record MaterialDefinition(
         float indexOfRefraction,
         float transmissionR,
         float transmissionG,
-        float transmissionB
+        float transmissionB,
+        float lightRadiusScale,
+        float lightIntensityScale,
+        float reflectionScale
 ) {
     public static final MaterialDefinition AIR = new MaterialDefinition(
             "minecraft:air", MaterialFlags.AIR, 0,
             0.0f, 0.0f, 0.0f,
             1.0f, 0.0f, 0.0f, 1.0f,
+            1.0f, 1.0f, 1.0f,
             1.0f, 1.0f, 1.0f
     );
+
+    /** Compatibility constructor retaining the previous transmission-aware ABI surface. */
+    public MaterialDefinition(
+            String sourceId,
+            int flags,
+            int emissionLevel,
+            float emissionR,
+            float emissionG,
+            float emissionB,
+            float roughness,
+            float metallic,
+            float opacity,
+            float indexOfRefraction,
+            float transmissionR,
+            float transmissionG,
+            float transmissionB
+    ) {
+        this(
+                sourceId,
+                flags,
+                emissionLevel,
+                emissionR,
+                emissionG,
+                emissionB,
+                roughness,
+                metallic,
+                opacity,
+                indexOfRefraction,
+                transmissionR,
+                transmissionG,
+                transmissionB,
+                1.0f,
+                1.0f,
+                1.0f
+        );
+    }
 
     /** Compatibility constructor for callers that already provide explicit emissive RGB. */
     public MaterialDefinition(
@@ -55,14 +95,14 @@ public record MaterialDefinition(
                 indexOfRefraction,
                 1.0f,
                 1.0f,
+                1.0f,
+                1.0f,
+                1.0f,
                 1.0f
         );
     }
 
-    /**
-     * Compatibility constructor for non-emissive/baseline callers. Emissive materials created
-     * through this constructor default to neutral white and transmission defaults to neutral RGB.
-     */
+    /** Compatibility constructor for non-emissive/baseline callers. */
     public MaterialDefinition(
             String sourceId,
             int flags,
@@ -85,6 +125,9 @@ public record MaterialDefinition(
                 indexOfRefraction,
                 1.0f,
                 1.0f,
+                1.0f,
+                1.0f,
+                1.0f,
                 1.0f
         );
     }
@@ -99,27 +142,36 @@ public record MaterialDefinition(
         if (!isNormalized(emissionR) || !isNormalized(emissionG) || !isNormalized(emissionB)) {
             throw new IllegalArgumentException("emission RGB must be in [0, 1]");
         }
-        if (roughness < 0.0f || roughness > 1.0f) {
+        if (!isNormalized(roughness)) {
             throw new IllegalArgumentException("roughness must be in [0, 1]");
         }
-        if (metallic < 0.0f || metallic > 1.0f) {
+        if (!isNormalized(metallic)) {
             throw new IllegalArgumentException("metallic must be in [0, 1]");
         }
-        if (opacity < 0.0f || opacity > 1.0f) {
+        if (!isNormalized(opacity)) {
             throw new IllegalArgumentException("opacity must be in [0, 1]");
         }
-        if (indexOfRefraction <= 0.0f) {
-            throw new IllegalArgumentException("indexOfRefraction must be positive");
+        if (!Float.isFinite(indexOfRefraction) || indexOfRefraction <= 0.0f) {
+            throw new IllegalArgumentException("indexOfRefraction must be positive and finite");
         }
         if (!isNormalized(transmissionR)
                 || !isNormalized(transmissionG)
                 || !isNormalized(transmissionB)) {
             throw new IllegalArgumentException("transmission RGB must be in [0, 1]");
         }
+        if (!isScale(lightRadiusScale, 8.0f)
+                || !isScale(lightIntensityScale, 8.0f)
+                || !isScale(reflectionScale, 4.0f)) {
+            throw new IllegalArgumentException("runtime material scales are out of range");
+        }
     }
 
     private static boolean isNormalized(float value) {
         return Float.isFinite(value) && value >= 0.0f && value <= 1.0f;
+    }
+
+    private static boolean isScale(float value, float max) {
+        return Float.isFinite(value) && value >= 0.0f && value <= max;
     }
 
     public boolean has(int flag) {

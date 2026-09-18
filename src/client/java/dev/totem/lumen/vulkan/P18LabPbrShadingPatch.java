@@ -39,6 +39,7 @@ final class P18LabPbrShadingPatch {
                     float ao;
                     float roughness;
                     float metallic;
+                    float reflectionScale;
                     vec3 f0;
                     vec3 emission;
                 };
@@ -351,9 +352,31 @@ final class P18LabPbrShadingPatch {
                     surface.ao = 1.0;
                     surface.roughness = 0.80;
                     surface.metallic = 0.0;
+                    surface.reflectionScale = 1.0;
                     surface.f0 = vec3(0.04);
                     vec4 baselineEmission = materialEmission(hit.materialId);
-                    surface.emission = baselineEmission.rgb * baselineEmission.a * 1.6;
+                    surface.emission = baselineEmission.rgb
+                            * baselineEmission.a
+                            * uintBitsToFloat(scene.data[83]);
+                    if (hit.materialId < scene.data[23]) {
+                        uint materialBase = MATERIAL_EMISSION_BASE
+                                + hit.materialId * MATERIAL_EMISSION_WORDS_PER_RECORD;
+                        surface.roughness = clamp(
+                                uintBitsToFloat(scene.data[materialBase + 9u]),
+                                0.0,
+                                1.0
+                        );
+                        surface.metallic = clamp(
+                                uintBitsToFloat(scene.data[materialBase + 10u]),
+                                0.0,
+                                1.0
+                        );
+                        surface.reflectionScale = max(
+                                uintBitsToFloat(scene.data[materialBase + 14u]),
+                                0.0
+                        );
+                        surface.f0 = mix(vec3(0.04), surface.albedo, surface.metallic);
+                    }
 
                     // P14E/P17 synthetic materials intentionally keep their dedicated optics.
                     if (hit.materialId >= 0xFFF0u) return surface;
@@ -412,7 +435,9 @@ final class P18LabPbrShadingPatch {
                     float labPbrEmissionScale = uintBitsToFloat(scene.data[descriptor + 12u]);
                     float roughnessScale = uintBitsToFloat(scene.data[descriptor + 13u]);
                     float normalStrength = uintBitsToFloat(scene.data[descriptor + 14u]);
+                    float textureReflectionScale = uintBitsToFloat(scene.data[descriptor + 16u]);
                     surface.emission *= baselineEmissionScale;
+                    surface.reflectionScale *= textureReflectionScale;
 
                     uint albedoArgb = p18SampleTextureWord(surface.textureHandle, surface.uv, 0u);
                     surface.albedo = p18ArgbRgb(albedoArgb);
@@ -457,7 +482,9 @@ final class P18LabPbrShadingPatch {
                         if (emissive > 0u && emissive < 255u) {
                             float emissionStrength = float(emissive) / 254.0;
                             surface.emission = surface.albedo
-                                    * (emissionStrength * 1.6 * labPbrEmissionScale);
+                                    * (emissionStrength
+                                    * uintBitsToFloat(scene.data[83])
+                                    * labPbrEmissionScale);
                         }
                     }
 
@@ -474,7 +501,7 @@ final class P18LabPbrShadingPatch {
                     vec3 normal = resolvedSurfaceNormal(hit, rayDirection);
                     vec3 albedo = materialColor(hit.materialId);
                     vec4 emission = materialEmission(hit.materialId);
-                    vec3 emitted = emission.rgb * emission.a * 1.6;
+                    vec3 emitted = emission.rgb * emission.a * uintBitsToFloat(scene.data[83]);
                 """,
                 """
                     P18SurfaceSample p18Surface = p18ResolveSurface(hit, rayOrigin, rayDirection);
@@ -603,7 +630,7 @@ final class P18LabPbrShadingPatch {
                 """
                     int slot = sectionSlotForVoxel(hit.voxel);
                     vec4 surfaceEmission = emissiveMode ? materialEmission(hit.materialId) : vec4(0.0);
-                    vec3 emitted = surfaceEmission.rgb * surfaceEmission.a * 1.6;
+                    vec3 emitted = surfaceEmission.rgb * surfaceEmission.a * uintBitsToFloat(scene.data[83]);
                 """,
                 """
                     int slot = sectionSlotForVoxel(hit.voxel);
@@ -617,8 +644,8 @@ final class P18LabPbrShadingPatch {
         );
         local = replaceRequiredOnce(
                 local,
-                "return packRgba(materialColor(hit.materialId) * 0.05 + emitted, 255u);",
-                "return packRgba(p18Diffuse * (0.05 * p18Surface.ao) + emitted, 255u);",
+                "return packRgba(materialColor(hit.materialId) * uintBitsToFloat(scene.data[82]) + emitted, 255u);",
+                "return packRgba(p18Diffuse * (uintBitsToFloat(scene.data[82]) * p18Surface.ao) + emitted, 255u);",
                 "local light no-section fallback"
         );
         local = replaceRequiredOnce(
@@ -629,8 +656,8 @@ final class P18LabPbrShadingPatch {
         );
         local = replaceRequiredOnce(
                 local,
-                "vec3 lighting = vec3(0.045);",
-                "vec3 lighting = vec3(0.045 * p18Surface.ao);",
+                "vec3 lighting = vec3(uintBitsToFloat(scene.data[82]));",
+                "vec3 lighting = vec3(uintBitsToFloat(scene.data[82]) * p18Surface.ao);",
                 "local light ambient AO"
         );
         local = replaceRequiredOnce(
@@ -658,8 +685,8 @@ final class P18LabPbrShadingPatch {
                 composite,
                 """
                     vec4 emission = materialEmission(hit.materialId);
-                    vec3 emitted = emission.rgb * emission.a * 1.6;
-                    vec3 localBase = materialColor(hit.materialId) * 0.045 + emitted;
+                    vec3 emitted = emission.rgb * emission.a * uintBitsToFloat(scene.data[83]);
+                    vec3 localBase = materialColor(hit.materialId) * uintBitsToFloat(scene.data[82]) + emitted;
                 """,
                 """
                     P18SurfaceSample p18Surface = p18ResolveSurface(
@@ -668,7 +695,7 @@ final class P18LabPbrShadingPatch {
                     vec3 emitted = p18Surface.emission;
                     vec3 localBase = p18Surface.albedo
                             * (1.0 - p18Surface.metallic)
-                            * (0.045 * p18Surface.ao)
+                            * (uintBitsToFloat(scene.data[82]) * p18Surface.ao)
                             + emitted;
                 """,
                 "GI composite local base"

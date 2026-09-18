@@ -22,7 +22,7 @@ import java.util.Objects;
  * deduplicated before upload.</p>
  */
 public final class GpuPbrTextureScene {
-    public static final int ABI_VERSION = 3;
+    public static final int ABI_VERSION = 4;
     public static final int MAX_TEXTURE_HANDLES = PbrTextureHandleRegistry.MAX_HANDLE + 1;
     public static final int MAX_TEXTURE_DIMENSION = 128;
     public static final int MAX_TEXELS = 2_097_152;
@@ -38,7 +38,7 @@ public final class GpuPbrTextureScene {
     public static final int FLAG_TIMELINE_TRUNCATED = 1 << 6;
 
     public static final int HEADER_WORDS = 8;
-    public static final int DESCRIPTOR_WORDS_PER_RECORD = 16;
+    public static final int DESCRIPTOR_WORDS_PER_RECORD = 24;
     public static final int DESCRIPTOR_WORDS =
             MAX_TEXTURE_HANDLES * DESCRIPTOR_WORDS_PER_RECORD;
     public static final int ANIMATION_POOL_WORDS = MAX_ANIMATION_TIMELINE_WORDS;
@@ -235,6 +235,14 @@ public final class GpuPbrTextureScene {
                     descriptor + 15,
                     Float.floatToRawIntBits(texture.runtimeProperties().alphaCutoff())
             );
+            putWord(
+                    buffer,
+                    descriptor + 16,
+                    Float.floatToRawIntBits(texture.runtimeProperties().reflectionScale())
+            );
+            for (int reserved = 17; reserved < DESCRIPTOR_WORDS_PER_RECORD; reserved++) {
+                putWord(buffer, descriptor + reserved, 0);
+            }
 
             packedTextures++;
             if (downsampled) downsampledTextures++;
