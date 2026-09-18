@@ -24,7 +24,7 @@ public final class TotemLumenVideoSettingsIntegration {
             int x = Math.max(6, scaledWidth - buttonWidth - 6);
             Button button = Button.builder(
                     Component.translatable("screen.totem-lumen.entry"),
-                    ignored -> client.setScreen(new TotemLumenVideoSettingsScreen(screen))
+                    ignored -> client.gui.setScreen(new TotemLumenVideoSettingsScreen(screen))
             ).bounds(x, 6, buttonWidth, 20).build();
 
             Screens.getWidgets(screen).add(button);
