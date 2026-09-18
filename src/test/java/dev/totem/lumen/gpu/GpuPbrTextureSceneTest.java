@@ -3,6 +3,7 @@ package dev.totem.lumen.gpu;
 import dev.totem.lumen.material.PbrAnimation;
 import dev.totem.lumen.material.PbrImage;
 import dev.totem.lumen.material.PbrTextureData;
+import dev.totem.lumen.material.PbrTextureRuntimeProperties;
 import dev.totem.lumen.material.PbrTextureHandleRegistry;
 import org.junit.jupiter.api.Test;
 
@@ -181,13 +182,18 @@ final class GpuPbrTextureSceneTest {
     }
 
     @Test
-    void suppressesCoarseBlockEmissionOnCampfireWoodButNotFlame() {
-        String logSprite = "minecraft:block/campfire_log_lit";
-        String fireSprite = "minecraft:block/campfire_fire";
-        int logHandle = PbrTextureHandleRegistry.handleFor(logSprite);
-        int fireHandle = PbrTextureHandleRegistry.handleFor(fireSprite);
-
+    void packsStableRuntimeMaterialScalarsWithoutTextureSpecificShaderFlags() {
+        String sprite = "minecraft:block/runtime_rule_test";
+        int handle = PbrTextureHandleRegistry.handleFor(sprite);
         PbrImage still = new PbrImage(1, 1, new int[]{0xFFFFFFFF});
+        PbrTextureRuntimeProperties properties = new PbrTextureRuntimeProperties(
+                0.0f,
+                1.75f,
+                0.65f,
+                1.40f,
+                0.50f
+        );
+
         ByteBuffer buffer = ByteBuffer
                 .allocate((int) GpuPbrTextureScene.MAX_STORAGE_BYTES)
                 .order(ByteOrder.LITTLE_ENDIAN);
@@ -195,26 +201,27 @@ final class GpuPbrTextureSceneTest {
         GpuPbrTextureScene.pack(
                 buffer,
                 0,
-                List.of(
-                        new PbrTextureData(logSprite, still, null, null),
-                        new PbrTextureData(fireSprite, still, null, null)
-                )
+                List.of(new PbrTextureData(
+                        sprite,
+                        still,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        properties
+                ))
         );
 
-        int logDescriptor = GpuPbrTextureScene.DESCRIPTOR_BASE_WORD
-                + logHandle * GpuPbrTextureScene.DESCRIPTOR_WORDS_PER_RECORD;
-        int fireDescriptor = GpuPbrTextureScene.DESCRIPTOR_BASE_WORD
-                + fireHandle * GpuPbrTextureScene.DESCRIPTOR_WORDS_PER_RECORD;
+        int descriptor = GpuPbrTextureScene.DESCRIPTOR_BASE_WORD
+                + handle * GpuPbrTextureScene.DESCRIPTOR_WORDS_PER_RECORD;
 
-        int logFlags = buffer.getInt((logDescriptor + 3) * Integer.BYTES);
-        int fireFlags = buffer.getInt((fireDescriptor + 3) * Integer.BYTES);
-
-        assertNotEquals(0, logFlags & GpuPbrTextureScene.FLAG_SUPPRESS_BLOCK_EMISSION);
-        assertEquals(0, fireFlags & GpuPbrTextureScene.FLAG_SUPPRESS_BLOCK_EMISSION);
-        assertTrue(GpuPbrTextureScene.suppressesBaselineBlockEmission("minecraft:block/campfire_log"));
-        assertTrue(GpuPbrTextureScene.suppressesBaselineBlockEmission("minecraft:block/soul_campfire_log_lit"));
-        assertFalse(GpuPbrTextureScene.suppressesBaselineBlockEmission(fireSprite));
-        assertFalse(GpuPbrTextureScene.suppressesBaselineBlockEmission("minecraft:block/glowstone"));
+        assertEquals(16, GpuPbrTextureScene.DESCRIPTOR_WORDS_PER_RECORD);
+        assertEquals(0.0f, buffer.getFloat((descriptor + 11) * Integer.BYTES));
+        assertEquals(1.75f, buffer.getFloat((descriptor + 12) * Integer.BYTES));
+        assertEquals(0.65f, buffer.getFloat((descriptor + 13) * Integer.BYTES));
+        assertEquals(1.40f, buffer.getFloat((descriptor + 14) * Integer.BYTES));
+        assertEquals(0.50f, buffer.getFloat((descriptor + 15) * Integer.BYTES));
     }
 
     @Test
