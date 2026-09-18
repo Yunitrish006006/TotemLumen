@@ -100,7 +100,7 @@ public final class P16MultipassReflection {
     ) {
         VulkanComputeProgram program = activeProgram;
         VulkanOwnedBuffer scene = attachedScene;
-        if (program == null || scene == null || RendererSettings.reflectionBounces() <= 0) return;
+        if (program == null || scene == null || !RendererSettings.reflectionsEnabled()) return;
 
         try (MemoryStack stack = MemoryStack.stackPush()) {
             VkBufferMemoryBarrier.Buffer baseToReflection = VkBufferMemoryBarrier.calloc(1, stack);
