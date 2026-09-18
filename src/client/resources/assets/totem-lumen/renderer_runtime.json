@@ -23,5 +23,6 @@
   "water_reflection_roughness": 0.025,
   "lava_reflection_roughness": 0.32,
   "water_reflection_scale": 1.0,
-  "lava_reflection_scale": 1.0
+  "lava_reflection_scale": 1.0,
+  "entity_emissive_gain": 2.0
 }
