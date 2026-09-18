@@ -985,9 +985,14 @@ public final class P5StableLookupRenderer {
     }
 
     public static DebugMode cycleMode() {
-        DebugMode previous = mode;
         DebugMode[] values = DebugMode.values();
-        mode = values[(mode.ordinal() + 1) % values.length];
+        return setMode(values[(mode.ordinal() + 1) % values.length]);
+    }
+
+    public static DebugMode setMode(DebugMode nextMode) {
+        if (nextMode == null) throw new IllegalArgumentException("nextMode is required");
+        DebugMode previous = mode;
+        mode = nextMode;
         if (!historyCompatible(mode, previous)) {
             historyValid = false;
         }
