@@ -33,7 +33,7 @@ public final class GpuMaterialPacker {
             buffer.putFloat(material.lightRadiusScale());
             buffer.putFloat(material.lightIntensityScale());
             buffer.putFloat(material.reflectionScale());
-            buffer.putInt(0);
+            buffer.putInt(material.lightEmitterAnchor());
 
             if (buffer.position() - base != GpuSceneAbi.MATERIAL_STRIDE_BYTES) {
                 throw new IllegalStateException("Material ABI stride mismatch");
