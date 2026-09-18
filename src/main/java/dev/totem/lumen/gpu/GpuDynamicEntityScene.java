@@ -141,10 +141,32 @@ public final class GpuDynamicEntityScene {
             putFloat(buffer, descriptor + 13, entity.maxZ() - sectionOriginZ);
             putWord(buffer, descriptor + 14, nextQuad);
             putWord(buffer, descriptor + 15, entity.quadCount());
+            putWord(buffer, descriptor + 16, entityFlags(entity.entityTypeId()));
+            for (int reserved = 17; reserved < ENTITY_DESCRIPTOR_WORDS_PER_RECORD; reserved++) {
+                putWord(buffer, descriptor + reserved, 0);
+            }
 
-            int quadWord = baseWord + QUAD_POOL_BASE_WORD + nextQuad * QUAD_WORDS_PER_RECORD;
-            for (float position : entity.copyQuadPositions()) {
-                putWord(buffer, quadWord++, Float.floatToRawIntBits(position));
+            float[] positions = entity.copyQuadPositions();
+            float[] uvs = entity.copyQuadUvs();
+            for (int quad = 0; quad < entity.quadCount(); quad++) {
+                int quadWord = baseWord + QUAD_POOL_BASE_WORD
+                        + (nextQuad + quad) * QUAD_WORDS_PER_RECORD;
+                int positionBase = quad * 12;
+                for (int word = 0; word < 12; word++) {
+                    putWord(
+                            buffer,
+                            quadWord + word,
+                            Float.floatToRawIntBits(positions[positionBase + word])
+                    );
+                }
+                int uvBase = quad * 8;
+                for (int word = 0; word < 8; word++) {
+                    putWord(
+                            buffer,
+                            quadWord + 12 + word,
+                            Float.floatToRawIntBits(uvs[uvBase + word])
+                    );
+                }
             }
             nextQuad += entity.quadCount();
         }
@@ -166,6 +188,8 @@ public final class GpuDynamicEntityScene {
             maxProbe = Math.max(maxProbe, probe);
         }
 
+        Dimensions spiderEyes = packSpiderEyeTexture(buffer, baseWord, spiderEyeTexture);
+
         putWord(buffer, baseWord, ABI_VERSION);
         putWord(buffer, baseWord + 1, entities.size());
         putWord(buffer, baseWord + 2, totalQuads);
@@ -174,6 +198,14 @@ public final class GpuDynamicEntityScene {
         putWord(buffer, baseWord + 5, maxProbe);
         putWord(buffer, baseWord + 6, ENTITY_DESCRIPTOR_BASE_WORD);
         putWord(buffer, baseWord + 7, SECTION_LOOKUP_BASE_WORD);
+        putWord(buffer, baseWord + 8, spiderEyes.width());
+        putWord(buffer, baseWord + 9, spiderEyes.height());
+        putWord(buffer, baseWord + 10, spiderEyes.width() * spiderEyes.height());
+        putWord(buffer, baseWord + 11, SPIDER_EYE_POOL_BASE_WORD);
+        putWord(buffer, baseWord + 12, spiderEyes.width() > 0 ? 1 : 0);
+        putWord(buffer, baseWord + 13, 0);
+        putWord(buffer, baseWord + 14, 0);
+        putWord(buffer, baseWord + 15, 0);
 
         int usedWords = Math.addExact(
                 QUAD_POOL_BASE_WORD,
@@ -187,6 +219,41 @@ public final class GpuDynamicEntityScene {
                 maxProbe,
                 usedWords
         );
+    }
+
+    private static int entityFlags(String entityTypeId) {
+        return entityTypeId.equals("minecraft:spider")
+                || entityTypeId.equals("minecraft:cave_spider")
+                ? FLAG_SPIDER_EYES
+                : 0;
+    }
+
+    private static Dimensions packSpiderEyeTexture(
+            ByteBuffer buffer,
+            int baseWord,
+            PbrImage image
+    ) {
+        if (image == null) return new Dimensions(0, 0);
+
+        int largest = Math.max(image.width(), image.height());
+        float scale = largest <= MAX_SPIDER_EYE_DIMENSION
+                ? 1.0f
+                : MAX_SPIDER_EYE_DIMENSION / (float) largest;
+        int width = Math.max(1, Math.round(image.width() * scale));
+        int height = Math.max(1, Math.round(image.height() * scale));
+
+        for (int y = 0; y < height; y++) {
+            float v = (y + 0.5f) / height;
+            for (int x = 0; x < width; x++) {
+                float u = (x + 0.5f) / width;
+                putWord(
+                        buffer,
+                        baseWord + SPIDER_EYE_POOL_BASE_WORD + y * width + x,
+                        image.sampleNearest(u, v)
+                );
+            }
+        }
+        return new Dimensions(width, height);
     }
 
     /** Returns the entity index for a packed section candidate, or -1 when absent. Test/debug helper. */
@@ -269,6 +336,9 @@ public final class GpuDynamicEntityScene {
 
     private static int getWord(ByteBuffer buffer, int wordIndex) {
         return buffer.getInt(Math.multiplyExact(wordIndex, Integer.BYTES));
+    }
+
+    private record Dimensions(int width, int height) {
     }
 
     public record PackResult(
