@@ -25,6 +25,7 @@ public final class DynamicEntitySnapshot {
     private final double maxY;
     private final double maxZ;
     private final float[] quadPositions;
+    private final float[] quadUvs;
 
     public DynamicEntitySnapshot(
             long instanceId,
@@ -35,6 +36,28 @@ public final class DynamicEntitySnapshot {
             double worldZ,
             float[] quadPositions
     ) {
+        this(
+                instanceId,
+                dimensionId,
+                entityTypeId,
+                worldX,
+                worldY,
+                worldZ,
+                quadPositions,
+                new float[quadPositions == null ? 0 : quadPositions.length / 3 * 2]
+        );
+    }
+
+    public DynamicEntitySnapshot(
+            long instanceId,
+            String dimensionId,
+            String entityTypeId,
+            double worldX,
+            double worldY,
+            double worldZ,
+            float[] quadPositions,
+            float[] quadUvs
+    ) {
         if (instanceId <= 0L) {
             throw new IllegalArgumentException("instanceId must be positive");
         }
@@ -44,8 +67,12 @@ public final class DynamicEntitySnapshot {
         requireFinite(worldY, "worldY");
         requireFinite(worldZ, "worldZ");
         Objects.requireNonNull(quadPositions, "quadPositions");
+        Objects.requireNonNull(quadUvs, "quadUvs");
         if (quadPositions.length == 0 || quadPositions.length % 12 != 0) {
             throw new IllegalArgumentException("quadPositions must contain one or more 4-vertex quads");
+        }
+        if (quadUvs.length != quadPositions.length / 3 * 2) {
+            throw new IllegalArgumentException("quadUvs must contain one UV pair per entity vertex");
         }
 
         this.instanceId = instanceId;
@@ -53,6 +80,10 @@ public final class DynamicEntitySnapshot {
         this.worldY = worldY;
         this.worldZ = worldZ;
         this.quadPositions = quadPositions.clone();
+        this.quadUvs = quadUvs.clone();
+        for (int i = 0; i < this.quadUvs.length; i++) {
+            requireFinite(this.quadUvs[i], "quad uv");
+        }
 
         float localMinX = Float.POSITIVE_INFINITY;
         float localMinY = Float.POSITIVE_INFINITY;
@@ -136,6 +167,10 @@ public final class DynamicEntitySnapshot {
         return quadPositions.clone();
     }
 
+    public float[] copyQuadUvs() {
+        return quadUvs.clone();
+    }
+
     public boolean geometryEquals(DynamicEntitySnapshot other) {
         return other != null
                 && instanceId == other.instanceId
@@ -144,7 +179,8 @@ public final class DynamicEntitySnapshot {
                 && Double.doubleToLongBits(worldX) == Double.doubleToLongBits(other.worldX)
                 && Double.doubleToLongBits(worldY) == Double.doubleToLongBits(other.worldY)
                 && Double.doubleToLongBits(worldZ) == Double.doubleToLongBits(other.worldZ)
-                && Arrays.equals(quadPositions, other.quadPositions);
+                && Arrays.equals(quadPositions, other.quadPositions)
+                && Arrays.equals(quadUvs, other.quadUvs);
     }
 
     private static double checkedWorldBound(double origin, float local, String name) {
