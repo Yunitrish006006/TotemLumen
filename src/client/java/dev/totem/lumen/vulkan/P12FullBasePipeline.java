@@ -157,6 +157,30 @@ public final class P12FullBasePipeline {
         return failure;
     }
 
+    /**
+     * Rebuilds the staged full-renderer pipelines for the currently attached scene.
+     *
+     * <p>The small bootstrap pipeline remains available while P12-P15 recompiles. P17 and P16 are
+     * restarted only after the new full base succeeds, matching normal startup ordering.</p>
+     *
+     * @return true when a rebuild was started; false when no live Vulkan scene is attached
+     */
+    public static boolean recompile() {
+        VulkanDevice device = MinecraftVulkanBridge.currentDevice();
+        VulkanOwnedBuffer scene = attachedScene;
+        if (device == null || scene == null) {
+            TotemLumenClient.LOGGER.warn(
+                    "Pipeline recompile requested before a live Vulkan scene was attached"
+            );
+            return false;
+        }
+
+        TotemLumenClient.LOGGER.info("Manual renderer pipeline recompile requested");
+        shutdown();
+        attach(device, scene);
+        return true;
+    }
+
     public static void shutdown() {
         P17EnhancedBasePipeline.shutdown();
         P16MultipassReflection.shutdown();
