@@ -11,6 +11,7 @@ import dev.totem.lumen.integration.SceneExtractionBridge;
 import dev.totem.lumen.network.LightingWorldRulesPayload;
 import dev.totem.lumen.render.RendererBootstrap;
 import dev.totem.lumen.render.RendererCompileProgressNotifier;
+import dev.totem.lumen.render.RendererSettings;
 import dev.totem.lumen.vulkan.P5StableLookupRenderer;
 import dev.totem.lumen.vulkan.P5WorldDebugComposite;
 import dev.totem.lumen.vulkan.VulkanComputeProgram;
@@ -38,6 +39,7 @@ public final class TotemLumenClient implements ClientModInitializer {
     @Override
     public void onInitializeClient() {
         LOGGER.info("Initializing Totem Lumen");
+        RendererSettings.initialize();
 
         ClientPlayNetworking.registerGlobalReceiver(LightingWorldRulesPayload.TYPE, (payload, context) -> {
             if (ClientLightingWorldRules.apply(payload.rules())) {
