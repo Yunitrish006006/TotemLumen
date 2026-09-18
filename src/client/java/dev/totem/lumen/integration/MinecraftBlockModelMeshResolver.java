@@ -98,7 +98,10 @@ public final class MinecraftBlockModelMeshResolver {
                                 surface.metallic()
                         );
                 if (surfaceSet != null) {
-                    BlockSurfaceSetRegistry.register(surfaceSet);
+                    int surfaceSetId = BlockSurfaceSetRegistry.register(surfaceSet);
+                    if (surfaceSetId > 0) {
+                        return BlockGeometryCode.texturedCube(surfaceSetId);
+                    }
                 }
                 return BlockGeometryCode.surfaceCube(surface.roughness(), surface.metallic());
             }
