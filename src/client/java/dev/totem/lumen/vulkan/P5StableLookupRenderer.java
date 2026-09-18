@@ -913,9 +913,9 @@ public final class P5StableLookupRenderer {
 
         int windowWidth = Math.max(1, Minecraft.getInstance().getWindow().getWidth());
         int windowHeight = Math.max(1, Minecraft.getInstance().getWindow().getHeight());
-        int targetWidth = RendererSettings.internalResolution().width();
+        int targetWidth = RendererSettings.internalResolution().targetWidth(windowWidth);
         int targetHeight = Math.max(1, Math.round(targetWidth * (windowHeight / (float) windowWidth)));
-        int capacityWidth = RendererSettings.InternalResolution.HIGH.width();
+        int capacityWidth = RendererSettings.InternalResolution.HIGH.targetWidth(windowWidth);
         int capacityHeight = Math.max(1, Math.round(capacityWidth * (windowHeight / (float) windowWidth)));
 
         if (resources == null || resources.width != capacityWidth || resources.height != capacityHeight) {
