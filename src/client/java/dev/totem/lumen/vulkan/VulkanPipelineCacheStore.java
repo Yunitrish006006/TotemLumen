@@ -40,6 +40,8 @@ final class VulkanPipelineCacheStore {
     private static boolean activeLoadedFromDisk;
     private static boolean dirty;
     private static boolean shuttingDown;
+    private static boolean destroyWhenIdle;
+    private static int activeCreates;
 
     private VulkanPipelineCacheStore() {
     }
@@ -50,53 +52,80 @@ final class VulkanPipelineCacheStore {
             LongBuffer pipelineOut,
             String shaderName
     ) {
+        long pipelineCache = 0L;
+        boolean cacheLoadedFromDisk = false;
+        boolean useCache = false;
+
         synchronized (LOCK) {
-            if (shuttingDown) {
-                return createWithoutCache(device, pipelineInfo, pipelineOut, shaderName);
-            }
-            try {
-                ensureSessionCache(device, shaderName);
-            } catch (Throwable cacheFailure) {
-                TotemLumenClient.LOGGER.warn(
-                        "Persistent Vulkan pipeline cache unavailable for {}; compiling without cache",
-                        shaderName,
-                        cacheFailure
-                );
-                return createWithoutCache(device, pipelineInfo, pipelineOut, shaderName);
-            }
-
-            long startedAt = System.nanoTime();
-            int result = VK10.vkCreateComputePipelines(
-                    device.vkDevice(),
-                    activePipelineCache,
-                    pipelineInfo,
-                    null,
-                    pipelineOut
-            );
-            long elapsedMs = (System.nanoTime() - startedAt) / 1_000_000L;
-
-            TotemLumenClient.LOGGER.info(
-                    "Vulkan pipeline creation {}: shader={}, sessionCache={}, elapsed={} ms",
-                    result == VK10.VK_SUCCESS ? "COMPLETE" : "FAILED(" + result + ")",
-                    shaderName,
-                    activeLoadedFromDisk ? "warm" : "cold",
-                    elapsedMs
-            );
-
-            if (result == VK10.VK_SUCCESS) {
-                dirty = true;
+            if (!shuttingDown) {
                 try {
-                    persistActiveCache(shaderName);
-                } catch (Throwable persistFailure) {
+                    ensureSessionCache(device, shaderName);
+                    pipelineCache = activePipelineCache;
+                    cacheLoadedFromDisk = activeLoadedFromDisk;
+                    activeCreates++;
+                    useCache = pipelineCache != 0L;
+                } catch (Throwable cacheFailure) {
                     TotemLumenClient.LOGGER.warn(
-                            "Failed to persist shared Vulkan pipeline cache after {}; renderer remains usable",
+                            "Persistent Vulkan pipeline cache unavailable for {}; compiling without cache",
                             shaderName,
-                            persistFailure
+                            cacheFailure
                     );
                 }
             }
-            return result;
         }
+
+        long startedAt = System.nanoTime();
+        int result = VK10.vkCreateComputePipelines(
+                device.vkDevice(),
+                useCache ? pipelineCache : 0L,
+                pipelineInfo,
+                null,
+                pipelineOut
+        );
+        long elapsedMs = (System.nanoTime() - startedAt) / 1_000_000L;
+
+        TotemLumenClient.LOGGER.info(
+                "Vulkan pipeline creation {}: shader={}, sessionCache={}, concurrentBuilds={}, elapsed={} ms",
+                result == VK10.VK_SUCCESS ? "COMPLETE" : "FAILED(" + result + ")",
+                shaderName,
+                useCache ? (cacheLoadedFromDisk ? "warm" : "cold") : "disabled",
+                useCache ? "enabled" : "n/a",
+                elapsedMs
+        );
+
+        if (useCache) {
+            synchronized (LOCK) {
+                activeCreates--;
+                if (result == VK10.VK_SUCCESS) {
+                    dirty = true;
+                }
+
+                if (activeCreates == 0) {
+                    if (dirty) {
+                        try {
+                            persistActiveCache(shaderName);
+                        } catch (Throwable persistFailure) {
+                            TotemLumenClient.LOGGER.warn(
+                                    "Failed to persist shared Vulkan pipeline cache after {}; renderer remains usable",
+                                    shaderName,
+                                    persistFailure
+                            );
+                        }
+                    }
+                    if (destroyWhenIdle) {
+                        closeSessionCacheLocked("deferred shutdown");
+                    }
+                } else if (result == VK10.VK_SUCCESS) {
+                    TotemLumenClient.LOGGER.info(
+                            "Deferring Vulkan pipeline cache save after {} until {} concurrent build(s) finish",
+                            shaderName,
+                            activeCreates
+                    );
+                }
+                LOCK.notifyAll();
+            }
+        }
+        return result;
     }
 
     static void shutdown() {
@@ -107,23 +136,16 @@ final class VulkanPipelineCacheStore {
                 return;
             }
 
-            if (dirty) {
-                try {
-                    persistActiveCache("session shutdown");
-                } catch (Throwable persistFailure) {
-                    TotemLumenClient.LOGGER.warn(
-                            "Failed to persist shared Vulkan pipeline cache during shutdown",
-                            persistFailure
-                    );
-                }
+            if (activeCreates > 0) {
+                destroyWhenIdle = true;
+                TotemLumenClient.LOGGER.info(
+                        "Vulkan pipeline cache shutdown deferred until {} active pipeline build(s) finish",
+                        activeCreates
+                );
+                return;
             }
 
-            VK10.vkDestroyPipelineCache(activeDevice.vkDevice(), activePipelineCache, null);
-            TotemLumenClient.LOGGER.info(
-                    "Vulkan pipeline cache session CLOSED: file={}",
-                    activeCacheFile == null ? "<none>" : activeCacheFile.getFileName()
-            );
-            resetSessionState();
+            closeSessionCacheLocked("session shutdown");
         }
     }
 
@@ -135,6 +157,13 @@ final class VulkanPipelineCacheStore {
         }
 
         if (activePipelineCache != 0L) {
+            if (activeCreates > 0) {
+                throw new IllegalStateException(
+                        "Cannot switch Vulkan pipeline-cache device while "
+                                + activeCreates
+                                + " pipeline build(s) are active"
+                );
+            }
             if (dirty) {
                 try {
                     persistActiveCache("device switch");
@@ -356,12 +385,41 @@ final class VulkanPipelineCacheStore {
         }
     }
 
+    private static void closeSessionCacheLocked(String reason) {
+        if (activePipelineCache == 0L) {
+            resetSessionState();
+            return;
+        }
+
+        if (dirty) {
+            try {
+                persistActiveCache(reason);
+            } catch (Throwable persistFailure) {
+                TotemLumenClient.LOGGER.warn(
+                        "Failed to persist shared Vulkan pipeline cache during {}",
+                        reason,
+                        persistFailure
+                );
+            }
+        }
+
+        VK10.vkDestroyPipelineCache(activeDevice.vkDevice(), activePipelineCache, null);
+        TotemLumenClient.LOGGER.info(
+                "Vulkan pipeline cache session CLOSED: reason={}, file={}",
+                reason,
+                activeCacheFile == null ? "<none>" : activeCacheFile.getFileName()
+        );
+        resetSessionState();
+    }
+
     private static void resetSessionState() {
         activeDevice = null;
         activeCacheFile = null;
         activePipelineCache = 0L;
         activeLoadedFromDisk = false;
         dirty = false;
+        destroyWhenIdle = false;
+        activeCreates = 0;
     }
 
     private static void deleteQuietly(Path path) {
