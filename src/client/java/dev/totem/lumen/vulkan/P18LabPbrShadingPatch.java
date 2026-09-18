@@ -39,6 +39,7 @@ final class P18LabPbrShadingPatch {
                     float ao;
                     float roughness;
                     float metallic;
+                    float reflectionScale;
                     vec3 f0;
                     vec3 emission;
                 };
@@ -351,9 +352,31 @@ final class P18LabPbrShadingPatch {
                     surface.ao = 1.0;
                     surface.roughness = 0.80;
                     surface.metallic = 0.0;
+                    surface.reflectionScale = 1.0;
                     surface.f0 = vec3(0.04);
                     vec4 baselineEmission = materialEmission(hit.materialId);
-                    surface.emission = baselineEmission.rgb * baselineEmission.a * 1.6;
+                    surface.emission = baselineEmission.rgb
+                            * baselineEmission.a
+                            * uintBitsToFloat(scene.data[83]);
+                    if (hit.materialId < scene.data[23]) {
+                        uint materialBase = MATERIAL_EMISSION_BASE
+                                + hit.materialId * MATERIAL_EMISSION_WORDS_PER_RECORD;
+                        surface.roughness = clamp(
+                                uintBitsToFloat(scene.data[materialBase + 9u]),
+                                0.0,
+                                1.0
+                        );
+                        surface.metallic = clamp(
+                                uintBitsToFloat(scene.data[materialBase + 10u]),
+                                0.0,
+                                1.0
+                        );
+                        surface.reflectionScale = max(
+                                uintBitsToFloat(scene.data[materialBase + 14u]),
+                                0.0
+                        );
+                        surface.f0 = mix(vec3(0.04), surface.albedo, surface.metallic);
+                    }
 
                     // P14E/P17 synthetic materials intentionally keep their dedicated optics.
                     if (hit.materialId >= 0xFFF0u) return surface;
@@ -412,7 +435,9 @@ final class P18LabPbrShadingPatch {
                     float labPbrEmissionScale = uintBitsToFloat(scene.data[descriptor + 12u]);
                     float roughnessScale = uintBitsToFloat(scene.data[descriptor + 13u]);
                     float normalStrength = uintBitsToFloat(scene.data[descriptor + 14u]);
+                    float textureReflectionScale = uintBitsToFloat(scene.data[descriptor + 16u]);
                     surface.emission *= baselineEmissionScale;
+                    surface.reflectionScale *= textureReflectionScale;
 
                     uint albedoArgb = p18SampleTextureWord(surface.textureHandle, surface.uv, 0u);
                     surface.albedo = p18ArgbRgb(albedoArgb);
