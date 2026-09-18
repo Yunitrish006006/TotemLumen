@@ -57,5 +57,9 @@
   "screen.totem-lumen.renderer_state.disabled_unsupported_vulkan": "已停用（Vulkan 裝置不支援）",
   "screen.totem-lumen.renderer_state.waiting_for_pipeline": "正在編譯啟動管線",
   "screen.totem-lumen.renderer_state.ready_for_scene_extraction": "已就緒",
-  "screen.totem-lumen.renderer_state.pipeline_failed": "啟動管線失敗"
+  "screen.totem-lumen.renderer_state.pipeline_failed": "啟動管線失敗",
+  "screen.totem-lumen.reflection_bounces": "反射次數：%s",
+  "screen.totem-lumen.reflection_distance": "反射距離：%s 格",
+  "screen.totem-lumen.value.off": "關閉",
+  "screen.totem-lumen.value.bounces": "%s 次"
 }
