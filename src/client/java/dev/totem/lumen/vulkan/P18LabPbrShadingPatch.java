@@ -26,19 +26,6 @@ final class P18LabPbrShadingPatch {
         }
 
         String declarations = ("""
-                P18SurfaceSample p18ResolveSurface(
-                        HitResult hit,
-                        vec3 rayOrigin,
-                        vec3 rayDirection
-                );
-
-                """).formatted(
-                GpuPbrTextureScene.FLAG_HAS_NORMAL,
-                GpuPbrTextureScene.FLAG_HAS_SPECULAR
-        );
-        source = source.replace(declarationMarker, declarations + declarationMarker);
-
-        String helpers = """
                 const uint P18_TEXTURE_FLAG_HAS_NORMAL = %du;
                 const uint P18_TEXTURE_FLAG_HAS_SPECULAR = %du;
 
@@ -56,6 +43,19 @@ final class P18LabPbrShadingPatch {
                     vec3 emission;
                 };
 
+                P18SurfaceSample p18ResolveSurface(
+                        HitResult hit,
+                        vec3 rayOrigin,
+                        vec3 rayDirection
+                );
+
+                """).formatted(
+                GpuPbrTextureScene.FLAG_HAS_NORMAL,
+                GpuPbrTextureScene.FLAG_HAS_SPECULAR
+        );
+        source = source.replace(declarationMarker, declarations + declarationMarker);
+
+        String helpers = """
                 vec3 p18ArgbRgb(uint argb) {
                     return vec3(
                         float((argb >> 16u) & 255u),
