@@ -3,9 +3,8 @@ package dev.totem.lumen.material;
 /**
  * Immutable texture triplet loaded from one resource-pack sprite.
  *
- * <p>Each LabPBR layer may have its own Minecraft animation timeline. Keeping the source sheet and
- * timeline together lets the GPU packer build one compact, deduplicated animation sequence without
- * re-uploading the whole texture scene every frame.</p>
+ * <p>Each LabPBR layer may have its own Minecraft animation timeline. Runtime properties are kept
+ * separately from the generated shader so material-rule updates only change GPU data.</p>
  */
 public record PbrTextureData(
         String spriteId,
@@ -14,7 +13,8 @@ public record PbrTextureData(
         PbrImage specular,
         PbrAnimation albedoAnimation,
         PbrAnimation normalAnimation,
-        PbrAnimation specularAnimation
+        PbrAnimation specularAnimation,
+        PbrTextureRuntimeProperties runtimeProperties
 ) {
     public PbrTextureData {
         if (spriteId == null || spriteId.isBlank()) {
@@ -23,6 +23,30 @@ public record PbrTextureData(
         if (albedo == null) {
             throw new IllegalArgumentException("albedo image is required");
         }
+        if (runtimeProperties == null) {
+            runtimeProperties = PbrTextureRuntimeProperties.DEFAULT;
+        }
+    }
+
+    public PbrTextureData(
+            String spriteId,
+            PbrImage albedo,
+            PbrImage normal,
+            PbrImage specular,
+            PbrAnimation albedoAnimation,
+            PbrAnimation normalAnimation,
+            PbrAnimation specularAnimation
+    ) {
+        this(
+                spriteId,
+                albedo,
+                normal,
+                specular,
+                albedoAnimation,
+                normalAnimation,
+                specularAnimation,
+                PbrTextureRuntimeProperties.DEFAULT
+        );
     }
 
     /** Backward-compatible still-texture constructor used by tests and non-animated loaders. */
@@ -32,7 +56,16 @@ public record PbrTextureData(
             PbrImage normal,
             PbrImage specular
     ) {
-        this(spriteId, albedo, normal, specular, null, null, null);
+        this(
+                spriteId,
+                albedo,
+                normal,
+                specular,
+                null,
+                null,
+                null,
+                PbrTextureRuntimeProperties.DEFAULT
+        );
     }
 
     public boolean hasNormalMap() {
