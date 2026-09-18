@@ -104,7 +104,7 @@ final class RendererQualityShaderPatch {
         source = replaceRequiredOnce(source, oldMoon, newMoon, "moon quality");
 
         TotemLumenClient.LOGGER.info(
-                "Runtime renderer quality shader patch active: giSamples=1/2/4, shadowSamples=1/2/4, "
+                "Runtime renderer quality shader patch active: giSamples=1/2/4, shadowSamples=1/2/4 directional+localArea, "
                         + "temporal=off/fast/stable, denoiseRadius=0/1/2"
         );
         return source;
