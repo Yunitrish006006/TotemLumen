@@ -342,24 +342,19 @@ final class P14EFluidShaderPatch {
                 """;
         source = source.replace(debugMarker, helper + debugMarker);
 
-        String modeMarker = """
-                        if (mode == 6u) {
-                            return localLightColor(hit, primaryOrigin, primaryDirection, true);
-                        }
-                        return softShadowColor(hit, primaryOrigin, primaryDirection);
-                """;
-        String modeReplacement = """
-                        if (mode == 6u) {
-                            return localLightColor(hit, primaryOrigin, primaryDirection, true);
-                        }
-                        if (mode == 12u) {
-                            return packRgba(p14eFluidDebugColor(hit), 255u);
-                        }
-                        return softShadowColor(hit, primaryOrigin, primaryDirection);
-                """;
-        if (!source.contains(modeMarker)) {
+        String fallbackMarker = "return softShadowColor(hit, primaryOrigin, primaryDirection);";
+        int debugStart = source.indexOf(debugMarker);
+        int fallbackIndex = source.indexOf(fallbackMarker, debugStart);
+        if (fallbackIndex < 0) {
             throw new IllegalStateException("P14E fluid debug-view marker missing: debugColor fallback");
         }
-        return source.replace(modeMarker, modeReplacement);
+        String modeBranch = """
+                if (mode == 12u) {
+                    return packRgba(p14eFluidDebugColor(hit), 255u);
+                }
+                """;
+        return source.substring(0, fallbackIndex)
+                + modeBranch
+                + source.substring(fallbackIndex);
     }
 }
