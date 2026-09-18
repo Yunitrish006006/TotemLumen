@@ -16,6 +16,7 @@ The main page contains user-facing renderer quality and feature controls. Pipeli
 
 | Setting | Values | Default | Runtime effect |
 | --- | --- | --- | --- |
+| Totem Lumen renderer | Off / On | On | Stops/starts Totem Lumen compute submission and final composite; Minecraft Vulkan rendering remains active |
 | GI quality | Low / Balanced / High | Balanced | 1 / 2 / 4 one-bounce GI samples per frame |
 | Shadow quality | Low / Balanced / High | Balanced | 1 / 2 / 4 Sun/Moon soft-shadow transmission rays |
 | Ray distance | 64 / 128 / 256 blocks | 256 | Primary/shared scene trace distance |
@@ -56,6 +57,21 @@ Changing a runtime setting increments a renderer settings revision. P5 invalidat
 
 ## Internal-resolution ownership
 
+### Active-copy regression fix
+
+The initial fixed-capacity implementation dispatched only the selected active extent but still copied the pixel buffer into the Vulkan image using the maximum-capacity row length and image extent. Because shader output is packed linearly using the active width, low-resolution modes were interpreted with the wrong row stride and only part of the screen appeared rendered.
+
+The copy path now uses the same active dimensions for all three Vulkan copy fields:
+
+```text
+bufferRowLength  = active render width
+bufferImageHeight = active render height
+imageExtent       = active render width x active render height
+```
+
+The final GUI composite then samples the corresponding active UV rectangle from the fixed-capacity texture and scales it across the full Minecraft viewport.
+
+
 Changing internal resolution must not cause the large MoltenVK pipelines to be recompiled.
 
 P5 therefore allocates its render/history resources once at the maximum **High** extent (240 pixels wide, aspect-correct height) for the current window aspect. The selected quality controls only the active render extent:
@@ -83,6 +99,18 @@ P12/P13 lighting
 This preserves P15's colored-glass source markers and averages RGB transmission across the selected 1/2/4 directional samples instead of replacing glass with binary visibility.
 
 Local point lights remain point emitters and therefore keep a single exact visibility/transmission ray per light. The shadow-quality setting controls the area-like Sun/Moon directional sampling path.
+
+## Renderer master toggle
+
+`rendererEnabled=false` is a runtime renderer bypass, not a mod unload:
+
+- P5 does not submit Totem Lumen compute frames;
+- the Totem Lumen full-screen composite is skipped, revealing Minecraft's normal Vulkan output;
+- compile-progress chat messages are suppressed while disabled;
+- existing GPU resources/pipelines remain resident so re-enabling is immediate;
+- captured scene data may continue to update in the background so re-enabling does not require a world reload.
+
+The value is persistent and defaults to enabled.
 
 ## Reflection semantics
 
