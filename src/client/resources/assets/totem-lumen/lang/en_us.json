@@ -82,5 +82,6 @@
   "screen.totem-lumen.quality.fast": "Fast",
   "screen.totem-lumen.quality.stable": "Stable",
   "screen.totem-lumen.quality.off": "Off",
-  "screen.totem-lumen.quality.quality": "Quality"
+  "screen.totem-lumen.quality.quality": "Quality",
+  "screen.totem-lumen.renderer_enabled": "Totem Lumen renderer: %s"
 }
