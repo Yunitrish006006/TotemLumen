@@ -145,17 +145,29 @@ final class P14EFluidOpticsPatch {
 
     /** Applies only to the extracted P16 pass, where these markers exist. */
     private static String patchP16WaterReflection(String source) {
-        if (!source.contains("vec2 p16SurfaceProperties(HitResult hit) {")) return source;
+        if (!source.contains("vec3 p16SurfaceProperties(HitResult hit) {")) return source;
 
         String propertyMarker = """
-                vec2 p16SurfaceProperties(HitResult hit) {
-                    uint geometryCode = geometryAt(hit.voxel);
+                vec3 p16SurfaceProperties(HitResult hit) {
+                    if (hit.materialId < scene.data[23]) {
                 """;
         String propertyReplacement = """
-                vec2 p16SurfaceProperties(HitResult hit) {
-                    if (hit.materialId == P14E_WATER_MATERIAL_ID) return vec2(0.025, 0.0);
-                    if (hit.materialId == P14E_LAVA_MATERIAL_ID) return vec2(0.32, 0.0);
-                    uint geometryCode = geometryAt(hit.voxel);
+                vec3 p16SurfaceProperties(HitResult hit) {
+                    if (hit.materialId == P14E_WATER_MATERIAL_ID) {
+                        return vec3(
+                            clamp(uintBitsToFloat(scene.data[85]), 0.0, 1.0),
+                            0.0,
+                            max(uintBitsToFloat(scene.data[87]), 0.0)
+                        );
+                    }
+                    if (hit.materialId == P14E_LAVA_MATERIAL_ID) {
+                        return vec3(
+                            clamp(uintBitsToFloat(scene.data[86]), 0.0, 1.0),
+                            0.0,
+                            max(uintBitsToFloat(scene.data[88]), 0.0)
+                        );
+                    }
+                    if (hit.materialId < scene.data[23]) {
                 """;
         source = replaceRequiredOnce(
                 source,
