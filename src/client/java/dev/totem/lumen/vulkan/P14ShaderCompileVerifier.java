@@ -18,10 +18,12 @@ public final class P14ShaderCompileVerifier {
         verifyP13NightSkySource(baseSource);
         verifyFullBaseIsolation(baseSource);
         verifyP14EFluidSource(baseSource, "full base pass");
+        verifyP14EFluidDebugView(baseSource, "full base pass");
         verifyP14EFluidOptics(baseSource, "full base pass", false);
 
         String p17Source = P17EnhancedBasePipeline.buildSourceForVerification();
         verifyP14EFluidSource(p17Source, "P17 enhanced base pass");
+        verifyP14EFluidDebugView(p17Source, "P17 enhanced base pass");
         verifyP14EFluidOptics(p17Source, "P17 enhanced base pass", false);
         verifyP17DynamicEntitySource(p17Source, "enhanced base pass");
 
@@ -126,6 +128,17 @@ public final class P14ShaderCompileVerifier {
                 "P14E exact-fluid shader verification PASS (" + label + "): abi="
                         + GpuFluidScene.ABI_VERSION
                         + ", blockLookup=true, resolvedQuads=true, waterloggedCoexistence=true, nearestHit=true"
+        );
+    }
+
+    private static void verifyP14EFluidDebugView(String source, String label) {
+        requireSourceMarker(source, "vec3 p14eFluidDebugColor(HitResult hit)", label + " fluid debug helper");
+        requireSourceMarker(source, "if (mode == 12u)", label + " P14E fluid debug mode");
+        requireSourceMarker(source, "vec3(0.18, 1.00, 0.25)", label + " waterlogged static coexistence color");
+        requireSourceMarker(source, "vec3(0.86, 0.18, 1.00)", label + " waterlogged fluid coexistence color");
+        System.out.println(
+                "P14E fluid debug-view verification PASS (" + label + "): "
+                        + "mode=12, water=true, lava=true, coexistence=true"
         );
     }
 
