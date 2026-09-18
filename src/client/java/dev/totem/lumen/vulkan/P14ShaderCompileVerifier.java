@@ -214,7 +214,7 @@ public final class P14ShaderCompileVerifier {
         );
         requireSourceMarker(source, "int denoiseRadius = int(min(scene.data[50], 2u));", "runtime denoise radius");
         requireSourceMarker(source, "for (int offsetY = -2; offsetY <= 2; offsetY++)", "5x5 denoise bound");
-        requireSourceMarker(source, "float p13DirectionalVisibility(", "production soft-shadow helper");
+        requireSourceMarker(source, "vec3 tlRuntimeDirectionalTransmission(", "production soft-shadow helper");
         System.out.println(
                 "Renderer quality-settings verification PASS: gi=1/2/4, shadows=1/2/4, "
                         + "temporal=off/16/64, denoiseRadius=0/1/2"
