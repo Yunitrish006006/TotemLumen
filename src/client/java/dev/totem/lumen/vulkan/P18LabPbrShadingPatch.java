@@ -428,24 +428,7 @@ final class P18LabPbrShadingPatch {
                         + "* p13SkyVisibility(hitPoint, normal);",
                 "environment AO"
         );
-        source = replaceRequiredOnce(
-                source,
-                "return albedo * vec3(0.145, 0.040, 0.018) * facing + emitted;",
-                "return albedo * vec3(0.145, 0.040, 0.018) * (facing * p18Surface.ao) + emitted;",
-                "Nether AO"
-        );
-        source = replaceRequiredOnce(
-                source,
-                "return albedo * vec3(0.070, 0.046, 0.115) * facing + emitted;",
-                "return albedo * vec3(0.070, 0.046, 0.115) * (facing * p18Surface.ao) + emitted;",
-                "End AO"
-        );
-        source = replaceRequiredOnce(
-                source,
-                "return albedo * vec3(0.060, 0.070, 0.090) + emitted;",
-                "return albedo * vec3(0.060, 0.070, 0.090) * p18Surface.ao + emitted;",
-                "fallback AO"
-        );
+        source = patchEnvironmentAmbientAo(source);
 
         source = replaceRequiredOnce(
                 source,
@@ -476,6 +459,56 @@ final class P18LabPbrShadingPatch {
                         + "emission=true"
         );
         return source;
+    }
+
+    private static String patchEnvironmentAmbientAo(String source) {
+        String startMarker = "vec3 p13EnvironmentSurfaceRadiance(\n";
+        String endMarker = "vec3 p13OneBounceIndirectRgb(\n";
+        int start = source.indexOf(startMarker);
+        int end = source.indexOf(endMarker, start);
+        if (start < 0 || end < 0 || end <= start) {
+            throw new IllegalStateException("P18C shader marker missing: environment span for AO");
+        }
+
+        String environment = source.substring(start, end);
+        String facingNeedle = " * facing + emitted;";
+        int firstFacing = environment.indexOf(facingNeedle);
+        int secondFacing = firstFacing < 0
+                ? -1
+                : environment.indexOf(facingNeedle, firstFacing + facingNeedle.length());
+        int thirdFacing = secondFacing < 0
+                ? -1
+                : environment.indexOf(facingNeedle, secondFacing + facingNeedle.length());
+        if (firstFacing < 0 || secondFacing < 0 || thirdFacing >= 0) {
+            throw new IllegalStateException(
+                    "P18C shader marker missing/ambiguous: dimension ambient facing returns"
+            );
+        }
+
+        environment = environment.substring(0, firstFacing)
+                + " * (facing * p18Surface.ao) + emitted;"
+                + environment.substring(firstFacing + facingNeedle.length());
+        secondFacing = environment.indexOf(
+                facingNeedle,
+                firstFacing + " * (facing * p18Surface.ao) + emitted;".length()
+        );
+        if (secondFacing < 0) {
+            throw new IllegalStateException("P18C shader marker missing: second ambient facing return");
+        }
+        environment = environment.substring(0, secondFacing)
+                + " * (facing * p18Surface.ao) + emitted;"
+                + environment.substring(secondFacing + facingNeedle.length());
+
+        String fallbackNeedle = "return albedo * vec3(0.060, 0.070, 0.090) + emitted;";
+        int fallback = environment.indexOf(fallbackNeedle);
+        if (fallback < 0) {
+            throw new IllegalStateException("P18C shader marker missing: fallback ambient return");
+        }
+        environment = environment.substring(0, fallback)
+                + "return albedo * vec3(0.060, 0.070, 0.090) * p18Surface.ao + emitted;"
+                + environment.substring(fallback + fallbackNeedle.length());
+
+        return source.substring(0, start) + environment + source.substring(end);
     }
 
     private static String patchLocalLight(String source) {
