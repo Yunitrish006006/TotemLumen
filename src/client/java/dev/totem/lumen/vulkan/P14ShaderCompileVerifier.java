@@ -249,8 +249,8 @@ public final class P14ShaderCompileVerifier {
         );
         requireSourceMarker(
                 source,
-                "if (p18AlbedoAlpha(textureHandle, surfaceUv) == 0u) return;",
-                label + " mesh alpha-zero rejection"
+                "if (!p18AlphaAccept(textureHandle, surfaceUv, alphaSalt)) return;",
+                label + " mesh alpha coverage rejection"
         );
         requireSourceMarker(
                 source,
@@ -259,8 +259,18 @@ public final class P14ShaderCompileVerifier {
         );
         requireSourceMarker(
                 source,
-                "if (p18AlbedoAlpha(textureHandle, uv) == 0u)",
-                label + " textured-cube alpha-zero rejection"
+                "if (alpha == 0u) return false;",
+                label + " exact zero-alpha hole"
+        );
+        requireSourceMarker(
+                source,
+                "return sample < float(alpha) / 255.0;",
+                label + " stochastic partial-alpha coverage"
+        );
+        requireSourceMarker(
+                source,
+                "if (!p18AlphaAccept(textureHandle, uv, alphaSalt))",
+                label + " textured-cube alpha coverage rejection"
         );
         if (reflectionPass) {
             requireSourceMarker(
@@ -271,7 +281,7 @@ public final class P14ShaderCompileVerifier {
         }
         System.out.println(
                 "P18 textured-surface verification PASS (" + label + "): "
-                        + "meshUv=true, cubeFastPath=true, alphaZeroReject=true, reflectionFallback="
+                        + "meshUv=true, cubeFastPath=true, alphaZeroReject=true, partialAlpha=stochastic, reflectionFallback="
                         + reflectionPass
         );
     }
