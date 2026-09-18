@@ -95,12 +95,8 @@ final class P14EFluidOpticsPatch {
         source = source.replace(traceMarker, helper + traceMarker);
 
         String oldOptical = """
-                        bool p14eWaterSurface = candidate.materialId == P14E_WATER_MATERIAL_ID;
                         uint geometryCode = geometryAt(candidate.voxel);
-                        vec4 optical = p14eWaterSurface
-                                ? p14eWaterTransmission(candidate)
-                                : p15MaterialTransmission(candidate.materialId, geometryCode);
-                        float minTransmission = clamp(uintBitsToFloat(scene.data[63]), 0.0, 1.0);
+                        vec4 optical = p15MaterialTransmission(candidate.materialId, geometryCode);
                         if (optical.a <= minTransmission) {
                             candidate.distance += traveled;
                             result.hit = candidate;
@@ -108,21 +104,13 @@ final class P14EFluidOpticsPatch {
                         }
 
                         result.transmission *= optical.rgb * optical.a;
-                        float exitEpsilon = max(uintBitsToFloat(scene.data[62]), 0.00001);
-                        float advance;
-                        if (p14eWaterSurface) {
-                            // Advance only through the exact interface. Jumping to the voxel exit
-                            // would incorrectly skip waterlogged block geometry in the same cell.
-                            advance = candidate.distance + exitEpsilon;
-                        } else {
-                            vec3 hitPoint = cursorOrigin + dir * candidate.distance;
-                            float exitDistance = p15VoxelExitDistance(
-                                hitPoint + dir * 0.0005,
-                                dir,
-                                candidate.voxel
-                            );
-                            advance = candidate.distance + exitDistance + exitEpsilon;
-                        }
+                        vec3 hitPoint = cursorOrigin + dir * candidate.distance;
+                        float exitDistance = p15VoxelExitDistance(
+                            hitPoint + dir * 0.0005,
+                            dir,
+                            candidate.voxel
+                        );
+                        float advance = candidate.distance + exitDistance + exitEpsilon;
                 """;
         String newOptical = """
                         bool p14eWaterSurface = candidate.materialId == P14E_WATER_MATERIAL_ID;
@@ -130,7 +118,6 @@ final class P14EFluidOpticsPatch {
                         vec4 optical = p14eWaterSurface
                                 ? p14eWaterTransmission(candidate)
                                 : p15MaterialTransmission(candidate.materialId, geometryCode);
-                        float minTransmission = clamp(uintBitsToFloat(scene.data[63]), 0.0, 1.0);
                         if (optical.a <= minTransmission) {
                             candidate.distance += traveled;
                             result.hit = candidate;
@@ -138,7 +125,6 @@ final class P14EFluidOpticsPatch {
                         }
 
                         result.transmission *= optical.rgb * optical.a;
-                        float exitEpsilon = max(uintBitsToFloat(scene.data[62]), 0.00001);
                         float advance;
                         if (p14eWaterSurface) {
                             // Advance only through the exact interface. Jumping to the voxel exit
