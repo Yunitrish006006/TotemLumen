@@ -16,7 +16,7 @@ public final class P14ShaderCompileVerifier {
 
         String baseSource = P12FullBasePipeline.buildSourceForVerification();
         verifyP13NightSkySource(baseSource);
-        verifyFullBaseIsolation(baseSource);
+        verifyUnifiedFullLighting(baseSource);
         verifyP14EFluidSource(baseSource, "full base pass");
         verifyP14EFluidDebugView(baseSource, "full base pass");
         verifyP14EFluidOptics(baseSource, "full base pass", false);
@@ -25,14 +25,7 @@ public final class P14ShaderCompileVerifier {
         verifyP18TexturedSurfaces(baseSource, "full base pass", false);
         verifyP18LabPbrShading(baseSource, "full base pass", false);
 
-        String p17Source = P17EnhancedBasePipeline.buildSourceForVerification();
-        verifyP14EFluidSource(p17Source, "P17 enhanced base pass");
-        verifyP14EFluidDebugView(p17Source, "P17 enhanced base pass");
-        verifyP14EFluidOptics(p17Source, "P17 enhanced base pass", false);
-        verifyP17DynamicEntitySource(p17Source, "enhanced base pass");
-        verifyFixedCapacitySceneTails(p17Source, "P17 enhanced base pass");
-        verifyP18TexturedSurfaces(p17Source, "P17 enhanced base pass", false);
-        verifyP18LabPbrShading(p17Source, "P17 enhanced base pass", false);
+        verifyP17DynamicEntitySource(baseSource, "unified full lighting pass");
 
         String reflectionGeometry = P14EFluidShaderPatch.apply(P16ReflectionPassShader.build());
         String reflectionEntity = P17ShaderIntegration.apply(reflectionGeometry);
@@ -53,8 +46,12 @@ public final class P14ShaderCompileVerifier {
 
         try {
             compileAndVerify(compiler, BOOTSTRAP_SHADER_NAME, bootstrapSource, "Vulkan bootstrap readiness pass");
-            compileAndVerify(compiler, P12FullBasePipeline.SHADER_NAME, baseSource, "P12-P15+P14E full base pass");
-            compileAndVerify(compiler, P17EnhancedBasePipeline.SHADER_NAME, p17Source, "P14E+P17 enhanced base pass");
+            compileAndVerify(
+                    compiler,
+                    P12FullBasePipeline.SHADER_NAME,
+                    baseSource,
+                    "unified full lighting + dynamic entities pass"
+            );
             compileAndVerify(
                     compiler,
                     P16ReflectionPassShader.SHADER_NAME,
@@ -109,13 +106,16 @@ public final class P14ShaderCompileVerifier {
         );
     }
 
-    private static void verifyFullBaseIsolation(String source) {
-        if (source.contains("P17_ENTITY_MATERIAL_ID")) {
-            throw new IllegalStateException("P17 must remain outside the full P12-P15 base pipeline");
-        }
+    private static void verifyUnifiedFullLighting(String source) {
+        requireSourceMarker(
+                source,
+                "const uint P17_ENTITY_MATERIAL_ID = 0xFFFEu;",
+                "unified dynamic-entity tracing"
+        );
         System.out.println(
-                "Staged readiness verification PASS: bootstrap->P12-P15+P14E->P17/P16, "
-                        + "fullBaseContainsP17=false"
+                "Unified full-lighting verification PASS: "
+                        + "staticWorld=true, fluids=true, pbr=true, dynamicEntities=true, "
+                        + "duplicateEntityPipeline=false"
         );
     }
 
