@@ -116,6 +116,14 @@ final class P18TexturedSurfaceShaderPatch {
                     if (alpha == 0u) return false;
                     if (alpha == 255u) return true;
 
+                    uint textureBase = p18TextureSceneBase();
+                    uint descriptor = textureBase + P18_TEXTURE_DESCRIPTOR_BASE
+                            + textureHandle * P18_TEXTURE_DESCRIPTOR_WORDS;
+                    float alphaCutoff = uintBitsToFloat(scene.data[descriptor + 15u]);
+                    if (alphaCutoff > 0.0) {
+                        return float(alpha) / 255.0 >= alphaCutoff;
+                    }
+
                     uint state = textureHandle * 0x9E3779B1u
                             ^ floatBitsToUint(uv.x) * 0x85EBCA77u
                             ^ floatBitsToUint(uv.y) * 0xC2B2AE3Du
