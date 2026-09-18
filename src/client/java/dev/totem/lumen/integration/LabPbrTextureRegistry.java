@@ -1,7 +1,12 @@
 package dev.totem.lumen.integration;
 
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import com.mojang.blaze3d.platform.NativeImage;
 import dev.totem.lumen.TotemLumenClient;
+import dev.totem.lumen.material.PbrAnimation;
 import dev.totem.lumen.material.PbrImage;
 import dev.totem.lumen.material.PbrTextureData;
 import dev.totem.lumen.material.PbrTextureHandleRegistry;
@@ -10,6 +15,8 @@ import net.minecraft.resources.Identifier;
 import net.minecraft.server.packs.resources.ResourceManager;
 
 import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -48,6 +55,7 @@ public final class LabPbrTextureRegistry {
     private static volatile DeclaredFormat declaredFormat = DeclaredFormat.UNDECLARED;
     private static volatile int loadedWithNormal;
     private static volatile int loadedWithSpecular;
+    private static volatile int loadedAnimated;
     private static volatile boolean firstLoadLogged;
 
     private LabPbrTextureRegistry() {
@@ -90,13 +98,15 @@ public final class LabPbrTextureRegistry {
                 }
                 if (loaded.hasNormalMap()) loadedWithNormal++;
                 if (loaded.hasSpecularMap()) loadedWithSpecular++;
-                if (!firstLoadLogged && (loaded.hasNormalMap() || loaded.hasSpecularMap())) {
+                if (loaded.animated()) loadedAnimated++;
+                if (!firstLoadLogged && (loaded.hasNormalMap() || loaded.hasSpecularMap() || loaded.animated())) {
                     firstLoadLogged = true;
                     TotemLumenClient.LOGGER.info(
-                            "P18 LabPBR texture capture active: sprite={}, normal={}, specular={}, format={}",
+                            "P18 texture capture active: sprite={}, normal={}, specular={}, animated={}, format={}",
                             spriteId,
                             loaded.hasNormalMap(),
                             loaded.hasSpecularMap(),
+                            loaded.animated(),
                             declaredFormat
                     );
                 }
@@ -116,6 +126,7 @@ public final class LabPbrTextureRegistry {
         }
         loadedWithNormal = 0;
         loadedWithSpecular = 0;
+        loadedAnimated = 0;
         firstLoadLogged = false;
         formatScanned = false;
         declaredFormat = DeclaredFormat.UNDECLARED;
@@ -163,6 +174,10 @@ public final class LabPbrTextureRegistry {
         return loadedWithSpecular;
     }
 
+    public static int loadedAnimatedCount() {
+        return loadedAnimated;
+    }
+
     private static void scanDeclaredFormat(ResourceManager resources) {
         DeclaredFormat format = DeclaredFormat.UNDECLARED;
         try {
@@ -194,27 +209,39 @@ public final class LabPbrTextureRegistry {
         Identifier sprite = parseSpriteId(spriteId);
         if (sprite == null) return null;
 
-        PbrImage albedo = loadImage(resources, textureResource(sprite, ""));
+        LoadedLayer albedo = loadLayer(resources, textureResource(sprite, ""));
         if (albedo == null) {
             return null;
         }
-        PbrImage normal = loadImage(resources, textureResource(sprite, "_n"));
-        PbrImage specular = loadImage(resources, textureResource(sprite, "_s"));
-        return new PbrTextureData(spriteId, albedo, normal, specular);
+        LoadedLayer normal = loadLayer(resources, textureResource(sprite, "_n"));
+        LoadedLayer specular = loadLayer(resources, textureResource(sprite, "_s"));
+        return new PbrTextureData(
+                spriteId,
+                albedo.image(),
+                normal == null ? null : normal.image(),
+                specular == null ? null : specular.image(),
+                albedo.animation(),
+                normal == null ? null : normal.animation(),
+                specular == null ? null : specular.animation()
+        );
     }
 
-    private static PbrImage loadImage(ResourceManager resources, Identifier location) {
+    private static LoadedLayer loadLayer(ResourceManager resources, Identifier location) {
         try {
             var resource = resources.getResource(location);
             if (resource.isEmpty()) return null;
+            PbrImage image;
             try (InputStream input = resource.get().open();
-                 NativeImage image = NativeImage.read(input)) {
-                return new PbrImage(
-                        image.getWidth(),
-                        image.getHeight(),
-                        image.getPixels()
+                 NativeImage nativeImage = NativeImage.read(input)) {
+                image = new PbrImage(
+                        nativeImage.getWidth(),
+                        nativeImage.getHeight(),
+                        nativeImage.getPixels()
                 );
             }
+
+            PbrAnimation animation = loadAnimation(resources, location, image);
+            return new LoadedLayer(image, animation);
         } catch (Throwable failure) {
             TotemLumenClient.LOGGER.warn(
                     "P18 failed to decode resource-pack texture {}; ignoring this map",
@@ -225,9 +252,137 @@ public final class LabPbrTextureRegistry {
         }
     }
 
+    private static PbrAnimation loadAnimation(
+            ResourceManager resources,
+            Identifier textureLocation,
+            PbrImage image
+    ) {
+        Identifier metadataLocation = Identifier.fromNamespaceAndPath(
+                textureLocation.getNamespace(),
+                textureLocation.getPath() + ".mcmeta"
+        );
+        try {
+            var metadataResource = resources.getResource(metadataLocation);
+            if (metadataResource.isEmpty()) return null;
+
+            JsonObject root;
+            try (InputStream input = metadataResource.get().open();
+                 InputStreamReader reader = new InputStreamReader(input, StandardCharsets.UTF_8)) {
+                JsonElement parsed = JsonParser.parseReader(reader);
+                if (!parsed.isJsonObject()) return null;
+                root = parsed.getAsJsonObject();
+            }
+
+            JsonObject animationObject = root.has("animation") && root.get("animation").isJsonObject()
+                    ? root.getAsJsonObject("animation")
+                    : null;
+            if (animationObject == null) return null;
+
+            int frameWidth = positiveInt(animationObject, "width", image.width());
+            // Minecraft defaults both missing dimensions to the texture width, which makes the
+            // common 16x(N*16) vertical strip animate as 16x16 frames.
+            int frameHeight = positiveInt(animationObject, "height", image.width());
+            if (image.width() % frameWidth != 0 || image.height() % frameHeight != 0) {
+                TotemLumenClient.LOGGER.warn(
+                        "P18 animation metadata dimensions do not tile texture {}; image={}x{}, frame={}x{}",
+                        textureLocation,
+                        image.width(),
+                        image.height(),
+                        frameWidth,
+                        frameHeight
+                );
+                return null;
+            }
+
+            int columns = image.width() / frameWidth;
+            int rows = image.height() / frameHeight;
+            int sourceFrameCount = Math.multiplyExact(columns, rows);
+            int defaultFrameTime = positiveInt(animationObject, "frametime", 1);
+            boolean interpolate = animationObject.has("interpolate")
+                    && animationObject.get("interpolate").isJsonPrimitive()
+                    && animationObject.get("interpolate").getAsBoolean();
+
+            List<Integer> timeline = new ArrayList<>();
+            JsonArray frames = animationObject.has("frames") && animationObject.get("frames").isJsonArray()
+                    ? animationObject.getAsJsonArray("frames")
+                    : null;
+            if (frames == null || frames.isEmpty()) {
+                for (int frame = 0; frame < sourceFrameCount; frame++) {
+                    appendFrameTicks(timeline, frame, defaultFrameTime);
+                }
+            } else {
+                for (JsonElement entry : frames) {
+                    int frameIndex;
+                    int frameTime = defaultFrameTime;
+                    if (entry.isJsonPrimitive() && entry.getAsJsonPrimitive().isNumber()) {
+                        frameIndex = entry.getAsInt();
+                    } else if (entry.isJsonObject()) {
+                        JsonObject frameObject = entry.getAsJsonObject();
+                        if (!frameObject.has("index")) continue;
+                        frameIndex = frameObject.get("index").getAsInt();
+                        frameTime = positiveInt(frameObject, "time", defaultFrameTime);
+                    } else {
+                        continue;
+                    }
+
+                    if (frameIndex < 0 || frameIndex >= sourceFrameCount) {
+                        TotemLumenClient.LOGGER.warn(
+                                "P18 animation frame {} is outside {} source frames for {}",
+                                frameIndex,
+                                sourceFrameCount,
+                                textureLocation
+                        );
+                        continue;
+                    }
+                    appendFrameTicks(timeline, frameIndex, frameTime);
+                }
+            }
+
+            if (timeline.isEmpty()) return null;
+            int[] expanded = timeline.stream().mapToInt(Integer::intValue).toArray();
+            TotemLumenClient.LOGGER.info(
+                    "P18 animated texture discovered: texture={}, frame={}x{}, sourceFrames={}, timelineTicks={}, interpolate={}",
+                    textureLocation,
+                    frameWidth,
+                    frameHeight,
+                    sourceFrameCount,
+                    expanded.length,
+                    interpolate
+            );
+            return new PbrAnimation(frameWidth, frameHeight, expanded, interpolate);
+        } catch (Throwable failure) {
+            TotemLumenClient.LOGGER.warn(
+                    "P18 failed to read animation metadata {}; treating texture as static",
+                    metadataLocation,
+                    failure
+            );
+            return null;
+        }
+    }
+
+    private static int positiveInt(JsonObject object, String key, int fallback) {
+        if (!object.has(key) || !object.get(key).isJsonPrimitive()) return fallback;
+        try {
+            int value = object.get(key).getAsInt();
+            return value > 0 ? value : fallback;
+        } catch (RuntimeException ignored) {
+            return fallback;
+        }
+    }
+
+    private static void appendFrameTicks(List<Integer> timeline, int frameIndex, int ticks) {
+        int boundedTicks = Math.min(Math.max(ticks, 1), 4096);
+        for (int tick = 0; tick < boundedTicks; tick++) {
+            timeline.add(frameIndex);
+        }
+    }
+
     private static Identifier textureResource(Identifier sprite, String suffix) {
         String path = "textures/" + sprite.getPath() + suffix + ".png";
         return Identifier.fromNamespaceAndPath(sprite.getNamespace(), path);
+    }
+
+    private record LoadedLayer(PbrImage image, PbrAnimation animation) {
     }
 
     private static Identifier parseSpriteId(String spriteId) {
