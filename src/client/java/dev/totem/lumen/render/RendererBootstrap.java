@@ -3,6 +3,7 @@ package dev.totem.lumen.render;
 import dev.totem.lumen.TotemLumenClient;
 import dev.totem.lumen.platform.PlatformProfile;
 import dev.totem.lumen.vulkan.MinecraftVulkanBridge;
+import dev.totem.lumen.vulkan.P12FullBasePipeline;
 import dev.totem.lumen.vulkan.VulkanBackendInfo;
 import dev.totem.lumen.vulkan.VulkanCapabilities;
 import dev.totem.lumen.vulkan.VulkanCapabilityProbe;
@@ -170,9 +171,16 @@ public final class RendererBootstrap {
             return;
         }
 
+        var device = MinecraftVulkanBridge.currentDevice();
+        if (device != null) {
+            // Start the expensive production renderer while the player may still be in menus.
+            // Scene storage is bound later after world resources exist.
+            P12FullBasePipeline.prewarm(device);
+        }
+
         state = RendererState.READY_FOR_SCENE_EXTRACTION;
         TotemLumenClient.LOGGER.info(
-                "Renderer state: READY_FOR_SCENE_EXTRACTION. Vulkan backend and background pipeline prewarm are ready."
+                "Renderer state: READY_FOR_SCENE_EXTRACTION. Bootstrap is ready and full lighting prewarm has been started."
         );
     }
 

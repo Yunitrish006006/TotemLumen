@@ -205,17 +205,7 @@ public final class VulkanComputeProgram implements AutoCloseable {
                         "Main GI Vulkan pipeline was requested before background prewarm completed"
                 );
             }
-            if (prepared.deviceHandle != device.vkDevice()) {
-                throw new IllegalStateException("Prepared main GI pipeline belongs to a different Vulkan device");
-            }
-            return bindStorage(
-                    device,
-                    prepared.descriptorSetLayout,
-                    prepared.pipelineLayout,
-                    prepared.pipeline,
-                    storage,
-                    false
-            );
+            return prepared.bind(device, storage);
         }
 
         long shaderModule = compileShaderModule(device, name, glsl);
@@ -241,11 +231,25 @@ public final class VulkanComputeProgram implements AutoCloseable {
     }
 
     private static PreparedPipeline createPreparedPipeline(VulkanDevice device, byte[] spirv) {
+        return createPreparedPipeline(device, MAIN_GI_SHADER, spirv);
+    }
+
+    static PreparedPipeline preparePipeline(VulkanDevice device, String name, String glsl) {
+        int optimizationLevel = optimizationLevelFor(name);
+        byte[] spirv = compileShaderBytes(name, glsl, optimizationLevel);
+        return createPreparedPipeline(device, name, spirv);
+    }
+
+    private static PreparedPipeline createPreparedPipeline(
+            VulkanDevice device,
+            String name,
+            byte[] spirv
+    ) {
         long shaderModule = createShaderModule(device, spirv);
         try {
-            PipelineHandles handles = createPipelineHandles(device, shaderModule, MAIN_GI_SHADER);
+            PipelineHandles handles = createPipelineHandles(device, shaderModule, name);
             return new PreparedPipeline(
-                    device.vkDevice(),
+                    device,
                     handles.descriptorSetLayout,
                     handles.pipelineLayout,
                     handles.pipeline
@@ -372,11 +376,25 @@ public final class VulkanComputeProgram implements AutoCloseable {
     }
 
     private static long compileShaderModule(VulkanDevice device, String name, String source) {
-        byte[] spirv = compileShaderBytes(name, source, Shaderc.shaderc_optimization_level_performance);
+        byte[] spirv = compileShaderBytes(name, source, optimizationLevelFor(name));
         return createShaderModule(device, spirv);
     }
 
+    private static int optimizationLevelFor(String name) {
+        return switch (name) {
+            case "totem_lumen_p12_full_gi.comp",
+                 "totem_lumen_p17_dynamic_entities.comp",
+                 "totem_lumen_p16_reflection.comp" -> Shaderc.shaderc_optimization_level_zero;
+            default -> Shaderc.shaderc_optimization_level_performance;
+        };
+    }
+
     private static byte[] compileShaderBytes(String name, String source, int optimizationLevel) {
+        byte[] cached = ShaderSpirvCache.load(name, source, optimizationLevel);
+        if (cached != null) {
+            return cached;
+        }
+
         long compiler = Shaderc.shaderc_compiler_initialize();
         long options = Shaderc.shaderc_compile_options_initialize();
         if (compiler == 0L || options == 0L) {
@@ -413,6 +431,7 @@ public final class VulkanComputeProgram implements AutoCloseable {
                 }
                 byte[] spirv = new byte[bytes.remaining()];
                 bytes.get(spirv);
+                ShaderSpirvCache.store(name, source, optimizationLevel, spirv);
                 return spirv;
             } finally {
                 Shaderc.shaderc_result_release(result);
@@ -484,6 +503,51 @@ public final class VulkanComputeProgram implements AutoCloseable {
     private record PipelineHandles(long descriptorSetLayout, long pipelineLayout, long pipeline) {
     }
 
-    private record PreparedPipeline(Object deviceHandle, long descriptorSetLayout, long pipelineLayout, long pipeline) {
+    static final class PreparedPipeline implements AutoCloseable {
+        private final VulkanDevice device;
+        private final long descriptorSetLayout;
+        private final long pipelineLayout;
+        private final long pipeline;
+        private boolean closed;
+
+        private PreparedPipeline(
+                VulkanDevice device,
+                long descriptorSetLayout,
+                long pipelineLayout,
+                long pipeline
+        ) {
+            this.device = device;
+            this.descriptorSetLayout = descriptorSetLayout;
+            this.pipelineLayout = pipelineLayout;
+            this.pipeline = pipeline;
+        }
+
+        VulkanComputeProgram bind(VulkanDevice requestedDevice, VulkanOwnedBuffer storage) {
+            if (closed) {
+                throw new IllegalStateException("Prepared Vulkan pipeline is already closed");
+            }
+            if (device.vkDevice() != requestedDevice.vkDevice()) {
+                throw new IllegalStateException("Prepared Vulkan pipeline belongs to a different device");
+            }
+            return bindStorage(
+                    requestedDevice,
+                    descriptorSetLayout,
+                    pipelineLayout,
+                    pipeline,
+                    storage,
+                    false
+            );
+        }
+
+        @Override
+        public void close() {
+            if (closed) return;
+            closed = true;
+            VK10.vkDeviceWaitIdle(device.vkDevice());
+            destroyPipelineHandles(
+                    device,
+                    new PipelineHandles(descriptorSetLayout, pipelineLayout, pipeline)
+            );
+        }
     }
 }

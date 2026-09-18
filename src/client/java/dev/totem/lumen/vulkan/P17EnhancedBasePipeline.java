@@ -5,11 +5,10 @@ import dev.totem.lumen.TotemLumenClient;
 import dev.totem.lumen.vulkan.resource.VulkanOwnedBuffer;
 
 /**
- * Optional P17-enhanced replacement for the full P12-P15 compute program.
+ * Optional dynamic-entity enhanced base pipeline.
  *
- * <p>P17 never participates in renderer readiness. The tiny bootstrap becomes usable first, then
- * the full P12-P15 base, then this larger dynamic-entity variant. Command recording snapshots the
- * selected program once so pipeline/layout/descriptor reads for one frame cannot mix generations.</p>
+ * <p>The expensive pipeline is prepared without a world as soon as the full-lighting prewarm
+ * completes. World scene attachment only creates the descriptor binding.</p>
  */
 public final class P17EnhancedBasePipeline {
     public static final String SHADER_NAME = "totem_lumen_p17_dynamic_entities.comp";
@@ -20,76 +19,187 @@ public final class P17EnhancedBasePipeline {
 
     private static volatile VulkanOwnedBuffer attachedScene;
     private static volatile VulkanComputeProgram activeProgram;
+    private static volatile VulkanComputeProgram.PreparedPipeline preparedPipeline;
+    private static volatile VulkanDevice preparedDevice;
     private static volatile Throwable failure;
+    private static volatile Throwable prewarmFailure;
     private static volatile long generation;
+    private static volatile boolean prewarmStarted;
     private static volatile boolean firstDispatchLogged;
 
     private P17EnhancedBasePipeline() {
     }
 
-    public static void attach(VulkanDevice device, VulkanOwnedBuffer scene) {
-        if (device == null || scene == null) return;
+    public static void prewarm(VulkanDevice device) {
+        if (device == null) return;
 
-        VulkanComputeProgram staleProgram;
         long workerGeneration;
         synchronized (LOCK) {
-            if (attachedScene == scene && (activeProgram != null || failure == null)) return;
-            staleProgram = activeProgram;
-            activeProgram = null;
-            attachedScene = scene;
-            failure = null;
-            firstDispatchLogged = false;
-            workerGeneration = ++generation;
+            if (preparedPipeline != null
+                    && preparedDevice != null
+                    && preparedDevice.vkDevice() == device.vkDevice()) {
+                return;
+            }
+            if (prewarmStarted
+                    && preparedDevice != null
+                    && preparedDevice.vkDevice() == device.vkDevice()) {
+                return;
+            }
+            if (preparedDevice != null && preparedDevice.vkDevice() != device.vkDevice()) {
+                ++generation;
+                preparedPipeline = null;
+                prewarmFailure = null;
+            }
+            preparedDevice = device;
+            prewarmStarted = true;
+            prewarmFailure = null;
+            workerGeneration = generation;
         }
-        closeAsync(staleProgram, "TotemLumen-P17OldPipelineCleanup");
 
         Thread worker = new Thread(
-                () -> buildPipeline(device, scene, workerGeneration),
+                () -> buildPreparedPipeline(device, workerGeneration),
                 WORKER_NAME
         );
         worker.setDaemon(true);
         worker.start();
     }
 
-    private static void buildPipeline(VulkanDevice device, VulkanOwnedBuffer scene, long workerGeneration) {
-        VulkanComputeProgram created = null;
+    private static void buildPreparedPipeline(VulkanDevice device, long workerGeneration) {
+        VulkanComputeProgram.PreparedPipeline created = null;
         long startedAt = System.nanoTime();
         try {
             String source = buildSourceForVerification();
             TotemLumenClient.LOGGER.info(
-                    "P17 enhanced pipeline creation START: shader={}, sourceChars={}; P12-P15 full renderer remains available during compile",
+                    "Player/entity ray tracing prewarm START: shader={}, sourceChars={}",
                     SHADER_NAME,
                     source.length()
             );
-            created = VulkanComputeProgram.create(device, SHADER_NAME, source, scene);
+            created = VulkanComputeProgram.preparePipeline(device, SHADER_NAME, source);
 
+            synchronized (LOCK) {
+                if (workerGeneration != generation
+                        || preparedDevice == null
+                        || preparedDevice.vkDevice() != device.vkDevice()) {
+                    VulkanComputeProgram.PreparedPipeline stale = created;
+                    created = null;
+                    closePreparedAsync(stale, "TotemLumen-P17StalePreparedCleanup");
+                    return;
+                }
+                preparedPipeline = created;
+                created = null;
+                prewarmStarted = false;
+                LOCK.notifyAll();
+            }
+
+            long elapsedMs = (System.nanoTime() - startedAt) / 1_000_000L;
+            TotemLumenClient.LOGGER.info(
+                    "Player/entity ray tracing prewarm COMPLETE: shader={}, elapsed={} ms",
+                    SHADER_NAME,
+                    elapsedMs
+            );
+        } catch (Throwable buildFailure) {
+            synchronized (LOCK) {
+                if (workerGeneration == generation) {
+                    prewarmFailure = buildFailure;
+                    prewarmStarted = false;
+                    LOCK.notifyAll();
+                }
+            }
+            TotemLumenClient.LOGGER.error(
+                    "Player/entity ray tracing prewarm FAILED",
+                    buildFailure
+            );
+        } finally {
+            closePreparedAsync(created, "TotemLumen-P17FailedPreparedCleanup");
+        }
+    }
+
+    public static void attach(VulkanDevice device, VulkanOwnedBuffer scene) {
+        if (device == null || scene == null) return;
+        prewarm(device);
+
+        VulkanComputeProgram staleProgram;
+        long workerGeneration;
+        synchronized (LOCK) {
+            if (attachedScene == scene && activeProgram != null) return;
+            staleProgram = activeProgram;
+            activeProgram = null;
+            attachedScene = scene;
+            failure = null;
+            firstDispatchLogged = false;
+            workerGeneration = generation;
+        }
+        closeAsync(staleProgram, "TotemLumen-P17OldBindingCleanup");
+
+        Thread worker = new Thread(
+                () -> bindPreparedPipeline(device, scene, workerGeneration),
+                "TotemLumen-P17Bind"
+        );
+        worker.setDaemon(true);
+        worker.start();
+    }
+
+    private static void bindPreparedPipeline(
+            VulkanDevice device,
+            VulkanOwnedBuffer scene,
+            long workerGeneration
+    ) {
+        VulkanComputeProgram created = null;
+        try {
+            VulkanComputeProgram.PreparedPipeline prepared;
+            synchronized (LOCK) {
+                while (workerGeneration == generation
+                        && attachedScene == scene
+                        && preparedPipeline == null
+                        && prewarmFailure == null) {
+                    LOCK.wait();
+                }
+                if (workerGeneration != generation || attachedScene != scene) {
+                    return;
+                }
+                if (prewarmFailure != null) {
+                    throw new IllegalStateException(
+                            "Player/entity ray tracing prewarm failed",
+                            prewarmFailure
+                    );
+                }
+                prepared = preparedPipeline;
+            }
+
+            created = prepared.bind(device, scene);
             synchronized (LOCK) {
                 if (workerGeneration != generation || attachedScene != scene) {
                     VulkanComputeProgram stale = created;
                     created = null;
-                    closeAsync(stale, "TotemLumen-P17StalePipelineCleanup");
+                    closeAsync(stale, "TotemLumen-P17StaleBindingCleanup");
                     return;
                 }
                 activeProgram = created;
                 created = null;
             }
 
-            long elapsedMs = (System.nanoTime() - startedAt) / 1_000_000L;
             TotemLumenClient.LOGGER.info(
-                    "P17 enhanced pipeline creation COMPLETE: shader={}, elapsed={} ms; dynamic entities can now participate in shared nearest-hit tracing",
-                    SHADER_NAME,
-                    elapsedMs
+                    "Player/entity ray tracing scene binding READY"
             );
-        } catch (Throwable buildFailure) {
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
             synchronized (LOCK) {
-                if (workerGeneration == generation && attachedScene == scene) failure = buildFailure;
+                if (workerGeneration == generation && attachedScene == scene) {
+                    failure = interrupted;
+                }
+            }
+        } catch (Throwable bindFailure) {
+            synchronized (LOCK) {
+                if (workerGeneration == generation && attachedScene == scene) {
+                    failure = bindFailure;
+                }
             }
             TotemLumenClient.LOGGER.error(
-                    "P17 enhanced pipeline FAILED; keeping the P12-P15 full renderer active without dynamic-entity ray hits",
-                    buildFailure
+                    "Player/entity ray tracing scene binding FAILED; full static lighting remains active",
+                    bindFailure
             );
         } finally {
-            if (created != null) closeAsync(created, "TotemLumen-P17FailedPipelineCleanup");
+            closeAsync(created, "TotemLumen-P17FailedBindingCleanup");
         }
     }
 
@@ -127,21 +237,31 @@ public final class P17EnhancedBasePipeline {
     }
 
     public static Throwable failure() {
-        return failure;
+        Throwable bindingFailure = failure;
+        return bindingFailure != null ? bindingFailure : prewarmFailure;
     }
+
 
     public static void shutdown() {
         VulkanComputeProgram program;
+        VulkanComputeProgram.PreparedPipeline prepared;
         synchronized (LOCK) {
             ++generation;
             attachedScene = null;
             program = activeProgram;
             activeProgram = null;
+            prepared = preparedPipeline;
+            preparedPipeline = null;
+            preparedDevice = null;
             failure = null;
+            prewarmFailure = null;
+            prewarmStarted = false;
             firstDispatchLogged = false;
+            LOCK.notifyAll();
         }
         DISPATCH_PROGRAM.remove();
-        closeAsync(program, "TotemLumen-P17ShutdownCleanup");
+        closeAsync(program, "TotemLumen-P17ShutdownBindingCleanup");
+        closePreparedAsync(prepared, "TotemLumen-P17ShutdownPreparedCleanup");
     }
 
     private static void closeAsync(VulkanComputeProgram program, String threadName) {
@@ -150,7 +270,23 @@ public final class P17EnhancedBasePipeline {
             try {
                 program.close();
             } catch (Throwable closeFailure) {
-                TotemLumenClient.LOGGER.warn("Failed to close stale P17 pipeline cleanly", closeFailure);
+                TotemLumenClient.LOGGER.warn("Failed to close stale P17 binding cleanly", closeFailure);
+            }
+        }, threadName);
+        cleanup.setDaemon(true);
+        cleanup.start();
+    }
+
+    private static void closePreparedAsync(
+            VulkanComputeProgram.PreparedPipeline prepared,
+            String threadName
+    ) {
+        if (prepared == null) return;
+        Thread cleanup = new Thread(() -> {
+            try {
+                prepared.close();
+            } catch (Throwable closeFailure) {
+                TotemLumenClient.LOGGER.warn("Failed to close prepared P17 pipeline cleanly", closeFailure);
             }
         }, threadName);
         cleanup.setDaemon(true);
