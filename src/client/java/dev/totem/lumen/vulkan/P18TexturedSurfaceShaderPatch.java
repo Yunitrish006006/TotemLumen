@@ -101,8 +101,8 @@ final class P18TexturedSurfaceShaderPatch {
                             ^ salt
                             ^ scene.data[41] * 0x27D4EB2Du;
                     uint hashed = p18AlphaHash(state);
-                    float sample = float(hashed & 0x00FFFFFFu) / 16777216.0;
-                    return sample < float(alpha) / 255.0;
+                    float coverageSample = float(hashed & 0x00FFFFFFu) / 16777216.0;
+                    return coverageSample < float(alpha) / 255.0;
                 }
 
                 vec2 p18ReadUv(uint wordBase) {
