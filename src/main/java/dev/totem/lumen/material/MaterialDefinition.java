@@ -23,15 +23,57 @@ public record MaterialDefinition(
         float transmissionB,
         float lightRadiusScale,
         float lightIntensityScale,
-        float reflectionScale
+        float reflectionScale,
+        int lightEmitterAnchor
 ) {
     public static final MaterialDefinition AIR = new MaterialDefinition(
             "minecraft:air", MaterialFlags.AIR, 0,
             0.0f, 0.0f, 0.0f,
             1.0f, 0.0f, 0.0f, 1.0f,
             1.0f, 1.0f, 1.0f,
-            1.0f, 1.0f, 1.0f
+            1.0f, 1.0f, 1.0f,
+            0
     );
+
+    /** Compatibility constructor retaining the stable pre-anchor runtime material surface. */
+    public MaterialDefinition(
+            String sourceId,
+            int flags,
+            int emissionLevel,
+            float emissionR,
+            float emissionG,
+            float emissionB,
+            float roughness,
+            float metallic,
+            float opacity,
+            float indexOfRefraction,
+            float transmissionR,
+            float transmissionG,
+            float transmissionB,
+            float lightRadiusScale,
+            float lightIntensityScale,
+            float reflectionScale
+    ) {
+        this(
+                sourceId,
+                flags,
+                emissionLevel,
+                emissionR,
+                emissionG,
+                emissionB,
+                roughness,
+                metallic,
+                opacity,
+                indexOfRefraction,
+                transmissionR,
+                transmissionG,
+                transmissionB,
+                lightRadiusScale,
+                lightIntensityScale,
+                reflectionScale,
+                0
+        );
+    }
 
     /** Compatibility constructor retaining the previous transmission-aware ABI surface. */
     public MaterialDefinition(
@@ -65,7 +107,8 @@ public record MaterialDefinition(
                 transmissionB,
                 1.0f,
                 1.0f,
-                1.0f
+                1.0f,
+                0
         );
     }
 
@@ -98,7 +141,8 @@ public record MaterialDefinition(
                 1.0f,
                 1.0f,
                 1.0f,
-                1.0f
+                1.0f,
+                0
         );
     }
 
@@ -128,7 +172,8 @@ public record MaterialDefinition(
                 1.0f,
                 1.0f,
                 1.0f,
-                1.0f
+                1.0f,
+                0
         );
     }
 
@@ -164,6 +209,9 @@ public record MaterialDefinition(
                 || !isScale(reflectionScale, 4.0f)) {
             throw new IllegalArgumentException("runtime material scales are out of range");
         }
+        if ((lightEmitterAnchor & 0x7F000000) != 0) {
+            throw new IllegalArgumentException("lightEmitterAnchor uses reserved bits 24..30");
+        }
     }
 
     private static boolean isNormalized(float value) {
@@ -172,6 +220,40 @@ public record MaterialDefinition(
 
     private static boolean isScale(float value, float max) {
         return Float.isFinite(value) && value >= 0.0f && value <= max;
+    }
+
+    public static int pointLightEmitterAnchor(float x, float y, float z) {
+        return 0x80000000
+                | quantizeAnchor(x)
+                | (quantizeAnchor(y) << 8)
+                | (quantizeAnchor(z) << 16);
+    }
+
+    public boolean pointLightEmitter() {
+        return (lightEmitterAnchor & 0x80000000) != 0;
+    }
+
+    public float lightEmitterX() {
+        return pointLightEmitter() ? decodeAnchor(lightEmitterAnchor) : 0.5f;
+    }
+
+    public float lightEmitterY() {
+        return pointLightEmitter() ? decodeAnchor(lightEmitterAnchor >>> 8) : 0.5f;
+    }
+
+    public float lightEmitterZ() {
+        return pointLightEmitter() ? decodeAnchor(lightEmitterAnchor >>> 16) : 0.5f;
+    }
+
+    private static int quantizeAnchor(float value) {
+        if (!isNormalized(value)) {
+            throw new IllegalArgumentException("light emitter anchor components must be in [0, 1]");
+        }
+        return Math.round(value * 255.0f) & 0xFF;
+    }
+
+    private static float decodeAnchor(int packed) {
+        return (packed & 0xFF) / 255.0f;
     }
 
     public boolean has(int flag) {
