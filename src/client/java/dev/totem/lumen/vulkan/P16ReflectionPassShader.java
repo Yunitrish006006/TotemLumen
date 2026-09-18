@@ -53,6 +53,13 @@ final class P16ReflectionPassShader {
                 const uint VOXELS_PER_SECTION = 4096u;
                 const uint MATERIAL_EMISSION_BASE = 265344u;
                 const uint MATERIAL_EMISSION_WORDS_PER_RECORD = 4u;
+                const float SOFT_SHADOW_ANGULAR_RADIUS = 0.055;
+                const vec2 SOFT_SHADOW_OFFSETS[4] = vec2[4](
+                    vec2(0.32, 0.08),
+                    vec2(-0.26, 0.31),
+                    vec2(0.14, -0.36),
+                    vec2(-0.30, -0.19)
+                );
 
                 struct HitResult {
                     uint hit;
