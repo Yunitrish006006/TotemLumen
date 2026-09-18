@@ -2,9 +2,9 @@
 
 ## Status
 
-- **P18A renderer-resolved texture identity + LabPBR 1.3 decode contract: IMPLEMENTED / CI pending**
-- **P18B bounded PBR texture GPU scene + textured-cube surface table: IMPLEMENTED / CI pending**
-- **P18C textured BRDF + alpha coverage integration: alpha coverage IMPLEMENTED / CI pending; BRDF fields pending**
+- **P18A renderer-resolved texture identity + LabPBR 1.3 decode contract: IMPLEMENTED / CI PASS**
+- **P18B bounded PBR texture GPU scene + textured-cube surface table: IMPLEMENTED / CI PASS**
+- **P18C shared LabPBR shading + alpha coverage: IMPLEMENTED / SHADER CI PASS; runtime visual validation pending**
 - **P18D entity/block-entity material fidelity: PENDING**
 - **P18E height/POM and secondary LabPBR channels: DEFERRED**
 
@@ -92,22 +92,29 @@ The registry uses a 12-bit-compatible maximum id of 4095. P18A only captures/ded
 surface sets; it intentionally leaves the current `SURFACE_CUBE` geometry code unchanged until
 P18B uploads the surface-set table and P18C can consume it without visual regression.
 
-## P18B — bounded resident PBR texture scene
+## P18B — bounded PBR texture scene
 
-Planned constraints:
+The implemented first-pass GPU scene uses a compact SSBO-backed texture tail because the existing
+P5/P12/P16 pipelines bind one scene storage buffer.
 
-- do not upload every texture from every enabled resource pack;
-- select only sprites referenced by currently resident P5/P14/P14E/P17 scene data;
-- immutable CPU texture records survive only as Totem-owned decoded pixels/metadata;
-- resource reload replaces texture payload revisions without retaining old Minecraft image objects;
-- missing `_n`/`_s` maps use neutral defaults;
-- fixed GPU budget with explicit diagnostics and nearest/resident prioritization;
-- no player runtime dependency on shader compilers or external PBR tooling.
+Current invariants:
 
-A compact SSBO-backed resident atlas is preferred for the first Vulkan-compute baseline because the
-existing P5/P12/P16 pipelines currently bind one scene storage buffer. A later measured optimization
-may migrate PBR maps to sampled Vulkan images if that is materially faster on native Vulkan and
-MoltenVK.
+- model extraction only observes renderer-resolved sprite ids; PNG decode is deferred to the client
+  tick and limited per tick so section meshing workers do not synchronously decode resource packs;
+- decoded albedo/`_n`/`_s` pixels are copied into Totem-owned immutable data;
+- stable 12-bit texture handles survive resource reload while payload revisions are replaced;
+- the GPU tail preserves raw albedo alpha plus normal/specular auxiliary channels;
+- each uploaded texture is bounded to 128x128 while preserving aspect ratio;
+- total GPU texture capacity is bounded to 2,097,152 texels with explicit dropped-texture diagnostics;
+- missing `_n`/`_s` maps are represented explicitly and fall back to baseline material behavior;
+- canonical full cubes use a fixed indexed six-face surface-set table and remain on the AABB fast path;
+- generic P14C mesh records carry sprite-local UV plus texture handle;
+- no player runtime dependency on external PBR tooling is introduced.
+
+A later measured optimization may migrate PBR maps to sampled Vulkan images if that is materially
+faster on native Vulkan and MoltenVK. The current bounded selection is handle/order based rather than
+a final distance-prioritized residency policy; that remains a possible optimization after runtime
+profiling.
 
 ## P18C — shared material evaluation
 
@@ -121,13 +128,22 @@ One surface evaluation must feed all consumers:
 - P16 reflection/Fresnel;
 - emissive surface radiance.
 
-The initial LabPBR fields are:
+The implemented shared `P18SurfaceSample` resolves, for accepted P14C/textured-cube hits:
 
-- tangent-space normal;
-- AO;
-- roughness;
-- dielectric F0 / metal identity;
-- emission.
+- resource-pack albedo;
+- tangent-space normal reconstructed from LabPBR R/G;
+- AO from the normal-map B channel;
+- perceptual smoothness -> roughness;
+- linear dielectric F0 or metal identity;
+- predefined metal codes 230–237 and custom-metal-compatible fallback;
+- LabPBR emission.
+
+The ray-hit ABI remains unchanged. Textured identity/UV/tangent basis is reconstructed only for
+accepted shading hits, avoiding a wider shared `HitResult` contract across P14E/P17/P16.
+
+P12 environment lighting, GI and local lights consume the same material sample. P16 reflection uses
+the same normal, roughness, F0, metallic state and albedo. AO affects ambient/indirect terms rather
+than directly suppressing emissive radiance.
 
 Height/POM, porosity wetness and subsurface scattering are intentionally later gates.
 
@@ -155,6 +171,17 @@ After static blocks are correct:
 - emissive entity layers.
 
 This is where the remaining P17D material-fidelity debt moves.
+
+## CI gate
+
+Run #420 at head `795c32b2d82ea1211261b0ee6a2d5d505e77af7c` passed:
+
+- Java 25 compile + unit tests;
+- P18 texture/surface ABI tests;
+- P18 textured-surface verification in full base, P17 and P16;
+- P18 LabPBR shading verification in full base, P17 and P16;
+- shaderc compile with zero errors for bootstrap, P12/P14E full base, P17 enhanced base and P16
+  split reflection.
 
 ## Runtime gate
 
