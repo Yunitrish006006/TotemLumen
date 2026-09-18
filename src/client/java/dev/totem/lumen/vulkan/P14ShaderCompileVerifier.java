@@ -20,6 +20,7 @@ public final class P14ShaderCompileVerifier {
         verifyP14EFluidSource(baseSource, "full base pass");
         verifyP14EFluidDebugView(baseSource, "full base pass");
         verifyP14EFluidOptics(baseSource, "full base pass", false);
+        verifyRuntimeQualitySettings(baseSource);
 
         String p17Source = P17EnhancedBasePipeline.buildSourceForVerification();
         verifyP14EFluidSource(p17Source, "P17 enhanced base pass");
@@ -170,7 +171,7 @@ public final class P14ShaderCompileVerifier {
             );
             requireSourceMarker(
                     source,
-                    "bool p14eReflectWater = p14eRawPrimary.hit != 0u",
+                    "bool p14eReflectWater = scene.data[47] != 0u",
                     label + " raw exact-water reflection surface"
             );
         }
@@ -186,9 +187,37 @@ public final class P14ShaderCompileVerifier {
         requireSourceMarker(source, "float configuredDistance = uintBitsToFloat(scene.data[43]);", "P16 runtime distance");
         requireSourceMarker(source, "for (uint bounce = 0u; bounce < 2u; bounce++)", "P16 iterative bounce loop");
         requireSourceMarker(source, "HitResult nextRawHit = traceRayLimited(", "P16 secondary raw surface trace");
-        requireSourceMarker(source, "if (scene.data[42] == 0u) return;", "P16 runtime disable");
+        requireSourceMarker(
+                source,
+                "if (scene.data[46] == 0u || scene.data[42] == 0u) return;",
+                "P16 reflection master toggle"
+        );
+        requireSourceMarker(
+                source,
+                "&& scene.data[47] == 0u",
+                "P16 secondary water-reflection toggle"
+        );
         System.out.println(
-                "P16 runtime-settings verification PASS: bounces=0..2, distance=runtime, iterative=true"
+                "P16 runtime-settings verification PASS: bounces=1..2, distance=runtime, "
+                        + "masterToggle=true, waterToggle=true, iterative=true"
+        );
+    }
+
+    private static void verifyRuntimeQualitySettings(String source) {
+        requireSourceMarker(source, "uint giSamples = clamp(scene.data[44], 1u, 4u);", "runtime GI samples");
+        requireSourceMarker(source, "uint shadowSamples = clamp(scene.data[45], 1u, 4u);", "runtime shadow samples");
+        requireSourceMarker(source, "uint historyLimit = max(scene.data[48], 1u);", "runtime temporal history limit");
+        requireSourceMarker(
+                source,
+                "float temporalWeight = clamp(uintBitsToFloat(scene.data[49]), 0.0, 0.95);",
+                "runtime temporal weight"
+        );
+        requireSourceMarker(source, "int denoiseRadius = int(min(scene.data[50], 2u));", "runtime denoise radius");
+        requireSourceMarker(source, "for (int offsetY = -2; offsetY <= 2; offsetY++)", "5x5 denoise bound");
+        requireSourceMarker(source, "float p13DirectionalVisibility(", "production soft-shadow helper");
+        System.out.println(
+                "Renderer quality-settings verification PASS: gi=1/2/4, shadows=1/2/4, "
+                        + "temporal=off/16/64, denoiseRadius=0/1/2"
         );
     }
 
