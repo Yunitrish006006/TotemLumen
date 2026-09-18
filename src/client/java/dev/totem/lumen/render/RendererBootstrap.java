@@ -139,7 +139,7 @@ public final class RendererBootstrap {
         VulkanComputeProgram.prewarmMainGiPipeline(vulkanDevice);
         state = RendererState.WAITING_FOR_PIPELINE;
         TotemLumenClient.LOGGER.info(
-                "Renderer state: WAITING_FOR_PIPELINE. Totem Lumen will keep vanilla rendering active until shader and Vulkan pipeline prewarm complete."
+                "Renderer state: WAITING_FOR_PIPELINE. Minecraft presentation remains active through bootstrap and full-base compilation; Totem Lumen composites only after a complete full-base frame."
         );
         pollPipelinePrewarm();
     }
