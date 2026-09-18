@@ -466,26 +466,7 @@ final class P18LabPbrShadingPatch {
         );
         source = patchEnvironmentAmbientAo(source);
 
-        source = replaceRequiredOnce(
-                source,
-                "vec3 primaryNormal = resolvedSurfaceNormal(primaryHit, primaryDirection);",
-                "P18SurfaceSample p18PrimarySurface = p18ResolveSurface(\n"
-                        + "        primaryHit, primaryOrigin, primaryDirection\n"
-                        + "    );\n"
-                        + "    vec3 primaryNormal = p18PrimarySurface.normal;",
-                "GI primary normal"
-        );
-        source = replaceRequiredOnce(
-                source,
-                "return materialColor(primaryHit.materialId) * incomingRadiance * GI_STRENGTH;",
-                "return p18PrimarySurface.albedo\n"
-                        + "            * (1.0 - p18PrimarySurface.metallic)\n"
-                        + "            * p18PrimarySurface.ao\n"
-                        + "            * incomingRadiance\n"
-                        + "            * GI_STRENGTH;",
-                "GI primary material"
-        );
-
+        source = patchGiIndirect(source);
         source = patchLocalLight(source);
         source = patchGiComposite(source);
 
@@ -495,6 +476,38 @@ final class P18LabPbrShadingPatch {
                         + "emission=true"
         );
         return source;
+    }
+
+    private static String patchGiIndirect(String source) {
+        String startMarker = "vec3 p13OneBounceIndirectRgb(\n";
+        String endMarker = "vec3 giIndirectCurrentRgb(\n";
+        int start = source.indexOf(startMarker);
+        int end = source.indexOf(endMarker, start);
+        if (start < 0 || end < 0 || end <= start) {
+            throw new IllegalStateException("P18C shader marker missing: P13 GI span");
+        }
+
+        String gi = source.substring(start, end);
+        gi = replaceRequiredOnce(
+                gi,
+                "vec3 primaryNormal = resolvedSurfaceNormal(primaryHit, primaryDirection);",
+                "P18SurfaceSample p18PrimarySurface = p18ResolveSurface(\n"
+                        + "        primaryHit, primaryOrigin, primaryDirection\n"
+                        + "    );\n"
+                        + "    vec3 primaryNormal = p18PrimarySurface.normal;",
+                "P13 GI primary normal"
+        );
+        gi = replaceRequiredOnce(
+                gi,
+                "return materialColor(primaryHit.materialId) * incomingRadiance * GI_STRENGTH;",
+                "return p18PrimarySurface.albedo\n"
+                        + "            * (1.0 - p18PrimarySurface.metallic)\n"
+                        + "            * p18PrimarySurface.ao\n"
+                        + "            * incomingRadiance\n"
+                        + "            * GI_STRENGTH;",
+                "P13 GI primary material"
+        );
+        return source.substring(0, start) + gi + source.substring(end);
     }
 
     private static String patchEnvironmentAmbientAo(String source) {
