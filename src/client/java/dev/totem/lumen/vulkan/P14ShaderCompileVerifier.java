@@ -440,6 +440,16 @@ public final class P14ShaderCompileVerifier {
         );
         requireSourceMarker(
                 source,
+                "uint lightEmitterAnchor = scene.data[materialBase + 15u];",
+                label + " point-emitter material anchor"
+        );
+        requireSourceMarker(
+                source,
+                "smoothstep(0.08, 0.18, emitterDistance)",
+                label + " flame-tip fallback emission mask"
+        );
+        requireSourceMarker(
+                source,
                 "surface.emission = surface.albedo",
                 label + " LabPBR per-texel emission"
         );
@@ -500,6 +510,21 @@ public final class P14ShaderCompileVerifier {
         );
         requireSourceMarker(
                 source,
+                "bool pointEmitter = encodedIntensity < 0.0;",
+                "anchored point-emitter flag"
+        );
+        requireSourceMarker(
+                source,
+                "uint lightSamples = pointEmitter ? 1u : areaSamples;",
+                "point emitter single-sample path"
+        );
+        requireSourceMarker(
+                source,
+                "samplePosition = lightPosition;",
+                "point emitter anchor position"
+        );
+        requireSourceMarker(
+                source,
                 "uintBitsToFloat(scene.data[83])",
                 "runtime surface-emission gain"
         );
@@ -524,7 +549,7 @@ public final class P14ShaderCompileVerifier {
         System.out.println(
                 "Renderer quality-settings verification PASS: gi=1/2/4, shadows=1/2/4, "
                         + "temporal=off/16/64, denoiseRadius=0/1/2, stableHeader=96, "
-                        + "materialRecord=16, transmission=data, localLight=data"
+                        + "materialRecord=16, transmission=data, localLight=data, pointEmitter=true"
         );
     }
 

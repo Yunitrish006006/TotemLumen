@@ -27,6 +27,7 @@ class GpuSceneAbiTest {
 
     @Test
     void materialPackingCarriesStableRuntimeFieldsInSixtyFourByteStride() {
+        int emitterAnchor = MaterialDefinition.pointLightEmitterAnchor(0.5f, 0.7f, 0.25f);
         MaterialDefinition material = new MaterialDefinition(
                 "test:emissive_glass",
                 MaterialFlags.TRANSLUCENT | MaterialFlags.EMISSIVE,
@@ -43,7 +44,8 @@ class GpuSceneAbiTest {
                 0.6f,
                 1.25f,
                 0.75f,
-                1.50f
+                1.50f,
+                emitterAnchor
         );
 
         byte[] packed = GpuMaterialPacker.pack(List.of(MaterialDefinition.AIR, material));
@@ -67,5 +69,9 @@ class GpuSceneAbiTest {
         assertEquals(1.25f, view.getFloat(base + GpuSceneAbi.MATERIAL_LIGHT_RADIUS_SCALE_OFFSET));
         assertEquals(0.75f, view.getFloat(base + GpuSceneAbi.MATERIAL_LIGHT_INTENSITY_SCALE_OFFSET));
         assertEquals(1.50f, view.getFloat(base + GpuSceneAbi.MATERIAL_REFLECTION_SCALE_OFFSET));
+        assertEquals(
+                emitterAnchor,
+                view.getInt(base + GpuSceneAbi.MATERIAL_LIGHT_EMITTER_ANCHOR_OFFSET)
+        );
     }
 }

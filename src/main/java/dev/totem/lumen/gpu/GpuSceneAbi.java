@@ -27,7 +27,7 @@ public final class GpuSceneAbi {
      * float lightRadiusScale;
      * float lightIntensityScale;
      * float reflectionScale;
-     * uint reserved0;
+     * uint lightEmitterAnchor;
      * </pre>
      */
     public static final int MATERIAL_STRIDE_BYTES = 64;
@@ -47,6 +47,7 @@ public final class GpuSceneAbi {
     public static final int MATERIAL_LIGHT_RADIUS_SCALE_OFFSET = 48;
     public static final int MATERIAL_LIGHT_INTENSITY_SCALE_OFFSET = 52;
     public static final int MATERIAL_REFLECTION_SCALE_OFFSET = 56;
+    public static final int MATERIAL_LIGHT_EMITTER_ANCHOR_OFFSET = 60;
 
     private GpuSceneAbi() {
     }

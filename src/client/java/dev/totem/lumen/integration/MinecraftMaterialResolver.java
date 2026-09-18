@@ -12,6 +12,7 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.world.level.block.TransparentBlock;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.Property;
 
 /**
  * Minecraft-facing adapter from BlockState to Totem Lumen-owned material metadata.
@@ -126,6 +127,7 @@ public final class MinecraftMaterialResolver {
         float reflectionScale = runtimeRule.reflectionScale() == null
                 ? 1.0f
                 : runtimeRule.reflectionScale();
+        int lightEmitterAnchor = torchEmitterAnchor(state, sourceId);
 
         return new MaterialDefinition(
                 sourceId,
@@ -143,8 +145,54 @@ public final class MinecraftMaterialResolver {
                 transmissionColor[2],
                 lightRadiusScale,
                 lightIntensityScale,
-                reflectionScale
+                reflectionScale,
+                lightEmitterAnchor
         );
+    }
+
+    private static int torchEmitterAnchor(BlockState state, String sourceId) {
+        if (!isTorchLike(sourceId)) {
+            return 0;
+        }
+
+        float x = 0.5f;
+        float y = 0.70f;
+        float z = 0.5f;
+
+        if (sourceId.contains("wall_torch")) {
+            switch (propertyValue(state, "facing")) {
+                case "north" -> z -= 0.27f;
+                case "south" -> z += 0.27f;
+                case "west" -> x -= 0.27f;
+                case "east" -> x += 0.27f;
+                default -> {
+                    // Unknown/custom wall-torch state keeps the centered flame anchor.
+                }
+            }
+        }
+
+        return MaterialDefinition.pointLightEmitterAnchor(x, y, z);
+    }
+
+    private static boolean isTorchLike(String sourceId) {
+        return sourceId.equals("minecraft:torch")
+                || sourceId.endsWith("_torch");
+    }
+
+    private static String propertyValue(BlockState state, String name) {
+        for (Property<?> property : state.getProperties()) {
+            if (property.getName().equals(name)) {
+                return propertyValue(state, property);
+            }
+        }
+        return "";
+    }
+
+    private static <T extends Comparable<T>> String propertyValue(
+            BlockState state,
+            Property<T> property
+    ) {
+        return property.getName(state.getValue(property));
     }
 
     private static boolean isTransmissiveGlass(String sourceId) {

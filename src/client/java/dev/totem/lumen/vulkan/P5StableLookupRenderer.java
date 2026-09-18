@@ -517,21 +517,30 @@ public final class P5StableLookupRenderer {
                         uintBitsToFloat(scene.data[lightBase + 5u]),
                         uintBitsToFloat(scene.data[lightBase + 6u])
                     ) : vec3(1.0, 0.82, 0.58);
+                    float encodedIntensity = uintBitsToFloat(scene.data[lightBase + 7u]);
+                    bool pointEmitter = encodedIntensity < 0.0;
                     float intensity = emissiveMode
-                            ? uintBitsToFloat(scene.data[lightBase + 7u])
+                            ? abs(encodedIntensity)
                             : clamp((radius - 0.5) / 15.0, 0.0, 1.0);
 
+                    uint lightSamples = pointEmitter ? 1u : areaSamples;
                     float sampleLighting = 0.0;
                     for (uint areaIndex = 0u; areaIndex < 4u; areaIndex++) {
-                        if (areaIndex >= areaSamples) break;
+                        if (areaIndex >= lightSamples) break;
 
                         vec3 emitterNormal;
-                        vec3 samplePosition = tlLocalEmitterSample(
-                            lightPosition,
-                            hitPoint,
-                            areaIndex,
-                            emitterNormal
-                        );
+                        vec3 samplePosition;
+                        if (pointEmitter) {
+                            samplePosition = lightPosition;
+                            emitterNormal = vec3(0.0);
+                        } else {
+                            samplePosition = tlLocalEmitterSample(
+                                lightPosition,
+                                hitPoint,
+                                areaIndex,
+                                emitterNormal
+                            );
+                        }
                         vec3 toLight = samplePosition - hitPoint;
                         float distanceToLight = length(toLight);
                         if (distanceToLight <= 0.0001 || distanceToLight >= radius) continue;
@@ -540,7 +549,9 @@ public final class P5StableLookupRenderer {
                         float nDotL = max(dot(surfaceNormal, lightDirection), 0.0);
                         if (nDotL <= 0.0) continue;
 
-                        float emitterCosine = max(dot(emitterNormal, -lightDirection), 0.0);
+                        float emitterCosine = pointEmitter
+                                ? 1.0
+                                : max(dot(emitterNormal, -lightDirection), 0.0);
                         if (emitterCosine <= 0.0) continue;
 
                         float visibility = 1.0;
@@ -557,7 +568,7 @@ public final class P5StableLookupRenderer {
                     }
 
                     lighting += lightColor * (
-                        uintBitsToFloat(scene.data[54]) * intensity * sampleLighting / float(areaSamples)
+                        uintBitsToFloat(scene.data[54]) * intensity * sampleLighting / float(lightSamples)
                     );
                 }
 
@@ -1482,7 +1493,7 @@ public final class P5StableLookupRenderer {
             putWord(buffer, base + 12, Float.floatToRawIntBits(material.lightRadiusScale()));
             putWord(buffer, base + 13, Float.floatToRawIntBits(material.lightIntensityScale()));
             putWord(buffer, base + 14, Float.floatToRawIntBits(material.reflectionScale()));
-            putWord(buffer, base + 15, 0);
+            putWord(buffer, base + 15, material.lightEmitterAnchor());
             if (material.emissionLevel() > 0) {
                 lastEmissiveMaterialCount++;
             }
@@ -1503,7 +1514,11 @@ public final class P5StableLookupRenderer {
                             material.emissionG(),
                             material.emissionB(),
                             material.lightRadiusScale(),
-                            material.lightIntensityScale()
+                            material.lightIntensityScale(),
+                            material.pointLightEmitter(),
+                            material.lightEmitterX(),
+                            material.lightEmitterY(),
+                            material.lightEmitterZ()
                     );
                 }
         );
@@ -1532,7 +1547,10 @@ public final class P5StableLookupRenderer {
             putWord(buffer, base + 4, Float.floatToRawIntBits(light.r()));
             putWord(buffer, base + 5, Float.floatToRawIntBits(light.g()));
             putWord(buffer, base + 6, Float.floatToRawIntBits(light.b()));
-            putWord(buffer, base + 7, Float.floatToRawIntBits(light.intensity()));
+            float encodedIntensity = light.pointEmitter()
+                    ? -Math.max(light.intensity(), Float.MIN_NORMAL)
+                    : light.intensity();
+            putWord(buffer, base + 7, Float.floatToRawIntBits(encodedIntensity));
         }
 
         lastLightCount = lights.size();

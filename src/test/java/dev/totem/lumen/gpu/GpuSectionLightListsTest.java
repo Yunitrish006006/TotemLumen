@@ -145,6 +145,40 @@ final class GpuSectionLightListsTest {
         assertEquals(0.25f, light.b());
     }
 
+    @Test
+    void pointEmitterUsesExplicitBlockLocalAnchor() {
+        SectionSnapshot source = sectionWithLights(
+                new SectionKey("minecraft:overworld", 2, 3, -1),
+                new int[][]{{4, 5, 6, 7}}
+        );
+
+        var result = GpuSectionLightLists.build(
+                List.of(source),
+                1,
+                key -> 0,
+                (GpuSectionLightLists.EmissionResolver) materialId -> materialId == 7
+                        ? new GpuSectionLightLists.Emission(
+                                14,
+                                1.0f,
+                                0.55f,
+                                0.22f,
+                                1.0f,
+                                1.0f,
+                                true,
+                                0.50f,
+                                0.70f,
+                                0.23f
+                        )
+                        : new GpuSectionLightLists.Emission(0, 0.0f, 0.0f, 0.0f)
+        );
+
+        var light = result.lights().getFirst();
+        assertEquals(36.50f, light.x(), 0.0001f);
+        assertEquals(53.70f, light.y(), 0.0001f);
+        assertEquals(-9.77f, light.z(), 0.0001f);
+        assertTrue(light.pointEmitter());
+    }
+
     private static SectionSnapshot sectionWithLights(SectionKey key, int[][] lightVoxels) {
         int[] ids = new int[SectionVoxelData.VOXEL_COUNT];
         for (int[] light : lightVoxels) {

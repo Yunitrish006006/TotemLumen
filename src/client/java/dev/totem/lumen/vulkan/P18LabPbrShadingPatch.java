@@ -375,6 +375,23 @@ final class P18LabPbrShadingPatch {
                                 uintBitsToFloat(scene.data[materialBase + 14u]),
                                 0.0
                         );
+
+                        uint lightEmitterAnchor = scene.data[materialBase + 15u];
+                        if ((lightEmitterAnchor & 0x80000000u) != 0u) {
+                            vec3 emitterAnchor = vec3(
+                                float(lightEmitterAnchor & 255u),
+                                float((lightEmitterAnchor >> 8u) & 255u),
+                                float((lightEmitterAnchor >> 16u) & 255u)
+                            ) / 255.0;
+                            vec3 localHitPoint = rayOrigin
+                                    + rayDirection * hit.distance
+                                    - vec3(hit.voxel);
+                            float emitterDistance = distance(localHitPoint, emitterAnchor);
+                            float fallbackEmitterMask = 1.0
+                                    - smoothstep(0.08, 0.18, emitterDistance);
+                            surface.emission *= fallbackEmitterMask;
+                        }
+
                         surface.f0 = mix(vec3(0.04), surface.albedo, surface.metallic);
                     }
 
