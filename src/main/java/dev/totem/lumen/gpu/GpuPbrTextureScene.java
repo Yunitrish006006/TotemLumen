@@ -22,7 +22,7 @@ import java.util.Objects;
  * deduplicated before upload.</p>
  */
 public final class GpuPbrTextureScene {
-    public static final int ABI_VERSION = 3;
+    public static final int ABI_VERSION = 4;
     public static final int MAX_TEXTURE_HANDLES = PbrTextureHandleRegistry.MAX_HANDLE + 1;
     public static final int MAX_TEXTURE_DIMENSION = 128;
     public static final int MAX_TEXELS = 2_097_152;
