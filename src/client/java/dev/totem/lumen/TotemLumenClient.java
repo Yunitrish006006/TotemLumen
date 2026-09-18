@@ -147,6 +147,10 @@ public final class TotemLumenClient implements ClientModInitializer {
                 Identifier.fromNamespaceAndPath(MOD_ID, "p5_debug_overlay"),
                 (graphics, deltaTracker) -> P5StableLookupRenderer.drawHud(graphics)
         );
+        HudElementRegistry.addLast(
+                Identifier.fromNamespaceAndPath(MOD_ID, "compile_progress"),
+                (graphics, deltaTracker) -> RendererCompileProgressNotifier.drawHud(graphics)
+        );
 
         ClientLifecycleEvents.CLIENT_STOPPING.register(client -> {
             RendererCompileProgressNotifier.reset();
