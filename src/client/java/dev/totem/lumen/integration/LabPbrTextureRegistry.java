@@ -175,6 +175,29 @@ public final class LabPbrTextureRegistry {
         return loadedAnimated;
     }
 
+    public static long animationSignature(long gameTick) {
+        long hash = 0xCBF29CE484222325L;
+        List<PbrTextureData> textures = snapshot();
+        for (PbrTextureData texture : textures) {
+            if (!texture.animated()) continue;
+            hash ^= texture.spriteId().hashCode();
+            hash *= 0x100000001B3L;
+            if (texture.albedoAnimation() != null) {
+                hash ^= texture.albedoAnimation().frameAtTick(gameTick);
+                hash *= 0x100000001B3L;
+            }
+            if (texture.normalAnimation() != null) {
+                hash ^= texture.normalAnimation().frameAtTick(gameTick);
+                hash *= 0x100000001B3L;
+            }
+            if (texture.specularAnimation() != null) {
+                hash ^= texture.specularAnimation().frameAtTick(gameTick);
+                hash *= 0x100000001B3L;
+            }
+        }
+        return hash;
+    }
+
     private static void scanDeclaredFormat(ResourceManager resources) {
         DeclaredFormat format = DeclaredFormat.UNDECLARED;
         try {
