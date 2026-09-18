@@ -36,9 +36,9 @@ public final class P14ModelMeshGpuUploader {
 
     private static void packSnapshot(ByteBuffer buffer, BlockModelMeshRegistry.Snapshot snapshot) {
         int pixelBaseWord = buffer.getInt(3 * Integer.BYTES);
-        int width = buffer.getInt(4 * Integer.BYTES);
-        int height = buffer.getInt(5 * Integer.BYTES);
-        int pixelCount = Math.multiplyExact(width, height);
+        int capacityWidth = buffer.getInt(51 * Integer.BYTES);
+        int capacityHeight = buffer.getInt(52 * Integer.BYTES);
+        int pixelCount = Math.multiplyExact(capacityWidth, capacityHeight);
         int modelBaseWord = Math.addExact(pixelBaseWord, pixelCount);
         int descriptorBaseWord = modelBaseWord;
         int quadBaseWord = Math.addExact(descriptorBaseWord, P14ModelMeshGpuLayout.MESH_DESCRIPTOR_WORDS);
