@@ -1,10 +1,9 @@
 package dev.totem.lumen.integration;
 
-import com.google.gson.JsonArray;
-import com.google.gson.JsonElement;
-import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
 import com.mojang.blaze3d.platform.NativeImage;
+import net.minecraft.client.resources.metadata.animation.AnimationFrame;
+import net.minecraft.client.resources.metadata.animation.AnimationMetadataSection;
+import net.minecraft.client.resources.metadata.animation.FrameSize;
 import dev.totem.lumen.TotemLumenClient;
 import dev.totem.lumen.material.PbrAnimation;
 import dev.totem.lumen.material.PbrImage;
@@ -15,8 +14,6 @@ import net.minecraft.resources.Identifier;
 import net.minecraft.server.packs.resources.ResourceManager;
 
 import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -248,10 +245,12 @@ public final class LabPbrTextureRegistry {
 
     private static LoadedLayer loadLayer(ResourceManager resources, Identifier location) {
         try {
-            var resource = resources.getResource(location);
-            if (resource.isEmpty()) return null;
+            var resourceOptional = resources.getResource(location);
+            if (resourceOptional.isEmpty()) return null;
+            var resource = resourceOptional.get();
+
             PbrImage image;
-            try (InputStream input = resource.get().open();
+            try (InputStream input = resource.open();
                  NativeImage nativeImage = NativeImage.read(input)) {
                 image = new PbrImage(
                         nativeImage.getWidth(),
@@ -260,7 +259,7 @@ public final class LabPbrTextureRegistry {
                 );
             }
 
-            PbrAnimation animation = loadAnimation(resources, location, image);
+            PbrAnimation animation = loadAnimation(resource, location, image);
             return new LoadedLayer(image, animation);
         } catch (Throwable failure) {
             TotemLumenClient.LOGGER.warn(
@@ -273,36 +272,21 @@ public final class LabPbrTextureRegistry {
     }
 
     private static PbrAnimation loadAnimation(
-            ResourceManager resources,
+            net.minecraft.server.packs.resources.Resource resource,
             Identifier textureLocation,
             PbrImage image
     ) {
-        Identifier metadataLocation = Identifier.fromNamespaceAndPath(
-                textureLocation.getNamespace(),
-                textureLocation.getPath() + ".mcmeta"
-        );
         try {
-            var metadataResource = resources.getResource(metadataLocation);
-            if (metadataResource.isEmpty()) return null;
+            var metadata = resource.metadata().getSection(AnimationMetadataSection.TYPE);
+            if (metadata.isEmpty()) return null;
 
-            JsonObject root;
-            try (InputStream input = metadataResource.get().open();
-                 InputStreamReader reader = new InputStreamReader(input, StandardCharsets.UTF_8)) {
-                JsonElement parsed = JsonParser.parseReader(reader);
-                if (!parsed.isJsonObject()) return null;
-                root = parsed.getAsJsonObject();
-            }
-
-            JsonObject animationObject = root.has("animation") && root.get("animation").isJsonObject()
-                    ? root.getAsJsonObject("animation")
-                    : null;
-            if (animationObject == null) return null;
-
-            int frameWidth = positiveInt(animationObject, "width", image.width());
-            // Minecraft defaults both missing dimensions to the texture width, which makes the
-            // common 16x(N*16) vertical strip animate as 16x16 frames.
-            int frameHeight = positiveInt(animationObject, "height", image.width());
-            if (image.width() % frameWidth != 0 || image.height() % frameHeight != 0) {
+            AnimationMetadataSection animation = metadata.get();
+            FrameSize frameSize = animation.calculateFrameSize(image.width(), image.height());
+            int frameWidth = frameSize.width();
+            int frameHeight = frameSize.height();
+            if (frameWidth <= 0 || frameHeight <= 0
+                    || image.width() % frameWidth != 0
+                    || image.height() % frameHeight != 0) {
                 TotemLumenClient.LOGGER.warn(
                         "P18 animation metadata dimensions do not tile texture {}; image={}x{}, frame={}x{}",
                         textureLocation,
@@ -317,34 +301,17 @@ public final class LabPbrTextureRegistry {
             int columns = image.width() / frameWidth;
             int rows = image.height() / frameHeight;
             int sourceFrameCount = Math.multiplyExact(columns, rows);
-            int defaultFrameTime = positiveInt(animationObject, "frametime", 1);
-            boolean interpolate = animationObject.has("interpolate")
-                    && animationObject.get("interpolate").isJsonPrimitive()
-                    && animationObject.get("interpolate").getAsBoolean();
+            int defaultFrameTime = Math.max(1, animation.defaultFrameTime());
 
             List<Integer> timeline = new ArrayList<>();
-            JsonArray frames = animationObject.has("frames") && animationObject.get("frames").isJsonArray()
-                    ? animationObject.getAsJsonArray("frames")
-                    : null;
-            if (frames == null || frames.size() == 0) {
+            List<AnimationFrame> frames = animation.frames().orElse(null);
+            if (frames == null || frames.isEmpty()) {
                 for (int frame = 0; frame < sourceFrameCount; frame++) {
                     appendFrameTicks(timeline, frame, defaultFrameTime);
                 }
             } else {
-                for (JsonElement entry : frames) {
-                    int frameIndex;
-                    int frameTime = defaultFrameTime;
-                    if (entry.isJsonPrimitive() && entry.getAsJsonPrimitive().isNumber()) {
-                        frameIndex = entry.getAsInt();
-                    } else if (entry.isJsonObject()) {
-                        JsonObject frameObject = entry.getAsJsonObject();
-                        if (!frameObject.has("index")) continue;
-                        frameIndex = frameObject.get("index").getAsInt();
-                        frameTime = positiveInt(frameObject, "time", defaultFrameTime);
-                    } else {
-                        continue;
-                    }
-
+                for (AnimationFrame entry : frames) {
+                    int frameIndex = entry.index();
                     if (frameIndex < 0 || frameIndex >= sourceFrameCount) {
                         TotemLumenClient.LOGGER.warn(
                                 "P18 animation frame {} is outside {} source frames for {}",
@@ -354,7 +321,11 @@ public final class LabPbrTextureRegistry {
                         );
                         continue;
                     }
-                    appendFrameTicks(timeline, frameIndex, frameTime);
+                    appendFrameTicks(
+                            timeline,
+                            frameIndex,
+                            Math.max(1, entry.timeOr(defaultFrameTime))
+                    );
                 }
             }
 
@@ -367,13 +338,18 @@ public final class LabPbrTextureRegistry {
                     frameHeight,
                     sourceFrameCount,
                     expanded.length,
-                    interpolate
+                    animation.interpolatedFrames()
             );
-            return new PbrAnimation(frameWidth, frameHeight, expanded, interpolate);
+            return new PbrAnimation(
+                    frameWidth,
+                    frameHeight,
+                    expanded,
+                    animation.interpolatedFrames()
+            );
         } catch (Throwable failure) {
             TotemLumenClient.LOGGER.warn(
-                    "P18 failed to read animation metadata {}; treating texture as static",
-                    metadataLocation,
+                    "P18 failed to read animation metadata for {}; treating texture as static",
+                    textureLocation,
                     failure
             );
             return null;
@@ -400,16 +376,6 @@ public final class LabPbrTextureRegistry {
                 sourceAnimation.copyTimelineFrames(),
                 sourceAnimation.interpolate()
         );
-    }
-
-    private static int positiveInt(JsonObject object, String key, int fallback) {
-        if (!object.has(key) || !object.get(key).isJsonPrimitive()) return fallback;
-        try {
-            int value = object.get(key).getAsInt();
-            return value > 0 ? value : fallback;
-        } catch (RuntimeException ignored) {
-            return fallback;
-        }
     }
 
     private static void appendFrameTicks(List<Integer> timeline, int frameIndex, int ticks) {
