@@ -23,6 +23,8 @@ public final class P18PbrTextureGpuUploader {
     private static int lastLoggedTexelCount = -1;
     private static int lastLoggedDroppedTextures = -1;
     private static int lastLoggedAlphaTextures = -1;
+    private static int lastLoggedAnimatedTextures = -1;
+    private static int lastLoggedTimelineWords = -1;
 
     private P18PbrTextureGpuUploader() {
     }
@@ -102,21 +104,27 @@ public final class P18PbrTextureGpuUploader {
         if (lastLoggedTextureCount != packed.textureCount()
                 || lastLoggedTexelCount != packed.texelCount()
                 || lastLoggedDroppedTextures != packed.droppedTextures()
-                || lastLoggedAlphaTextures != packed.alphaTextures()) {
+                || lastLoggedAlphaTextures != packed.alphaTextures()
+                || lastLoggedAnimatedTextures != packed.animatedTextures()
+                || lastLoggedTimelineWords != packed.animationTimelineWords()) {
             lastLoggedTextureCount = packed.textureCount();
             lastLoggedTexelCount = packed.texelCount();
             lastLoggedDroppedTextures = packed.droppedTextures();
             lastLoggedAlphaTextures = packed.alphaTextures();
+            lastLoggedAnimatedTextures = packed.animatedTextures();
+            lastLoggedTimelineWords = packed.animationTimelineWords();
 
             TotemLumenClient.LOGGER.info(
                     "P18 PBR GPU scene: surfaceSets={}, texturedCubeFaces={}, textures={}, "
-                            + "texels={}, alphaTextures={}, downsampled={}, dropped={}, "
-                            + "bytes={}, maxBytes={}, format={}",
+                            + "texels={}, alphaTextures={}, animatedTextures={}, timelineTicks={}, "
+                            + "downsampled={}, dropped={}, bytes={}, maxBytes={}, format={}",
                     surfaces.surfaceSetCount(),
                     surfaces.texturedFaces(),
                     packed.textureCount(),
                     packed.texelCount(),
                     packed.alphaTextures(),
+                    packed.animatedTextures(),
+                    packed.animationTimelineWords(),
                     packed.downsampledTextures(),
                     packed.droppedTextures(),
                     lastCopyBytes,
@@ -126,9 +134,23 @@ public final class P18PbrTextureGpuUploader {
             );
             if (packed.droppedTextures() > 0) {
                 TotemLumenClient.LOGGER.warn(
-                        "P18 resident texture scene exceeded bounded texel capacity; "
+                        "P18 resident texture scene exceeded bounded texel/timeline capacity; "
                                 + "{} texture(s) use baseline material fallback",
                         packed.droppedTextures()
+                );
+            }
+            if (packed.interpolatedAnimations() > 0) {
+                TotemLumenClient.LOGGER.info(
+                        "P18 animated textures requested interpolation on {} texture(s); "
+                                + "current baseline preserves frame timing but uses discrete frame sampling",
+                        packed.interpolatedAnimations()
+                );
+            }
+            if (packed.truncatedAnimations() > 0) {
+                TotemLumenClient.LOGGER.warn(
+                        "P18 animation timeline cap reached for {} texture(s); cycles are bounded to {} ticks",
+                        packed.truncatedAnimations(),
+                        GpuPbrTextureScene.MAX_TIMELINE_TICKS_PER_TEXTURE
                 );
             }
         }
