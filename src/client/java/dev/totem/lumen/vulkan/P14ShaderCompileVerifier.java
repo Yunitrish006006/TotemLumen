@@ -264,7 +264,7 @@ public final class P14ShaderCompileVerifier {
         );
         requireSourceMarker(
                 source,
-                "return sample < float(alpha) / 255.0;",
+                "return coverageSample < float(alpha) / 255.0;",
                 label + " stochastic partial-alpha coverage"
         );
         requireSourceMarker(
