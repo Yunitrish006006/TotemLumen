@@ -2,7 +2,6 @@ package dev.totem.lumen.render;
 
 import dev.totem.lumen.vulkan.P12FullBasePipeline;
 import dev.totem.lumen.vulkan.P16MultipassReflection;
-import dev.totem.lumen.vulkan.P17EnhancedBasePipeline;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.network.chat.Component;
