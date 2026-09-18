@@ -78,6 +78,8 @@ public final class LabPbrTextureRegistry {
         if (client == null) return;
         ResourceManager resources = client.getResourceManager();
         PbrTextureMaterialRuleRegistry.ensureLoaded(resources);
+        BlockMaterialRuleRegistry.ensureLoaded(resources);
+        RendererRuntimeTuningRegistry.ensureLoaded(resources);
         if (!formatScanned) {
             scanDeclaredFormat(resources);
         }
@@ -129,6 +131,8 @@ public final class LabPbrTextureRegistry {
         formatScanned = false;
         declaredFormat = DeclaredFormat.UNDECLARED;
         PbrTextureMaterialRuleRegistry.invalidate();
+        BlockMaterialRuleRegistry.invalidate();
+        RendererRuntimeTuningRegistry.invalidate();
         reloadGeneration++;
         revision++;
         TotemLumenClient.LOGGER.info(
