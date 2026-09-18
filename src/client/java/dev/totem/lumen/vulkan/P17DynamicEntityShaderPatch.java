@@ -14,6 +14,7 @@ import dev.totem.lumen.gpu.GpuDynamicEntityScene;
  */
 final class P17DynamicEntityShaderPatch {
     static final int ENTITY_MATERIAL_ID = 0xFFFE;
+    static final int SPIDER_ENTITY_MATERIAL_ID = 0xFFFD;
 
     private P17DynamicEntityShaderPatch() {
     }
@@ -34,7 +35,9 @@ final class P17DynamicEntityShaderPatch {
 
         String helpers = ("""
                 const uint P17_ENTITY_MATERIAL_ID = 0xFFFEu;
-                const uint P17_ENTITY_ABI_VERSION = 1u;
+                const uint P17_SPIDER_ENTITY_MATERIAL_ID = 0xFFFDu;
+                const uint P17_ENTITY_ABI_VERSION = 2u;
+                const uint P17_ENTITY_FLAG_SPIDER_EYES = %du;
                 const uint P17_MAX_ENTITIES = %du;
                 const uint P17_SECTION_LOOKUP_CAPACITY = %du;
                 const uint P17_SECTION_LOOKUP_MASK = %du;
@@ -43,6 +46,7 @@ final class P17DynamicEntityShaderPatch {
                 const uint P17_SECTION_BUCKET_WORDS = %du;
                 const uint P17_ENTITY_DESCRIPTOR_BASE = %du;
                 const uint P17_SECTION_LOOKUP_BASE = %du;
+                const uint P17_SPIDER_EYE_POOL_BASE = %du;
                 const uint P17_QUAD_POOL_BASE = %du;
                 const uint P17_QUAD_WORDS = %du;
                 const uint P17_P14_MAX_STORAGE_WORDS = %du;
@@ -77,6 +81,48 @@ final class P17DynamicEntityShaderPatch {
                         uintBitsToFloat(scene.data[base + 1u]),
                         uintBitsToFloat(scene.data[base + 2u])
                     );
+                }
+
+                vec2 p17Uv(uint entityBase, uint wordBase) {
+                    uint base = entityBase + P17_QUAD_POOL_BASE + wordBase;
+                    return vec2(
+                        uintBitsToFloat(scene.data[base]),
+                        uintBitsToFloat(scene.data[base + 1u])
+                    );
+                }
+
+                uint p17PackUv(vec2 uv) {
+                    vec2 wrapped = fract(uv);
+                    uint u = uint(round(clamp(wrapped.x, 0.0, 1.0) * 65535.0));
+                    uint v = uint(round(clamp(wrapped.y, 0.0, 1.0) * 65535.0));
+                    return u | (v << 16u);
+                }
+
+                vec2 p17UnpackUv(uint packed) {
+                    return vec2(
+                        float(packed & 65535u),
+                        float((packed >> 16u) & 65535u)
+                    ) / 65535.0;
+                }
+
+                vec3 p17ArgbRgb(uint argb) {
+                    return vec3(
+                        float((argb >> 16u) & 255u),
+                        float((argb >> 8u) & 255u),
+                        float(argb & 255u)
+                    ) / 255.0;
+                }
+
+                uint p17SpiderEyeArgb(uint entityBase, vec2 uv) {
+                    uint width = scene.data[entityBase + 8u];
+                    uint height = scene.data[entityBase + 9u];
+                    if (width == 0u || height == 0u) return 0u;
+                    vec2 wrapped = fract(uv);
+                    uint x = min(width - 1u, uint(floor(wrapped.x * float(width))));
+                    uint y = min(height - 1u, uint(floor(wrapped.y * float(height))));
+                    return scene.data[
+                        entityBase + P17_SPIDER_EYE_POOL_BASE + y * width + x
+                    ];
                 }
 
                 bool p17IntersectAabb(
@@ -127,11 +173,17 @@ final class P17DynamicEntityShaderPatch {
                         vec3 a,
                         vec3 b,
                         vec3 c,
+                        vec2 uvA,
+                        vec2 uvB,
+                        vec2 uvC,
+                        uint candidateMaterialId,
                         float minDistance,
                         float maxDistance,
                         inout bool found,
                         inout float bestDistance,
-                        inout vec3 bestNormal
+                        inout vec3 bestNormal,
+                        inout vec2 bestUv,
+                        inout uint bestMaterialId
                 ) {
                     vec3 edge1 = b - a;
                     vec3 edge2 = c - a;
@@ -161,6 +213,8 @@ final class P17DynamicEntityShaderPatch {
                     found = true;
                     bestDistance = max(distance, 0.0);
                     bestNormal = geometricNormal;
+                    bestUv = uvA * (1.0 - u - v) + uvB * u + uvC * v;
+                    bestMaterialId = candidateMaterialId;
                 }
 
                 bool p17TrySectionEntities(
@@ -171,7 +225,9 @@ final class P17DynamicEntityShaderPatch {
                         float minDistance,
                         float maxDistance,
                         out float hitDistance,
-                        out vec3 hitNormal
+                        out vec3 hitNormal,
+                        out uint hitMaterialId,
+                        out uint hitPackedUv
                 ) {
                     uint bucket = p17FindSectionBucket(entityBase, sectionCoord);
                     if (bucket == 0xFFFFFFFFu) return false;
@@ -184,6 +240,8 @@ final class P17DynamicEntityShaderPatch {
                     bool found = false;
                     float bestDistance = maxDistance;
                     vec3 bestNormal = vec3(0.0);
+                    vec2 bestUv = vec2(0.0);
+                    uint bestMaterialId = P17_ENTITY_MATERIAL_ID;
 
                     for (uint candidateIndex = 0u; candidateIndex < candidateCount; candidateIndex++) {
                         uint entityIndex = scene.data[bucket + 4u + candidateIndex];
@@ -220,6 +278,11 @@ final class P17DynamicEntityShaderPatch {
                                 min(maxDistance, bestDistance)
                         )) continue;
 
+                        uint entityFlags = scene.data[descriptor + 16u];
+                        uint candidateMaterialId =
+                                (entityFlags & P17_ENTITY_FLAG_SPIDER_EYES) != 0u
+                                ? P17_SPIDER_ENTITY_MATERIAL_ID
+                                : P17_ENTITY_MATERIAL_ID;
                         uint firstQuad = scene.data[descriptor + 14u];
                         uint quadCount = scene.data[descriptor + 15u];
                         for (uint quadIndex = 0u; quadIndex < quadCount; quadIndex++) {
@@ -228,21 +291,29 @@ final class P17DynamicEntityShaderPatch {
                             vec3 v1 = entityOrigin + p17Vertex(entityBase, quadWord + 3u);
                             vec3 v2 = entityOrigin + p17Vertex(entityBase, quadWord + 6u);
                             vec3 v3 = entityOrigin + p17Vertex(entityBase, quadWord + 9u);
+                            vec2 uv0 = p17Uv(entityBase, quadWord + 12u);
+                            vec2 uv1 = p17Uv(entityBase, quadWord + 14u);
+                            vec2 uv2 = p17Uv(entityBase, quadWord + 16u);
+                            vec2 uv3 = p17Uv(entityBase, quadWord + 18u);
                             p17TryTriangle(
                                 origin, direction, v0, v1, v2,
+                                uv0, uv1, uv2, candidateMaterialId,
                                 minDistance, min(maxDistance, bestDistance),
-                                found, bestDistance, bestNormal
+                                found, bestDistance, bestNormal, bestUv, bestMaterialId
                             );
                             p17TryTriangle(
                                 origin, direction, v0, v2, v3,
+                                uv0, uv2, uv3, candidateMaterialId,
                                 minDistance, min(maxDistance, bestDistance),
-                                found, bestDistance, bestNormal
+                                found, bestDistance, bestNormal, bestUv, bestMaterialId
                             );
                         }
                     }
 
                     hitDistance = bestDistance;
                     hitNormal = bestNormal;
+                    hitMaterialId = bestMaterialId;
+                    hitPackedUv = p17PackUv(bestUv);
                     return found;
                 }
 
@@ -292,6 +363,8 @@ final class P17DynamicEntityShaderPatch {
                         float segmentEnd = min(sectionExit, maxDistance);
                         float entityDistance;
                         vec3 entityNormal;
+                        uint entityMaterialId;
+                        uint entityPackedUv;
                         if (p17TrySectionEntities(
                                 entityBase,
                                 sectionCoord,
@@ -300,11 +373,13 @@ final class P17DynamicEntityShaderPatch {
                                 sectionEntry,
                                 segmentEnd,
                                 entityDistance,
-                                entityNormal
+                                entityNormal,
+                                entityMaterialId,
+                                entityPackedUv
                         )) {
                             vec3 hitPoint = origin + dir * entityDistance;
                             result.hit = 1u;
-                            result.materialId = P17_ENTITY_MATERIAL_ID;
+                            result.materialId = entityMaterialId;
                             result.voxel = ivec3(floor(hitPoint));
                             result.normal = ivec3(round(clamp(
                                 entityNormal,
@@ -312,7 +387,7 @@ final class P17DynamicEntityShaderPatch {
                                 vec3(1.0)
                             ) * 32767.0));
                             result.distance = entityDistance;
-                            result.steps = sectionStep;
+                            result.steps = entityPackedUv;
                             return result;
                         }
 
@@ -352,6 +427,7 @@ final class P17DynamicEntityShaderPatch {
                 }
 
                 """).formatted(
+                GpuDynamicEntityScene.FLAG_SPIDER_EYES,
                 GpuDynamicEntityScene.MAX_ENTITIES,
                 GpuDynamicEntityScene.SECTION_LOOKUP_CAPACITY,
                 GpuDynamicEntityScene.SECTION_LOOKUP_CAPACITY - 1,
@@ -360,6 +436,7 @@ final class P17DynamicEntityShaderPatch {
                 GpuDynamicEntityScene.SECTION_BUCKET_WORDS,
                 GpuDynamicEntityScene.ENTITY_DESCRIPTOR_BASE_WORD,
                 GpuDynamicEntityScene.SECTION_LOOKUP_BASE_WORD,
+                GpuDynamicEntityScene.SPIDER_EYE_POOL_BASE_WORD,
                 GpuDynamicEntityScene.QUAD_POOL_BASE_WORD,
                 GpuDynamicEntityScene.QUAD_WORDS_PER_RECORD,
                 P14ModelMeshGpuLayout.MAX_STORAGE_WORDS
@@ -371,7 +448,8 @@ final class P17DynamicEntityShaderPatch {
                         vec4 optical = p15MaterialTransmission(candidate.materialId, geometryCode);
                 """;
         String p15EntityOpaque = """
-                        if (candidate.materialId == P17_ENTITY_MATERIAL_ID) {
+                        if (candidate.materialId == P17_ENTITY_MATERIAL_ID
+                                || candidate.materialId == P17_SPIDER_ENTITY_MATERIAL_ID) {
                             candidate.distance += traveled;
                             result.hit = candidate;
                             return result;
