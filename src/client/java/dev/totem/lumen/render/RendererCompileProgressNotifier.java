@@ -4,6 +4,7 @@ import dev.totem.lumen.vulkan.P12FullBasePipeline;
 import dev.totem.lumen.vulkan.P16MultipassReflection;
 import dev.totem.lumen.vulkan.P17EnhancedBasePipeline;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.network.chat.Component;
 
 /**
@@ -134,6 +135,90 @@ public final class RendererCompileProgressNotifier {
                             ? "message.totem-lumen.compile.complete"
                             : "message.totem-lumen.compile.complete_degraded"
             );
+        }
+    }
+
+    public static int progressPercent() {
+        RendererState rendererState = RendererBootstrap.state();
+        return switch (rendererState) {
+            case NEW -> 0;
+            case WAITING_FOR_DEVICE -> 5;
+            case WAITING_FOR_VULKAN_INTEROP -> 10;
+            case WAITING_FOR_PIPELINE -> 20;
+            case DISABLED_NON_VULKAN, DISABLED_UNSUPPORTED_VULKAN, PIPELINE_FAILED -> 100;
+            case READY_FOR_SCENE_EXTRACTION -> {
+                Throwable fullFailure = P12FullBasePipeline.failure();
+                if (fullFailure != null) {
+                    yield 100;
+                }
+                if (!P12FullBasePipeline.ready()) {
+                    yield 30;
+                }
+
+                boolean p17Finished = P17EnhancedBasePipeline.ready()
+                        || P17EnhancedBasePipeline.failure() != null;
+                boolean p16Finished = P16MultipassReflection.ready()
+                        || P16MultipassReflection.failure() != null;
+                int progress = 70;
+                if (p17Finished) progress += 15;
+                if (p16Finished) progress += 15;
+                yield progress;
+            }
+        };
+    }
+
+    public static void drawHud(GuiGraphicsExtractor graphics) {
+        Minecraft client = Minecraft.getInstance();
+        if (client.level == null || !RendererSettings.rendererEnabled()) {
+            return;
+        }
+
+        RendererState rendererState = RendererBootstrap.state();
+        if (rendererState == RendererState.DISABLED_NON_VULKAN
+                || rendererState == RendererState.DISABLED_UNSUPPORTED_VULKAN
+                || rendererState == RendererState.PIPELINE_FAILED
+                || P12FullBasePipeline.failure() != null) {
+            return;
+        }
+
+        int progress = progressPercent();
+        if (progress >= 100) {
+            return;
+        }
+
+        String stageKey;
+        if (rendererState == RendererState.WAITING_FOR_DEVICE
+                || rendererState == RendererState.WAITING_FOR_VULKAN_INTEROP
+                || rendererState == RendererState.NEW) {
+            stageKey = "screen.totem-lumen.compile_hud.backend";
+        } else if (rendererState == RendererState.WAITING_FOR_PIPELINE) {
+            stageKey = "screen.totem-lumen.compile_hud.bootstrap";
+        } else if (!P12FullBasePipeline.ready()) {
+            stageKey = "screen.totem-lumen.compile_hud.full";
+        } else {
+            stageKey = "screen.totem-lumen.compile_hud.advanced";
+        }
+
+        Component label = Component.translatable(
+                "screen.totem-lumen.compile_hud",
+                Component.translatable(stageKey),
+                progress
+        );
+
+        int x = 8;
+        int y = 8;
+        int barWidth = 132;
+        int barHeight = 4;
+        int textWidth = client.font.width(label);
+        int panelWidth = Math.max(barWidth, textWidth);
+        int barY = y + 12;
+        int filledWidth = Math.round(barWidth * (progress / 100.0f));
+
+        graphics.fill(x - 4, y - 4, x + panelWidth + 4, barY + barHeight + 4, 0xA0000000);
+        graphics.text(client.font, label, x, y, 0xFFFFFFFF, true);
+        graphics.fill(x, barY, x + barWidth, barY + barHeight, 0xA0404040);
+        if (filledWidth > 0) {
+            graphics.fill(x, barY, x + filledWidth, barY + barHeight, 0xFFE0E0E0);
         }
     }
 
