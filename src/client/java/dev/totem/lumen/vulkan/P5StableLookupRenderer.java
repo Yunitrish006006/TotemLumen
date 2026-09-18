@@ -1413,7 +1413,11 @@ public final class P5StableLookupRenderer {
         putWord(buffer, 82, Float.floatToRawIntBits(tuning.localAmbient()));
         putWord(buffer, 83, Float.floatToRawIntBits(tuning.surfaceEmissionGain()));
         putWord(buffer, 84, Float.floatToRawIntBits(tuning.giDisplayGain()));
-        for (int word = 85; word < HEADER_WORDS; word++) putWord(buffer, word, 0);
+        putWord(buffer, 85, Float.floatToRawIntBits(tuning.waterReflectionRoughness()));
+        putWord(buffer, 86, Float.floatToRawIntBits(tuning.lavaReflectionRoughness()));
+        putWord(buffer, 87, Float.floatToRawIntBits(tuning.waterReflectionScale()));
+        putWord(buffer, 88, Float.floatToRawIntBits(tuning.lavaReflectionScale()));
+        for (int word = 89; word < HEADER_WORDS; word++) putWord(buffer, word, 0);
     }
 
     private static long currentAnimationTick(FrameSnapshot frame) {
