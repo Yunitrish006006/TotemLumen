@@ -6,11 +6,11 @@
   "message.totem-lumen.compile.bootstrap": "[Totem Lumen] [1/4] 正在建立 Vulkan 啟動管線…",
   "message.totem-lumen.compile.bootstrap_wait": "[Totem Lumen] [1/4] Vulkan 啟動管線仍在編譯（%s）；目前維持原版渲染。",
   "message.totem-lumen.compile.bootstrap_ready": "[Totem Lumen] [1/4] Vulkan 啟動管線完成；完整光影尚未就緒，繼續使用 Minecraft 一般畫面。",
-  "message.totem-lumen.compile.full": "[Totem Lumen] [2/4] 正在背景編譯完整光照（GI、環境光、幾何與透射）…",
+  "message.totem-lumen.compile.full": "[Totem Lumen] [2/4] 正在背景編譯完整光照、材質與玩家 / 生物光追…",
   "message.totem-lumen.compile.full_wait": "[Totem Lumen] [2/4] 完整光照仍在編譯（%s）；目前維持 Minecraft 一般渲染與玩家選用的材質包。",
-  "message.totem-lumen.compile.full_ready": "[Totem Lumen] [2/4] 完整光照與材質已完成；Totem Lumen 將在首個完整 frame 後接管畫面。",
-  "message.totem-lumen.compile.advanced": "[Totem Lumen] [3/4 + 4/4] 正在背景編譯實體光追與反射管線…",
-  "message.totem-lumen.compile.advanced_wait": "[Totem Lumen] [3/4 + 4/4] 進階管線仍在編譯（%s）；已完成的渲染階段會持續運作。",
+  "message.totem-lumen.compile.full_ready": "[Totem Lumen] [2/4] 完整光照、材質與玩家 / 生物光追已完成；Totem Lumen 將在首個完整 frame 後接管畫面。",
+  "message.totem-lumen.compile.advanced": "[Totem Lumen] [4/4] 正在背景編譯反射管線…",
+  "message.totem-lumen.compile.advanced_wait": "[Totem Lumen] [4/4] 反射仍在編譯（%s）；完整光照與實體光追會持續運作。",
   "message.totem-lumen.compile.p17_ready": "[Totem Lumen] [3/4] 實體光線追蹤管線已完成。",
   "message.totem-lumen.compile.p16_ready": "[Totem Lumen] [4/4] 反射管線已完成。",
   "message.totem-lumen.compile.complete": "[Totem Lumen] [4/4] 所有渲染功能皆已完成。",
@@ -90,6 +90,6 @@
   "screen.totem-lumen.compile_hud": "Totem Lumen 編譯：%s  %s%%",
   "screen.totem-lumen.compile_hud.backend": "Vulkan 後端",
   "screen.totem-lumen.compile_hud.bootstrap": "建立基礎渲染",
-  "screen.totem-lumen.compile_hud.full": "GI / 天空 / 幾何 / 材質",
-  "screen.totem-lumen.compile_hud.advanced": "玩家 / 生物光追與反射"
+  "screen.totem-lumen.compile_hud.full": "光照 / 材質 / 玩家與生物",
+  "screen.totem-lumen.compile_hud.advanced": "反射"
 }
