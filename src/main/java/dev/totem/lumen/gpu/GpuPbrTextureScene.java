@@ -36,6 +36,7 @@ public final class GpuPbrTextureScene {
     public static final int FLAG_ANIMATED = 1 << 4;
     public static final int FLAG_INTERPOLATE_REQUESTED = 1 << 5;
     public static final int FLAG_TIMELINE_TRUNCATED = 1 << 6;
+    public static final int FLAG_SUPPRESS_BLOCK_EMISSION = 1 << 7;
 
     public static final int HEADER_WORDS = 8;
     public static final int DESCRIPTOR_WORDS_PER_RECORD = 12;
@@ -196,6 +197,9 @@ public final class GpuPbrTextureScene {
             if (animation.animated()) flags |= FLAG_ANIMATED;
             if (animation.interpolateRequested()) flags |= FLAG_INTERPOLATE_REQUESTED;
             if (animation.truncated()) flags |= FLAG_TIMELINE_TRUNCATED;
+            if (suppressesBaselineBlockEmission(texture.spriteId())) {
+                flags |= FLAG_SUPPRESS_BLOCK_EMISSION;
+            }
 
             int descriptor = baseWord + DESCRIPTOR_BASE_WORD
                     + handle * DESCRIPTOR_WORDS_PER_RECORD;
@@ -330,6 +334,15 @@ public final class GpuPbrTextureScene {
                 frameX * frameWidth + localX,
                 frameY * frameHeight + localY
         );
+    }
+
+    static boolean suppressesBaselineBlockEmission(String spriteId) {
+        if (spriteId == null) return false;
+        int colon = spriteId.indexOf(':');
+        String path = colon >= 0 ? spriteId.substring(colon + 1) : spriteId;
+        return path.equals("block/campfire_log")
+                || path.equals("block/campfire_log_lit")
+                || path.equals("block/soul_campfire_log_lit");
     }
 
     public static Dimensions boundedDimensions(int width, int height) {
