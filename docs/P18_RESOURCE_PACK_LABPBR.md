@@ -37,7 +37,7 @@ Normal map:
 Specular map:
 
 - R: perceptual smoothness, decoded as `roughness = (1 - R)^2`.
-- G 0–229: dielectric F0 mapped to 0–0.08.
+- G 0–229: dielectric F0 stored linearly as G/255 (229 ≈ 0.898).
 - G 230–237: predefined metals.
 - G 238–254: reserved/custom-metal-compatible range.
 - G 255: custom metal using albedo as conductor reflectance.
