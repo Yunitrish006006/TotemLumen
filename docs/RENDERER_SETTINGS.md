@@ -100,6 +100,20 @@ This preserves P15's colored-glass source markers and averages RGB transmission 
 
 Local emissive blocks are no longer shaded as center-point emitters. For each receiver, the renderer selects the block face oriented toward that receiver and evaluates 1 / 2 / 4 samples across the face. Each sample has its own receiver cosine, emitter cosine, range attenuation and P15 RGB visibility/transmission ray. The same Shadow Quality setting controls both Sun/Moon soft-shadow sampling and local emissive-face sampling.
 
+## Startup and recompile fallback
+
+Totem Lumen no longer exposes the simplified bootstrap renderer as a player-visible presentation.
+
+- Minecraft's normal world render stays visible while the Vulkan bootstrap and full P12-P18 material-aware base compile.
+- The player's currently selected resource pack stays selected; Totem Lumen does not force a resource-pack reload or replace the user's pack.
+- The bootstrap program exists only to establish the live Vulkan scene/storage contract needed to compile the full renderer.
+- No Totem full-screen composite is drawn until the full base pipeline is ready **and** a complete Totem frame has finished.
+- If the full base compile fails, Minecraft's normal renderer remains usable for the rest of the session.
+- Pressing **Recompile Renderer Pipelines** immediately returns presentation ownership to Minecraft until the replacement full-base frame is ready.
+- P17 dynamic entities and P16 reflections remain optional staged upgrades after the base presentation is already active.
+
+This provides the intended "ordinary Minecraft first, advanced lighting when ready" startup path without an expensive resource reload.
+
 ## Renderer master toggle
 
 `rendererEnabled=false` is a runtime renderer bypass, not a mod unload:
@@ -137,4 +151,4 @@ CI must verify all runtime-setting shader markers and shaderc-compile:
 3. P14E + P17 enhanced base;
 4. P14E + P16 + P17 reflection.
 
-Bootstrap remains free of these staged quality features so changing the settings system cannot reintroduce the cold-start readiness regression.
+Bootstrap remains free of these staged quality features and is never composited to the player. It exists only as an internal readiness/compilation bridge, so cold startup cannot replace normal Minecraft presentation with a partial Totem renderer.
