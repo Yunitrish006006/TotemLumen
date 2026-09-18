@@ -1632,7 +1632,8 @@ public final class P5StableLookupRenderer {
             GpuTexture texture = null;
             GpuTextureView view = null;
             try {
-                upload = VulkanOwnedBuffer.createUpload(device, totalBytes);
+                int uploadBytes = STATIC_DATA_END_WORD * Integer.BYTES;
+                upload = VulkanOwnedBuffer.createUpload(device, uploadBytes);
                 scene = VulkanOwnedBuffer.createStorage(device, totalBytes);
                 program = VulkanComputeProgram.create(device, "totem_lumen_p12_one_bounce_gi.comp", SHADER, scene);
                 commandPool = new VulkanFrameCommandPool(device);
