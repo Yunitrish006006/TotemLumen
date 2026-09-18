@@ -887,6 +887,10 @@ public final class P5StableLookupRenderer {
     }
 
     public static void runOnRenderThread() {
+        if (!RendererSettings.rendererEnabled()) {
+            historyValid = false;
+            return;
+        }
         if (!P5WorldDebugComposite.ready() || inFlight || resetRequested) return;
 
         FrameSnapshot frame = SceneExtractionBridge.latestFrame();
@@ -1032,6 +1036,7 @@ public final class P5StableLookupRenderer {
     }
 
     public static void drawHud(GuiGraphicsExtractor graphics) {
+        if (!RendererSettings.rendererEnabled()) return;
         Resources r = resources;
         if (!ready || r == null || r.view.isClosed()) {
             P5WorldDebugComposite.drawHud(graphics);
