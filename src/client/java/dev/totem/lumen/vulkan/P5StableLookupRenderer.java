@@ -493,7 +493,7 @@ public final class P5StableLookupRenderer {
                 vec4 surfaceEmission = emissiveMode ? materialEmission(hit.materialId) : vec4(0.0);
                 vec3 emitted = surfaceEmission.rgb * surfaceEmission.a * uintBitsToFloat(scene.data[83]);
                 if (slot < 0) {
-                    return packRgba(materialColor(hit.materialId) * 0.05 + emitted, 255u);
+                    return packRgba(materialColor(hit.materialId) * uintBitsToFloat(scene.data[82]) + emitted, 255u);
                 }
 
                 vec3 surfaceNormal = resolvedSurfaceNormal(hit, primaryDirection);
