@@ -12,6 +12,7 @@ import dev.totem.lumen.gpu.GpuSectionLightLists;
 import dev.totem.lumen.gpu.GpuSectionLookupTable;
 import dev.totem.lumen.gpu.GpuSectionSlotAllocator;
 import dev.totem.lumen.integration.SceneExtractionBridge;
+import dev.totem.lumen.render.RendererSettings;
 import dev.totem.lumen.scene.FrameSnapshot;
 import dev.totem.lumen.scene.SectionKey;
 import dev.totem.lumen.scene.SectionSnapshot;
@@ -61,7 +62,7 @@ public final class P5StableLookupRenderer {
     private static final int TARGET_WIDTH = 160;
     private static final int MAX_STEPS = 512;
     private static final float MAX_DISTANCE = 256.0f;
-    private static final int CAMERA_UPLOAD_WORDS = 42;
+    private static final int CAMERA_UPLOAD_WORDS = 44;
     private static final int SOFT_SHADOW_SAMPLES = 4;
     private static final float SOFT_SHADOW_ANGULAR_RADIUS = 0.055f;
     private static final float TEMPORAL_HISTORY_WEIGHT = 0.80f;
@@ -1245,6 +1246,8 @@ public final class P5StableLookupRenderer {
             putWord(buffer, 40, Float.floatToRawIntBits(resources.width / (float) resources.height));
         }
         putWord(buffer, 41, (int) frame.frameIndex());
+        putWord(buffer, 42, RendererSettings.reflectionBounces());
+        putWord(buffer, 43, Float.floatToRawIntBits((float) RendererSettings.reflectionDistance()));
     }
 
     private static void packLookupSectionsAndLights(ByteBuffer buffer, List<SectionSnapshot> sections) {
