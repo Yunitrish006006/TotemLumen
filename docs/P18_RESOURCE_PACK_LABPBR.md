@@ -221,7 +221,7 @@ Block light emission and visible surface self-emission are separate concerns.
 The voxel/material table still keeps a block's Minecraft light-emission level so campfires, lamps and other light sources continue to illuminate nearby geometry. P18 surface shading then resolves self-emission per textured surface:
 
 - when a LabPBR specular map exists, its per-texel emissive channel is authoritative and coarse BlockState emission is not added underneath;
-- vanilla campfire wood sprites (`campfire_log`, `campfire_log_lit`, `soul_campfire_log_lit`) explicitly suppress coarse BlockState self-emission;
+- built-in `material_rules.json` assigns `baseline_emission_scale: 0` to vanilla campfire wood sprites; this is data, not a shader special case;
 - campfire flame sprites remain eligible for the vanilla block-emission fallback when no LabPBR emissive map is present.
 
 This prevents the entire campfire model from glowing while preserving its local-light contribution and animated flame emission.
