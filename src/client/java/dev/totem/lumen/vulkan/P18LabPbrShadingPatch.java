@@ -20,7 +20,25 @@ final class P18LabPbrShadingPatch {
             throw new IllegalStateException("P18C shader marker missing: environment surface radiance");
         }
 
-        String helpers = ("""
+        String declarationMarker = "vec3 directionalSampleDirection(uint sampleIndex) {";
+        if (!source.contains(declarationMarker)) {
+            throw new IllegalStateException("P18C shader marker missing: material declaration anchor");
+        }
+
+        String declarations = ("""
+                P18SurfaceSample p18ResolveSurface(
+                        HitResult hit,
+                        vec3 rayOrigin,
+                        vec3 rayDirection
+                );
+
+                """).formatted(
+                GpuPbrTextureScene.FLAG_HAS_NORMAL,
+                GpuPbrTextureScene.FLAG_HAS_SPECULAR
+        );
+        source = source.replace(declarationMarker, declarations + declarationMarker);
+
+        String helpers = """
                 const uint P18_TEXTURE_FLAG_HAS_NORMAL = %du;
                 const uint P18_TEXTURE_FLAG_HAS_SPECULAR = %du;
 
@@ -434,10 +452,7 @@ final class P18LabPbrShadingPatch {
                     return surface;
                 }
 
-                """).formatted(
-                GpuPbrTextureScene.FLAG_HAS_NORMAL,
-                GpuPbrTextureScene.FLAG_HAS_SPECULAR
-        );
+                """;
         source = source.replace(environmentMarker, helpers + environmentMarker);
 
         source = replaceRequiredOnce(
