@@ -21,12 +21,14 @@ public final class P14ShaderCompileVerifier {
         verifyP14EFluidDebugView(baseSource, "full base pass");
         verifyP14EFluidOptics(baseSource, "full base pass", false);
         verifyRuntimeQualitySettings(baseSource);
+        verifyFixedCapacitySceneTails(baseSource, "full base pass");
 
         String p17Source = P17EnhancedBasePipeline.buildSourceForVerification();
         verifyP14EFluidSource(p17Source, "P17 enhanced base pass");
         verifyP14EFluidDebugView(p17Source, "P17 enhanced base pass");
         verifyP14EFluidOptics(p17Source, "P17 enhanced base pass", false);
         verifyP17DynamicEntitySource(p17Source, "enhanced base pass");
+        verifyFixedCapacitySceneTails(p17Source, "P17 enhanced base pass");
 
         String reflectionGeometry = P14EFluidShaderPatch.apply(P16ReflectionPassShader.build());
         String reflectionEntity = P17ShaderIntegration.apply(reflectionGeometry);
@@ -36,6 +38,7 @@ public final class P14ShaderCompileVerifier {
         verifyP14EFluidOptics(reflectionSource, "P16 reflection pass", true);
         verifyP16RuntimeSettings(reflectionSource);
         verifyP17DynamicEntitySource(reflectionSource, "P16 reflection pass");
+        verifyFixedCapacitySceneTails(reflectionSource, "P16 reflection pass");
 
         long compiler = Shaderc.shaderc_compiler_initialize();
         if (compiler == 0L) {
@@ -200,6 +203,23 @@ public final class P14ShaderCompileVerifier {
         System.out.println(
                 "P16 runtime-settings verification PASS: bounces=1..2, distance=runtime, "
                         + "masterToggle=true, waterToggle=true, iterative=true"
+        );
+    }
+
+    private static void verifyFixedCapacitySceneTails(String source, String label) {
+        requireSourceMarker(
+                source,
+                "uint pixelCount = scene.data[51] * scene.data[52];",
+                label + " fixed-capacity scene-tail base"
+        );
+        if (source.contains("uint pixelCount = scene.data[4] * scene.data[5];")) {
+            throw new IllegalStateException(
+                    label + " still derives a scene tail from active render extent"
+            );
+        }
+        System.out.println(
+                "Fixed-capacity scene-tail verification PASS (" + label
+                        + "): capacityWords=51/52, activeExtentTailBase=false"
         );
     }
 
