@@ -3,8 +3,8 @@
 ## Status
 
 - **P18A renderer-resolved texture identity + LabPBR 1.3 decode contract: IMPLEMENTED / CI pending**
-- **P18B bounded resident PBR texture GPU scene: PENDING**
-- **P18C textured BRDF + alpha coverage integration (albedo/normal/AO/roughness/F0/metal/emission): PENDING**
+- **P18B bounded PBR texture GPU scene + textured-cube surface table: IMPLEMENTED / CI pending**
+- **P18C textured BRDF + alpha coverage integration: alpha coverage IMPLEMENTED / CI pending; BRDF fields pending**
 - **P18D entity/block-entity material fidelity: PENDING**
 - **P18E height/POM and secondary LabPBR channels: DEFERRED**
 
@@ -137,11 +137,13 @@ Albedo alpha is not discarded during P18 upload/shading.
 
 - alpha = 0: the texel is a hole; the candidate triangle hit is rejected and ray traversal continues;
 - alpha = 255: ordinary opaque textured hit;
-- 0 < alpha < 255: fractional coverage/transmission is retained and must not be promoted to P15 glass semantics.
+- 0 < alpha < 255: stochastic coverage; the candidate is accepted with probability alpha/255 using
+  a stable per-candidate hash plus frame seed, so temporal accumulation converges toward the original
+  coverage without turning the surface into a fake glass volume.
 
-This alpha test occurs after geometric triangle intersection but before the shared hit is accepted, so
-primary rays, Sun/Moon shadows, local-light shadows, GI and P16 reflection see the same cutout
-silhouette. True glass/water volume/interface transmission remains owned by P15/P14E.
+This alpha test occurs after geometric triangle/AABB intersection but before the shared hit is
+accepted, so primary rays, Sun/Moon shadows, local-light shadows, GI and P16 reflection see the same
+coverage silhouette. True glass/water volume/interface transmission remains owned by P15/P14E.
 
 ## P18D — fidelity follow-up
 
