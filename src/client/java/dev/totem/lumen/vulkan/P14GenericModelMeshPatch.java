@@ -29,7 +29,7 @@ final class P14GenericModelMeshPatch {
 
         String helpers = """
                 uint p14ModelDescriptorBase() {
-                    uint pixelCount = scene.data[4] * scene.data[5];
+                    uint pixelCount = scene.data[51] * scene.data[52];
                     return scene.data[3] + pixelCount;
                 }
 
