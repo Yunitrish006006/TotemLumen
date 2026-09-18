@@ -215,14 +215,34 @@ public final class LabPbrTextureRegistry {
         }
         LoadedLayer normal = loadLayer(resources, textureResource(sprite, "_n"));
         LoadedLayer specular = loadLayer(resources, textureResource(sprite, "_s"));
+
+        PbrAnimation normalAnimation = normal == null ? null : normal.animation();
+        PbrAnimation specularAnimation = specular == null ? null : specular.animation();
+        if (albedo.animation() != null) {
+            if (normal != null && normalAnimation == null) {
+                normalAnimation = inheritedAnimation(
+                        albedo.image(),
+                        albedo.animation(),
+                        normal.image()
+                );
+            }
+            if (specular != null && specularAnimation == null) {
+                specularAnimation = inheritedAnimation(
+                        albedo.image(),
+                        albedo.animation(),
+                        specular.image()
+                );
+            }
+        }
+
         return new PbrTextureData(
                 spriteId,
                 albedo.image(),
                 normal == null ? null : normal.image(),
                 specular == null ? null : specular.image(),
                 albedo.animation(),
-                normal == null ? null : normal.animation(),
-                specular == null ? null : specular.animation()
+                normalAnimation,
+                specularAnimation
         );
     }
 
@@ -306,7 +326,7 @@ public final class LabPbrTextureRegistry {
             JsonArray frames = animationObject.has("frames") && animationObject.get("frames").isJsonArray()
                     ? animationObject.getAsJsonArray("frames")
                     : null;
-            if (frames == null || frames.isEmpty()) {
+            if (frames == null || frames.size() == 0) {
                 for (int frame = 0; frame < sourceFrameCount; frame++) {
                     appendFrameTicks(timeline, frame, defaultFrameTime);
                 }
@@ -358,6 +378,28 @@ public final class LabPbrTextureRegistry {
             );
             return null;
         }
+    }
+
+    private static PbrAnimation inheritedAnimation(
+            PbrImage sourceImage,
+            PbrAnimation sourceAnimation,
+            PbrImage targetImage
+    ) {
+        int columns = sourceImage.width() / sourceAnimation.frameWidth();
+        int rows = sourceImage.height() / sourceAnimation.frameHeight();
+        if (columns <= 0 || rows <= 0
+                || targetImage.width() % columns != 0
+                || targetImage.height() % rows != 0) {
+            return null;
+        }
+        int frameWidth = targetImage.width() / columns;
+        int frameHeight = targetImage.height() / rows;
+        return new PbrAnimation(
+                frameWidth,
+                frameHeight,
+                sourceAnimation.copyTimelineFrames(),
+                sourceAnimation.interpolate()
+        );
     }
 
     private static int positiveInt(JsonObject object, String key, int fallback) {
