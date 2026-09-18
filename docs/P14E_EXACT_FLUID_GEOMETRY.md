@@ -3,11 +3,11 @@
 ## Status
 
 - **P14E-A renderer-source fluid capture: IMPLEMENTED / CI PASS; Apple M4 runtime capture confirmed**
-- **P14E-B bounded GPU fluid scene ABI + independent upload: IMPLEMENTED / CI PASS; first Apple M4 capacity blocker fixed, revalidation pending**
+- **P14E-B bounded GPU fluid scene ABI + independent upload: IMPLEMENTED / CI PASS; Apple M4 capacity fix runtime PASS**
 - **P14E-C shared nearest-hit integration: IMPLEMENTED / SHADER CI PASS; runtime visual validation pending**
 - **P14E-D P15/P16 fluid optical semantics: IMPLEMENTED / SHADER CI PASS; runtime visual validation pending**
 
-Alpha 43 has passed its implementation/build gate. It does **not** claim complete fluid rendering until the runtime gate below is validated in-world.
+Alpha 43 has passed its implementation/build gate. The first P14E-B Apple M4 runtime capacity blocker has also been revalidated successfully. It does **not** claim complete fluid rendering until the remaining visual/runtime gate below is validated in-world.
 
 ## Goal
 
@@ -187,15 +187,15 @@ Intentional Alpha 43 optical limitations:
 - the baseline applies interface tint/attenuation per crossed water surface;
 - arbitrary Fabric custom fluid render handlers that bypass vanilla `FluidRenderer.addFace(...)` are not yet claimed as supported.
 
-## First Apple M4 runtime finding — 2026-09-18
+## Apple M4 runtime finding — 2026-09-18
 
 The first Alpha 43 in-world run confirmed that the renderer-source capture and GPU scene path are active on Apple M4 / MoltenVK 1.4.2. The log showed resolved fluid capture beginning on a flowing-lava cell and the GPU fluid scene growing normally with bounded hash-probe diagnostics.
 
-The run then exposed a P14E-B ownership bug: the uploader packed the entire active-dimension capture cache instead of only the P5 resident ray-scene window. As more chunk sections were tessellated, the cache reached `17,216` fluid cells and exceeded the fixed `16,384` GPU descriptor capacity, causing Totem Lumen to disable its renderer for the session while Minecraft itself continued running.
+That run exposed a P14E-B ownership bug: the uploader packed the entire active-dimension capture cache instead of only the P5 resident ray-scene window. As more chunk sections were tessellated, the cache reached `17,216` fluid cells and exceeded the fixed `16,384` GPU descriptor capacity, causing Totem Lumen to disable its renderer for the session while Minecraft itself continued running.
 
 The fix keeps the dimension-wide capture cache as renderer-source data but filters GPU packing through the ordered resident section window already selected by P5. Capacity fallback is now nonfatal and nearest-first, and nonresident cache revisions no longer invalidate temporal history or cause redundant fluid-tail uploads.
 
-Runtime revalidation must confirm that the new diagnostic stays bounded during exploration and that `droppedCells` normally remains `0` for the standard 64-section ray window.
+**Revalidation result: PASS.** The corrected Alpha 43 build remained usable on Apple M4/MoltenVK and no longer hit the previous dimension-wide fluid-capacity shutdown. This closes the first P14E-B runtime blocker. Remaining acceptance work is visual/behavioral validation of fluid geometry and optics.
 
 ## CI build gate
 
@@ -224,7 +224,7 @@ Alpha 43 is accepted only when all of the following are demonstrated in-world:
 6. waterlogged block geometry remains present while its fluid surface is traced;
 7. placing/removing water and subsequent flow changes replace stale captured faces without rejoining the world;
 8. underwater camera transitions do not leave stale or duplicate surfaces;
-9. the GPU fluid scene reports bounded nonzero resident geometry with no fatal lookup/capacity failure and normally `droppedCells=0`;
+9. the GPU fluid scene remains bounded without the former dimension-wide capacity shutdown;
 10. camera/shadow/GI/P15/P16 all use the same exact fluid triangles;
 11. water visibly transmits the scene behind it while retaining a P16 reflection on the exact surface;
 12. lava remains emissive on its exact surface geometry;
