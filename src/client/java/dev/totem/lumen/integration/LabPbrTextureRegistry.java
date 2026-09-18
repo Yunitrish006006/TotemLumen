@@ -77,6 +77,7 @@ public final class LabPbrTextureRegistry {
     public static void tick(Minecraft client) {
         if (client == null) return;
         ResourceManager resources = client.getResourceManager();
+        PbrTextureMaterialRuleRegistry.ensureLoaded(resources);
         if (!formatScanned) {
             scanDeclaredFormat(resources);
         }
@@ -127,6 +128,7 @@ public final class LabPbrTextureRegistry {
         firstLoadLogged = false;
         formatScanned = false;
         declaredFormat = DeclaredFormat.UNDECLARED;
+        PbrTextureMaterialRuleRegistry.invalidate();
         reloadGeneration++;
         revision++;
         TotemLumenClient.LOGGER.info(
@@ -262,7 +264,8 @@ public final class LabPbrTextureRegistry {
                 specular == null ? null : specular.image(),
                 albedo.animation(),
                 normalAnimation,
-                specularAnimation
+                specularAnimation,
+                PbrTextureMaterialRuleRegistry.propertiesFor(spriteId)
         );
     }
 
