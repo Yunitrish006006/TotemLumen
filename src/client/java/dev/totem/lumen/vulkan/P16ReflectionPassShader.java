@@ -193,9 +193,15 @@ final class P16ReflectionPassShader {
                             reflectionDirection,
                             reflectionDistance
                         );
+                        if (nextRawHit.hit != 0u
+                                && nextRawHit.materialId == P14E_WATER_MATERIAL_ID
+                                && scene.data[47] == 0u) {
+                            nextRawHit = filteredTrace.hit;
+                        }
                         if (nextRawHit.hit == 0u) {
                             accumulatedRadiance += throughput
-                                    * p13SkyRadiance(reflectionDirection);
+                                    * p13SkyRadiance(reflectionDirection)
+                                    * filteredTrace.transmission;
                             break;
                         }
 
@@ -215,7 +221,7 @@ final class P16ReflectionPassShader {
 
                     // P16 historically affected only the final GI composite debug mode.
                     if (scene.data[22] != 11u) return;
-                    if (scene.data[42] == 0u) return;
+                    if (scene.data[46] == 0u || scene.data[42] == 0u) return;
 
                     vec3 origin = vec3(
                         uintBitsToFloat(scene.data[8]),
