@@ -12,12 +12,12 @@ import java.util.function.IntUnaryOperator;
 import java.util.function.ToIntFunction;
 
 /**
- * Builds a compact set of emissive voxel lights plus fixed per-section local light lists.
+ * Builds a compact set of emissive voxel-light descriptors plus fixed per-section local light lists.
  *
  * <p>The input is Minecraft-independent: section snapshots, stable GPU slot lookup and material
  * emission metadata. Each resident GPU section slot receives at most
  * {@link #MAX_LIGHTS_PER_SECTION} nearby light indices, so shaders never scan every light in the
- * scene.</p>
+ * scene. The stored position is the emitting voxel center used for broad-phase/range selection; the GPU shading path expands it into sampled emitting faces instead of treating it as the final point-emitter position.</p>
  */
 public final class GpuSectionLightLists {
     public static final int MAX_GLOBAL_LIGHTS = 256;
