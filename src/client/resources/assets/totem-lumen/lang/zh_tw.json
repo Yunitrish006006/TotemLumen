@@ -86,5 +86,10 @@
   "screen.totem-lumen.quality.stable": "穩定",
   "screen.totem-lumen.quality.off": "關閉",
   "screen.totem-lumen.quality.quality": "高品質",
-  "screen.totem-lumen.renderer_enabled": "啟用 Totem Lumen：%s"
+  "screen.totem-lumen.renderer_enabled": "啟用 Totem Lumen：%s",
+  "screen.totem-lumen.compile_hud": "Totem Lumen 編譯：%s  %s%%",
+  "screen.totem-lumen.compile_hud.backend": "Vulkan 後端",
+  "screen.totem-lumen.compile_hud.bootstrap": "啟動管線",
+  "screen.totem-lumen.compile_hud.full": "完整光影",
+  "screen.totem-lumen.compile_hud.advanced": "實體 / 反射"
 }
