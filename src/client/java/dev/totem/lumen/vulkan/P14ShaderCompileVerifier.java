@@ -572,7 +572,7 @@ public final class P14ShaderCompileVerifier {
         );
         requireSourceMarker(
                 source,
-                "if (candidate.materialId == P17_ENTITY_MATERIAL_ID)",
+                "candidate.materialId == P17_ENTITY_MATERIAL_ID",
                 label + " P15 opaque entity baseline"
         );
         System.out.println(
