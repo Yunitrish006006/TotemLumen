@@ -1,10 +1,6 @@
 package dev.totem.lumen.gui;
 
-import dev.totem.lumen.render.RendererBootstrap;
 import dev.totem.lumen.render.RendererSettings;
-import dev.totem.lumen.vulkan.P12FullBasePipeline;
-import dev.totem.lumen.vulkan.P16MultipassReflection;
-import dev.totem.lumen.vulkan.P17EnhancedBasePipeline;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
@@ -19,6 +15,7 @@ public final class TotemLumenVideoSettingsScreen extends Screen {
     private static final int ROW_GAP = 22;
 
     private final Screen parent;
+    private Button rendererEnabledButton;
     private Button giQualityButton;
     private Button shadowQualityButton;
     private Button rayDistanceButton;
@@ -40,8 +37,13 @@ public final class TotemLumenVideoSettingsScreen extends Screen {
         int contentWidth = Math.min(CONTENT_WIDTH, Math.max(240, this.width - 24));
         int left = (this.width - contentWidth) / 2;
         int halfWidth = (contentWidth - 6) / 2;
-        int rowY = 72;
 
+        this.rendererEnabledButton = addSettingButton(
+                left, 44, contentWidth, rendererEnabledLabel(),
+                () -> RendererSettings.toggleRendererEnabled()
+        );
+
+        int rowY = 70;
         this.giQualityButton = addSettingButton(
                 left, rowY, halfWidth, giQualityLabel(),
                 () -> RendererSettings.cycleGiQuality()
@@ -124,26 +126,13 @@ public final class TotemLumenVideoSettingsScreen extends Screen {
     ) {
         super.extractRenderState(graphics, mouseX, mouseY, delta);
 
-        graphics.centeredText(this.font, this.title, this.width / 2, 16, 0xFFFFFFFF);
+        graphics.centeredText(this.font, this.title, this.width / 2, 12, 0xFFFFFFFF);
         graphics.centeredText(
                 this.font,
                 Component.translatable("screen.totem-lumen.subtitle"),
                 this.width / 2,
-                32,
+                26,
                 0xFFAAAAAA
-        );
-        graphics.centeredText(
-                this.font,
-                Component.translatable(
-                        "screen.totem-lumen.status.summary",
-                        compactState(RendererBootstrap.readyForRendering()),
-                        compactState(P12FullBasePipeline.ready()),
-                        compactState(P17EnhancedBasePipeline.ready()),
-                        compactState(P16MultipassReflection.ready())
-                ),
-                this.width / 2,
-                50,
-                0xFFD0D0D0
         );
     }
 
@@ -153,6 +142,7 @@ public final class TotemLumenVideoSettingsScreen extends Screen {
     }
 
     private void refreshSettingsButtons() {
+        if (rendererEnabledButton != null) rendererEnabledButton.setMessage(rendererEnabledLabel());
         if (giQualityButton != null) giQualityButton.setMessage(giQualityLabel());
         if (shadowQualityButton != null) shadowQualityButton.setMessage(shadowQualityLabel());
         if (rayDistanceButton != null) rayDistanceButton.setMessage(rayDistanceLabel());
@@ -163,6 +153,13 @@ public final class TotemLumenVideoSettingsScreen extends Screen {
         if (reflectionDistanceButton != null) reflectionDistanceButton.setMessage(reflectionDistanceLabel());
         if (temporalQualityButton != null) temporalQualityButton.setMessage(temporalQualityLabel());
         if (denoiseQualityButton != null) denoiseQualityButton.setMessage(denoiseQualityLabel());
+    }
+
+    private static Component rendererEnabledLabel() {
+        return Component.translatable(
+                "screen.totem-lumen.renderer_enabled",
+                booleanComponent(RendererSettings.rendererEnabled())
+        );
     }
 
     private static Component giQualityLabel() {
@@ -253,9 +250,5 @@ public final class TotemLumenVideoSettingsScreen extends Screen {
         );
     }
 
-    private static Component compactState(boolean ready) {
-        return Component.translatable(
-                ready ? "screen.totem-lumen.stage.ready_short" : "screen.totem-lumen.stage.pending_short"
-        );
-    }
+
 }
