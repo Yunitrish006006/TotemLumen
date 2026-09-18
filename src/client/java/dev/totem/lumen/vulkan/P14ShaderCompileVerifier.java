@@ -339,11 +339,13 @@ public final class P14ShaderCompileVerifier {
                 "surface.emission += surface.albedo * (emissionStrength * 1.6);",
                 label + " LabPBR emission"
         );
-        requireSourceMarker(
-                source,
-                "vec3 p18Diffuse = p18Surface.albedo * (1.0 - p18Surface.metallic);",
-                label + " local-light metal diffuse suppression"
-        );
+        if (!reflectionPass) {
+            requireSourceMarker(
+                    source,
+                    "vec3 p18Diffuse = p18Surface.albedo * (1.0 - p18Surface.metallic);",
+                    label + " local-light metal diffuse suppression"
+            );
+        }
         if (reflectionPass) {
             requireSourceMarker(
                     source,
