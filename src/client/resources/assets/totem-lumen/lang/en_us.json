@@ -57,5 +57,9 @@
   "screen.totem-lumen.renderer_state.disabled_unsupported_vulkan": "Disabled (unsupported Vulkan device)",
   "screen.totem-lumen.renderer_state.waiting_for_pipeline": "Compiling bootstrap pipeline",
   "screen.totem-lumen.renderer_state.ready_for_scene_extraction": "Ready",
-  "screen.totem-lumen.renderer_state.pipeline_failed": "Bootstrap pipeline failed"
+  "screen.totem-lumen.renderer_state.pipeline_failed": "Bootstrap pipeline failed",
+  "screen.totem-lumen.reflection_bounces": "Reflection bounces: %s",
+  "screen.totem-lumen.reflection_distance": "Reflection distance: %s blocks",
+  "screen.totem-lumen.value.off": "Off",
+  "screen.totem-lumen.value.bounces": "%s bounce(s)"
 }
