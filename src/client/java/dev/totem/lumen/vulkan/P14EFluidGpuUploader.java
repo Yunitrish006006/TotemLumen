@@ -69,9 +69,9 @@ public final class P14EFluidGpuUploader {
             FluidSceneSelector.Selection selection
     ) {
         int pixelBaseWord = buffer.getInt(3 * Integer.BYTES);
-        int width = buffer.getInt(4 * Integer.BYTES);
-        int height = buffer.getInt(5 * Integer.BYTES);
-        int pixelCount = Math.multiplyExact(width, height);
+        int capacityWidth = buffer.getInt(51 * Integer.BYTES);
+        int capacityHeight = buffer.getInt(52 * Integer.BYTES);
+        int pixelCount = Math.multiplyExact(capacityWidth, capacityHeight);
         int p14BaseWord = Math.addExact(pixelBaseWord, pixelCount);
         int p17BaseWord = Math.addExact(p14BaseWord, P14ModelMeshGpuLayout.MAX_STORAGE_WORDS);
         int fluidBaseWord = Math.addExact(p17BaseWord, GpuDynamicEntityScene.MAX_STORAGE_WORDS);
