@@ -22,7 +22,7 @@ import java.util.Objects;
  * deduplicated before upload.</p>
  */
 public final class GpuPbrTextureScene {
-    public static final int ABI_VERSION = 2;
+    public static final int ABI_VERSION = 3;
     public static final int MAX_TEXTURE_HANDLES = PbrTextureHandleRegistry.MAX_HANDLE + 1;
     public static final int MAX_TEXTURE_DIMENSION = 128;
     public static final int MAX_TEXELS = 2_097_152;
@@ -36,10 +36,9 @@ public final class GpuPbrTextureScene {
     public static final int FLAG_ANIMATED = 1 << 4;
     public static final int FLAG_INTERPOLATE_REQUESTED = 1 << 5;
     public static final int FLAG_TIMELINE_TRUNCATED = 1 << 6;
-    public static final int FLAG_SUPPRESS_BLOCK_EMISSION = 1 << 7;
 
     public static final int HEADER_WORDS = 8;
-    public static final int DESCRIPTOR_WORDS_PER_RECORD = 12;
+    public static final int DESCRIPTOR_WORDS_PER_RECORD = 16;
     public static final int DESCRIPTOR_WORDS =
             MAX_TEXTURE_HANDLES * DESCRIPTOR_WORDS_PER_RECORD;
     public static final int ANIMATION_POOL_WORDS = MAX_ANIMATION_TIMELINE_WORDS;
@@ -197,9 +196,6 @@ public final class GpuPbrTextureScene {
             if (animation.animated()) flags |= FLAG_ANIMATED;
             if (animation.interpolateRequested()) flags |= FLAG_INTERPOLATE_REQUESTED;
             if (animation.truncated()) flags |= FLAG_TIMELINE_TRUNCATED;
-            if (suppressesBaselineBlockEmission(texture.spriteId())) {
-                flags |= FLAG_SUPPRESS_BLOCK_EMISSION;
-            }
 
             int descriptor = baseWord + DESCRIPTOR_BASE_WORD
                     + handle * DESCRIPTOR_WORDS_PER_RECORD;
@@ -214,7 +210,31 @@ public final class GpuPbrTextureScene {
             putWord(buffer, descriptor + 8, packedFrameCount);
             putWord(buffer, descriptor + 9, timelineOffset);
             putWord(buffer, descriptor + 10, animation.timeline().length);
-            putWord(buffer, descriptor + 11, 0);
+            putWord(
+                    buffer,
+                    descriptor + 11,
+                    Float.floatToRawIntBits(texture.runtimeProperties().baselineEmissionScale())
+            );
+            putWord(
+                    buffer,
+                    descriptor + 12,
+                    Float.floatToRawIntBits(texture.runtimeProperties().labPbrEmissionScale())
+            );
+            putWord(
+                    buffer,
+                    descriptor + 13,
+                    Float.floatToRawIntBits(texture.runtimeProperties().roughnessScale())
+            );
+            putWord(
+                    buffer,
+                    descriptor + 14,
+                    Float.floatToRawIntBits(texture.runtimeProperties().normalStrength())
+            );
+            putWord(
+                    buffer,
+                    descriptor + 15,
+                    Float.floatToRawIntBits(texture.runtimeProperties().alphaCutoff())
+            );
 
             packedTextures++;
             if (downsampled) downsampledTextures++;
@@ -334,15 +354,6 @@ public final class GpuPbrTextureScene {
                 frameX * frameWidth + localX,
                 frameY * frameHeight + localY
         );
-    }
-
-    static boolean suppressesBaselineBlockEmission(String spriteId) {
-        if (spriteId == null) return false;
-        int colon = spriteId.indexOf(':');
-        String path = colon >= 0 ? spriteId.substring(colon + 1) : spriteId;
-        return path.equals("block/campfire_log")
-                || path.equals("block/campfire_log_lit")
-                || path.equals("block/soul_campfire_log_lit");
     }
 
     public static Dimensions boundedDimensions(int width, int height) {
