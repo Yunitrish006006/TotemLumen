@@ -283,7 +283,7 @@ final class P15GlassTransmissionPatch {
         );
         source = replaceRequiredOnce(
                 source,
-                "color = packRgba(unpackRgb(indirectColor) * 1.6, 255u);",
+                "color = packRgba(unpackRgb(indirectColor) * uintBitsToFloat(scene.data[84]), 255u);",
                 "color = packRgba(unpackRgb(indirectColor) * uintBitsToFloat(scene.data[84])"
                         + " * p15PrimaryTransmission, 255u);",
                 "indirect debug transmission"
