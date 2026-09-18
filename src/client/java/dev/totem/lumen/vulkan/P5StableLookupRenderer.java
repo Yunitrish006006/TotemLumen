@@ -816,6 +816,7 @@ public final class P5StableLookupRenderer {
         SPATIAL_DENOISE(9, "Spatial Denoise"),
         INDIRECT_GI(10, "Indirect GI"),
         GI_COMPOSITE(11, "GI Composite"),
+        FLUID_GEOMETRY(12, "P14E Fluid Geometry"),
         LOCAL_LIGHTS(5, "Local Lights"),
         EMISSIVE_MATERIALS(6, "Emissive Materials");
 
