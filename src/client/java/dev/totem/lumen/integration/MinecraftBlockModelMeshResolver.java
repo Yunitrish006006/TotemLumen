@@ -91,7 +91,12 @@ public final class MinecraftBlockModelMeshResolver {
             hadStaticGeometry = true;
             if (isCanonicalUnitCube(model.positions())) {
                 BlockSurfaceSetRegistry.CubeSurfaceSet surfaceSet =
-                        canonicalCubeSurfaceSet(model.positions(), model.surfaces());
+                        canonicalCubeSurfaceSet(
+                                model.positions(),
+                                model.surfaces(),
+                                surface.roughness(),
+                                surface.metallic()
+                        );
                 if (surfaceSet != null) {
                     BlockSurfaceSetRegistry.register(surfaceSet);
                 }
@@ -310,7 +315,9 @@ public final class MinecraftBlockModelMeshResolver {
 
     private static BlockSurfaceSetRegistry.CubeSurfaceSet canonicalCubeSurfaceSet(
             float[] quads,
-            QuadSurface[] surfaces
+            QuadSurface[] surfaces,
+            float fallbackRoughness,
+            float fallbackMetallic
     ) {
         if (quads.length != 6 * BlockModelMeshRegistry.FLOATS_PER_QUAD
                 || surfaces.length != 6) {
@@ -348,7 +355,9 @@ public final class MinecraftBlockModelMeshResolver {
             if (face == null) return null;
         }
         return new BlockSurfaceSetRegistry.CubeSurfaceSet(
-                faces[0], faces[1], faces[2], faces[3], faces[4], faces[5]
+                faces[0], faces[1], faces[2], faces[3], faces[4], faces[5],
+                fallbackRoughness,
+                fallbackMetallic
         );
     }
 
