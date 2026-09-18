@@ -6,11 +6,11 @@
   "message.totem-lumen.compile.bootstrap": "[Totem Lumen] [1/4] Building the Vulkan bootstrap pipeline...",
   "message.totem-lumen.compile.bootstrap_wait": "[Totem Lumen] [1/4] Vulkan bootstrap is still compiling (%s). Vanilla rendering remains active.",
   "message.totem-lumen.compile.bootstrap_ready": "[Totem Lumen] [1/4] Vulkan bootstrap ready. Full lighting is not ready yet; Minecraft's normal presentation remains active.",
-  "message.totem-lumen.compile.full": "[Totem Lumen] [2/4] Compiling full lighting (GI, environment, geometry and transmission) in the background...",
+  "message.totem-lumen.compile.full": "[Totem Lumen] [2/4] Compiling full lighting, materials and player/entity ray tracing in the background...",
   "message.totem-lumen.compile.full_wait": "[Totem Lumen] [2/4] Full lighting is still compiling (%s). Minecraft's normal renderer and your selected resource pack remain active.",
-  "message.totem-lumen.compile.full_ready": "[Totem Lumen] [2/4] Full lighting and materials are ready. Totem Lumen will take over after the first complete frame.",
-  "message.totem-lumen.compile.advanced": "[Totem Lumen] [3/4 + 4/4] Compiling dynamic-entity ray tracing and reflections in the background...",
-  "message.totem-lumen.compile.advanced_wait": "[Totem Lumen] [3/4 + 4/4] Advanced pipelines are still compiling (%s). Available stages remain active.",
+  "message.totem-lumen.compile.full_ready": "[Totem Lumen] [2/4] Full lighting, materials and player/entity ray tracing are ready. Totem Lumen will take over after the first complete frame.",
+  "message.totem-lumen.compile.advanced": "[Totem Lumen] [4/4] Compiling reflections in the background...",
+  "message.totem-lumen.compile.advanced_wait": "[Totem Lumen] [4/4] Reflections are still compiling (%s). Full lighting and entity ray tracing remain active.",
   "message.totem-lumen.compile.p17_ready": "[Totem Lumen] [3/4] Dynamic-entity ray tracing ready.",
   "message.totem-lumen.compile.p16_ready": "[Totem Lumen] [4/4] Reflection pipeline ready.",
   "message.totem-lumen.compile.complete": "[Totem Lumen] [4/4] All renderer features are ready.",
@@ -90,6 +90,6 @@
   "screen.totem-lumen.compile_hud": "Totem Lumen compiling: %s  %s%%",
   "screen.totem-lumen.compile_hud.backend": "Vulkan backend",
   "screen.totem-lumen.compile_hud.bootstrap": "Base renderer setup",
-  "screen.totem-lumen.compile_hud.full": "GI / sky / geometry / materials",
-  "screen.totem-lumen.compile_hud.advanced": "Player / entity RT & reflections"
+  "screen.totem-lumen.compile_hud.full": "Lighting / materials / entities",
+  "screen.totem-lumen.compile_hud.advanced": "Reflections"
 }
