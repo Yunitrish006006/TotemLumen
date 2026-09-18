@@ -97,7 +97,8 @@ class GpuDynamicEntitySceneTest {
         int quad = GpuDynamicEntityScene.QUAD_POOL_BASE_WORD;
         assertEquals(0.10f, floatWord(buffer, quad + 12), 0.0001f);
         assertEquals(0.20f, floatWord(buffer, quad + 13), 0.0001f);
-        assertEquals(0.30f, floatWord(buffer, quad + 18), 0.0001f);
+        assertEquals(0.30f, floatWord(buffer, quad + 16), 0.0001f);
+        assertEquals(0.10f, floatWord(buffer, quad + 18), 0.0001f);
         assertEquals(0.40f, floatWord(buffer, quad + 19), 0.0001f);
 
         assertEquals(2, word(buffer, 8));
