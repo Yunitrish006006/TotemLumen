@@ -1,6 +1,7 @@
 package dev.totem.lumen.geometry;
 
 import dev.totem.lumen.TotemLumenClient;
+import dev.totem.lumen.geometry.QuadSurface;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -41,13 +42,22 @@ public final class BlockModelMeshRegistry {
 
     public static synchronized int register(float[] quadPositions) {
         int quadCount = validatePositions(quadPositions);
+        return register(quadPositions, untexturedSurfaces(quadCount));
+    }
+
+    public static synchronized int register(
+            float[] quadPositions,
+            QuadSurface[] quadSurfaces
+    ) {
+        int quadCount = validatePositions(quadPositions);
+        validateSurfaces(quadSurfaces, quadCount);
         if (quadCount == 0) return 0;
         if (quadCount > MAX_QUADS_PER_MESH) {
             logPerMeshCapacity(quadCount);
             return -1;
         }
 
-        MeshKey key = MeshKey.of(quadPositions);
+        MeshKey key = MeshKey.of(quadPositions, quadSurfaces);
         Integer existing = STATIC_IDS.get(key);
         if (existing != null) return existing;
         if (!hasQuadCapacity(0, quadCount)) {
@@ -61,7 +71,12 @@ public final class BlockModelMeshRegistry {
             return -1;
         }
 
-        MESHES.put(id, new StoredMesh(id, quadPositions.clone(), false));
+        MESHES.put(id, new StoredMesh(
+                id,
+                quadPositions.clone(),
+                quadSurfaces.clone(),
+                false
+        ));
         STATIC_IDS.put(key, id);
         totalQuads += quadCount;
         revision++;
@@ -86,7 +101,9 @@ public final class BlockModelMeshRegistry {
             if (existing == null || !existing.dynamic) {
                 throw new IllegalStateException("dynamic mesh id is not backed by a dynamic entry: " + existingId);
             }
-            if (MeshKey.of(existing.positions).equals(MeshKey.of(quadPositions))) {
+            QuadSurface[] surfaces = untexturedSurfaces(quadCount);
+            if (MeshKey.of(existing.positions, existing.surfaces)
+                    .equals(MeshKey.of(quadPositions, surfaces))) {
                 return new DynamicUpsertResult(existingId, false, false, true);
             }
             int oldQuadCount = existing.positions.length / FLOATS_PER_QUAD;
@@ -94,7 +111,12 @@ public final class BlockModelMeshRegistry {
                 logGlobalCapacity();
                 return new DynamicUpsertResult(existingId, false, false, false);
             }
-            MESHES.put(existingId, new StoredMesh(existingId, quadPositions.clone(), true));
+            MESHES.put(existingId, new StoredMesh(
+                    existingId,
+                    quadPositions.clone(),
+                    surfaces,
+                    true
+            ));
             totalQuads += quadCount - oldQuadCount;
             revision++;
             return new DynamicUpsertResult(existingId, false, true, true);
@@ -111,7 +133,12 @@ public final class BlockModelMeshRegistry {
         }
 
         DYNAMIC_IDS.put(key, id);
-        MESHES.put(id, new StoredMesh(id, quadPositions.clone(), true));
+        MESHES.put(id, new StoredMesh(
+                id,
+                quadPositions.clone(),
+                untexturedSurfaces(quadCount),
+                true
+        ));
         totalQuads += quadCount;
         revision++;
         return new DynamicUpsertResult(id, true, true, true);
@@ -149,7 +176,13 @@ public final class BlockModelMeshRegistry {
             StoredMesh stored = MESHES.get(id);
             float[] owned = stored.positions.clone();
             int quadCount = owned.length / FLOATS_PER_QUAD;
-            meshes.add(new Mesh(id, firstQuad, quadCount, owned));
+            meshes.add(new Mesh(
+                    id,
+                    firstQuad,
+                    quadCount,
+                    owned,
+                    stored.surfaces.clone()
+            ));
             firstQuad += quadCount;
         }
         return new Snapshot(List.copyOf(meshes), firstQuad, revision);
@@ -189,6 +222,29 @@ public final class BlockModelMeshRegistry {
             }
         }
         return positions.length / FLOATS_PER_QUAD;
+    }
+
+    private static void validateSurfaces(QuadSurface[] surfaces, int quadCount) {
+        if (surfaces == null) {
+            throw new IllegalArgumentException("quad surfaces cannot be null");
+        }
+        if (surfaces.length != quadCount) {
+            throw new IllegalArgumentException(
+                    "quad surface count must match geometry: surfaces="
+                            + surfaces.length + ", quads=" + quadCount
+            );
+        }
+        for (QuadSurface surface : surfaces) {
+            if (surface == null) {
+                throw new IllegalArgumentException("quad surface cannot be null");
+            }
+        }
+    }
+
+    private static QuadSurface[] untexturedSurfaces(int quadCount) {
+        QuadSurface[] surfaces = new QuadSurface[quadCount];
+        Arrays.fill(surfaces, QuadSurface.UNTEXTURED);
+        return surfaces;
     }
 
     private static boolean hasQuadCapacity(int replacingQuads, int replacementQuads) {
@@ -234,7 +290,13 @@ public final class BlockModelMeshRegistry {
     public record DynamicUpsertResult(int meshId, boolean firstRegistration, boolean changed, boolean accepted) {
     }
 
-    public record Mesh(int id, int firstQuad, int quadCount, float[] positions) {
+    public record Mesh(
+            int id,
+            int firstQuad,
+            int quadCount,
+            float[] positions,
+            QuadSurface[] surfaces
+    ) {
         public Mesh {
             if (id <= 0 || id > MAX_MESH_ID) {
                 throw new IllegalArgumentException("mesh id out of range: " + id);
@@ -242,6 +304,7 @@ public final class BlockModelMeshRegistry {
             if (firstQuad < 0 || quadCount < 0 || positions.length != quadCount * FLOATS_PER_QUAD) {
                 throw new IllegalArgumentException("invalid mesh payload");
             }
+            validateSurfaces(surfaces, quadCount);
         }
     }
 
@@ -254,19 +317,26 @@ public final class BlockModelMeshRegistry {
         }
     }
 
-    private record StoredMesh(int id, float[] positions, boolean dynamic) {
+    private record StoredMesh(
+            int id,
+            float[] positions,
+            QuadSurface[] surfaces,
+            boolean dynamic
+    ) {
     }
 
     private static final class MeshKey {
         private final int[] bits;
+        private final QuadSurface[] surfaces;
         private final int hash;
 
-        private MeshKey(int[] bits) {
+        private MeshKey(int[] bits, QuadSurface[] surfaces) {
             this.bits = bits;
-            this.hash = Arrays.hashCode(bits);
+            this.surfaces = surfaces;
+            this.hash = 31 * Arrays.hashCode(bits) + Arrays.hashCode(surfaces);
         }
 
-        static MeshKey of(float[] positions) {
+        static MeshKey of(float[] positions, QuadSurface[] surfaces) {
             int[] bits = new int[positions.length];
             for (int index = 0; index < positions.length; index++) {
                 float value = positions[index] == 0.0f ? 0.0f : positions[index];
@@ -275,12 +345,14 @@ public final class BlockModelMeshRegistry {
                 }
                 bits[index] = Float.floatToIntBits(value);
             }
-            return new MeshKey(bits);
+            return new MeshKey(bits, surfaces.clone());
         }
 
         @Override
         public boolean equals(Object other) {
-            return other instanceof MeshKey key && Arrays.equals(bits, key.bits);
+            return other instanceof MeshKey key
+                    && Arrays.equals(bits, key.bits)
+                    && Arrays.equals(surfaces, key.surfaces);
         }
 
         @Override
