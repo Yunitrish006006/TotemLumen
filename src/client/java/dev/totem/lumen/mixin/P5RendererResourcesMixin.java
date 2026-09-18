@@ -2,6 +2,7 @@ package dev.totem.lumen.mixin;
 
 import dev.totem.lumen.gpu.GpuDynamicEntityScene;
 import dev.totem.lumen.gpu.GpuFluidScene;
+import dev.totem.lumen.gpu.GpuPbrTextureScene;
 import dev.totem.lumen.vulkan.P14ModelMeshGpuLayout;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -22,6 +23,7 @@ public abstract class P5RendererResourcesMixin {
         int existingWords = Math.addExact(pixelBaseWord, pixelCount);
         int withP14 = Math.addExact(existingWords, P14ModelMeshGpuLayout.MAX_STORAGE_WORDS);
         int withP17 = Math.addExact(withP14, GpuDynamicEntityScene.MAX_STORAGE_WORDS);
-        return Math.addExact(withP17, GpuFluidScene.MAX_STORAGE_WORDS);
+        int withP14e = Math.addExact(withP17, GpuFluidScene.MAX_STORAGE_WORDS);
+        return Math.addExact(withP14e, GpuPbrTextureScene.MAX_STORAGE_WORDS);
     }
 }
