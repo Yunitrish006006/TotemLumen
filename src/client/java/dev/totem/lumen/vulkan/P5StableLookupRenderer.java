@@ -12,6 +12,7 @@ import dev.totem.lumen.gpu.GpuSectionLightLists;
 import dev.totem.lumen.gpu.GpuSectionLookupTable;
 import dev.totem.lumen.gpu.GpuSectionSlotAllocator;
 import dev.totem.lumen.integration.SceneExtractionBridge;
+import dev.totem.lumen.render.RendererSettings;
 import dev.totem.lumen.scene.FrameSnapshot;
 import dev.totem.lumen.scene.SectionKey;
 import dev.totem.lumen.scene.SectionSnapshot;
@@ -58,10 +59,9 @@ public final class P5StableLookupRenderer {
     private static final int STATIC_DATA_END_WORD = MATERIAL_EMISSION_BASE_WORD
             + MAX_MATERIALS * MATERIAL_EMISSION_WORDS_PER_RECORD;
     private static final int HISTORY_RECORD_WORDS = 8;
-    private static final int TARGET_WIDTH = 160;
     private static final int MAX_STEPS = 512;
     private static final float MAX_DISTANCE = 256.0f;
-    private static final int CAMERA_UPLOAD_WORDS = 42;
+    private static final int CAMERA_UPLOAD_WORDS = 51;
     private static final int SOFT_SHADOW_SAMPLES = 4;
     private static final float SOFT_SHADOW_ANGULAR_RADIUS = 0.055f;
     private static final float TEMPORAL_HISTORY_WEIGHT = 0.80f;
@@ -364,8 +364,10 @@ public final class P5StableLookupRenderer {
             float softDirectionalVisibility(vec3 hitPoint, vec3 surfaceNormal) {
                 float visibleSamples = 0.0;
                 float validSamples = 0.0;
+                uint shadowSamples = clamp(scene.data[45], 1u, 4u);
 
                 for (uint sampleIndex = 0u; sampleIndex < 4u; sampleIndex++) {
+                    if (sampleIndex >= shadowSamples) break;
                     vec3 sampleDirection = directionalSampleDirection(sampleIndex);
                     if (dot(surfaceNormal, sampleDirection) <= 0.0) continue;
 
@@ -603,8 +605,10 @@ public final class P5StableLookupRenderer {
                 float totalWeight = 0.0;
                 ivec2 center = ivec2(centerPixel);
 
-                for (int offsetY = -1; offsetY <= 1; offsetY++) {
-                    for (int offsetX = -1; offsetX <= 1; offsetX++) {
+                int denoiseRadius = int(min(scene.data[50], 2u));
+                for (int offsetY = -2; offsetY <= 2; offsetY++) {
+                    for (int offsetX = -2; offsetX <= 2; offsetX++) {
+                        if (abs(offsetX) > denoiseRadius || abs(offsetY) > denoiseRadius) continue;
                         ivec2 samplePixel = center + ivec2(offsetX, offsetY);
                         if (samplePixel.x < 0 || samplePixel.y < 0
                                 || samplePixel.x >= int(width) || samplePixel.y >= int(height)) {
@@ -698,7 +702,8 @@ public final class P5StableLookupRenderer {
                     float historyWeight = float(previousSamples) / float(previousSamples + 1u);
                     return packRgba(mix(currentRgb, historyRgb, historyWeight), 255u);
                 }
-                return packRgba(mix(currentRgb, historyRgb, TEMPORAL_HISTORY_WEIGHT), 255u);
+                float temporalWeight = clamp(uintBitsToFloat(scene.data[49]), 0.0, 0.95);
+                return packRgba(mix(currentRgb, historyRgb, temporalWeight), 255u);
             }
 
             void writeHistory(uvec2 pixel, uint width, HitResult hit, uint color, uint sampleCount) {
@@ -816,6 +821,7 @@ public final class P5StableLookupRenderer {
         SPATIAL_DENOISE(9, "Spatial Denoise"),
         INDIRECT_GI(10, "Indirect GI"),
         GI_COMPOSITE(11, "GI Composite"),
+        FLUID_GEOMETRY(12, "P14E Fluid Geometry"),
         LOCAL_LIGHTS(5, "Local Lights"),
         EMISSIVE_MATERIALS(6, "Emissive Materials");
 
@@ -857,11 +863,15 @@ public final class P5StableLookupRenderer {
     private static FrameSnapshot lastCompletedFrame;
     private static DebugMode lastCompletedMode;
     private static String dimensionId;
+    private static long lastSettingsRevision = Long.MIN_VALUE;
+    private static int activeRenderWidth;
+    private static int activeRenderHeight;
 
     private P5StableLookupRenderer() {
     }
 
     private static boolean usesTemporalHistory(DebugMode debugMode) {
+        if (RendererSettings.temporalQuality() == RendererSettings.TemporalQuality.OFF) return false;
         return debugMode == DebugMode.TEMPORAL_HISTORY
                 || debugMode == DebugMode.SPATIAL_DENOISE
                 || debugMode == DebugMode.INDIRECT_GI
@@ -877,6 +887,10 @@ public final class P5StableLookupRenderer {
     }
 
     public static void runOnRenderThread() {
+        if (!RendererSettings.rendererEnabled()) {
+            historyValid = false;
+            return;
+        }
         if (!P5WorldDebugComposite.ready() || inFlight || resetRequested) return;
 
         FrameSnapshot frame = SceneExtractionBridge.latestFrame();
@@ -891,17 +905,28 @@ public final class P5StableLookupRenderer {
         List<SectionSnapshot> sections = nearestSections(frame);
         if (sections.size() < MIN_SECTIONS) return;
 
+        long settingsRevision = RendererSettings.revision();
+        if (settingsRevision != lastSettingsRevision) {
+            historyValid = false;
+            lastSettingsRevision = settingsRevision;
+        }
+
         int windowWidth = Math.max(1, Minecraft.getInstance().getWindow().getWidth());
         int windowHeight = Math.max(1, Minecraft.getInstance().getWindow().getHeight());
-        int targetHeight = Math.max(1, Math.round(TARGET_WIDTH * (windowHeight / (float) windowWidth)));
+        int targetWidth = RendererSettings.internalResolution().width();
+        int targetHeight = Math.max(1, Math.round(targetWidth * (windowHeight / (float) windowWidth)));
+        int capacityWidth = RendererSettings.InternalResolution.HIGH.width();
+        int capacityHeight = Math.max(1, Math.round(capacityWidth * (windowHeight / (float) windowWidth)));
 
-        if (resources == null || resources.height != targetHeight) {
+        if (resources == null || resources.width != capacityWidth || resources.height != capacityHeight) {
             destroyResourcesIfSafe();
-            resources = Resources.create(device, TARGET_WIDTH, targetHeight);
+            resources = Resources.create(device, capacityWidth, capacityHeight);
             sceneUploadRequired = true;
             sceneSignature = Long.MIN_VALUE;
             ready = false;
         }
+        activeRenderWidth = targetWidth;
+        activeRenderHeight = targetHeight;
 
         if (!frame.dimensionId().equals(dimensionId)) {
             resetSceneSlots();
@@ -938,7 +963,9 @@ public final class P5StableLookupRenderer {
                 submittedMode,
                 canReuseHistory ? lastCompletedFrame : null,
                 canReuseHistory ? historyReadIndex : -1,
-                historyWriteIndex
+                historyWriteIndex,
+                activeRenderWidth,
+                activeRenderHeight
         );
 
         int uploadBytes;
@@ -956,7 +983,13 @@ public final class P5StableLookupRenderer {
 
         try {
             VulkanFrameComputeBatch batch = VulkanFrameComputeBatch.begin(device, capabilities, r.commandPool);
-            recordCommands(batch.commandBuffer(), r, uploadBytes);
+            recordCommands(
+                    batch.commandBuffer(),
+                    r,
+                    uploadBytes,
+                    activeRenderWidth,
+                    activeRenderHeight
+            );
             batch.finishAndEnqueue(() -> onFrameComplete(
                     fullSceneUpload,
                     frame,
@@ -984,9 +1017,14 @@ public final class P5StableLookupRenderer {
     }
 
     public static DebugMode cycleMode() {
-        DebugMode previous = mode;
         DebugMode[] values = DebugMode.values();
-        mode = values[(mode.ordinal() + 1) % values.length];
+        return setMode(values[(mode.ordinal() + 1) % values.length]);
+    }
+
+    public static DebugMode setMode(DebugMode nextMode) {
+        if (nextMode == null) throw new IllegalArgumentException("nextMode is required");
+        DebugMode previous = mode;
+        mode = nextMode;
         if (!historyCompatible(mode, previous)) {
             historyValid = false;
         }
@@ -998,6 +1036,7 @@ public final class P5StableLookupRenderer {
     }
 
     public static void drawHud(GuiGraphicsExtractor graphics) {
+        if (!RendererSettings.rendererEnabled()) return;
         Resources r = resources;
         if (!ready || r == null || r.view.isClosed()) {
             P5WorldDebugComposite.drawHud(graphics);
@@ -1012,9 +1051,9 @@ public final class P5StableLookupRenderer {
                 graphics.guiWidth(),
                 graphics.guiHeight(),
                 0.0f,
-                1.0f,
+                activeRenderWidth / (float) r.width,
                 0.0f,
-                1.0f
+                activeRenderHeight / (float) r.height
         );
     }
 
@@ -1197,15 +1236,17 @@ public final class P5StableLookupRenderer {
             DebugMode debugMode,
             FrameSnapshot previousFrame,
             int historyReadIndex,
-            int historyWriteIndex
+            int historyWriteIndex,
+            int renderWidth,
+            int renderHeight
     ) {
         putWord(buffer, 1, sectionCount);
         putWord(buffer, 2, LOOKUP_CAPACITY);
         putWord(buffer, 3, resources.pixelBaseWord);
-        putWord(buffer, 4, resources.width);
-        putWord(buffer, 5, resources.height);
+        putWord(buffer, 4, renderWidth);
+        putWord(buffer, 5, renderHeight);
         putWord(buffer, 6, MAX_STEPS);
-        putWord(buffer, 7, Float.floatToRawIntBits(MAX_DISTANCE));
+        putWord(buffer, 7, Float.floatToRawIntBits((float) RendererSettings.rayDistance()));
         putWord(buffer, 8, Float.floatToRawIntBits((float) frame.cameraX()));
         putWord(buffer, 9, Float.floatToRawIntBits((float) frame.cameraY()));
         putWord(buffer, 10, Float.floatToRawIntBits((float) frame.cameraZ()));
@@ -1215,7 +1256,7 @@ public final class P5StableLookupRenderer {
         putVec3(buffer, 14, basis[1]);
         putVec3(buffer, 17, basis[2]);
         putWord(buffer, 20, Float.floatToRawIntBits((float) Math.tan(Math.toRadians(frame.fovDegrees()) * 0.5)));
-        putWord(buffer, 21, Float.floatToRawIntBits(resources.width / (float) resources.height));
+        putWord(buffer, 21, Float.floatToRawIntBits(renderWidth / (float) renderHeight));
         putWord(buffer, 22, debugMode.shaderValue);
         putWord(buffer, 24, historyReadIndex < 0 ? 0 : resources.historyBaseWord(historyReadIndex));
         putWord(buffer, 25, resources.historyBaseWord(historyWriteIndex));
@@ -1236,9 +1277,18 @@ public final class P5StableLookupRenderer {
                     39,
                     Float.floatToRawIntBits((float) Math.tan(Math.toRadians(previousFrame.fovDegrees()) * 0.5))
             );
-            putWord(buffer, 40, Float.floatToRawIntBits(resources.width / (float) resources.height));
+            putWord(buffer, 40, Float.floatToRawIntBits(renderWidth / (float) renderHeight));
         }
         putWord(buffer, 41, (int) frame.frameIndex());
+        putWord(buffer, 42, RendererSettings.reflectionBounces());
+        putWord(buffer, 43, Float.floatToRawIntBits((float) RendererSettings.reflectionDistance()));
+        putWord(buffer, 44, RendererSettings.giQuality().samples());
+        putWord(buffer, 45, RendererSettings.shadowQuality().samples());
+        putWord(buffer, 46, RendererSettings.reflectionsEnabled() ? 1 : 0);
+        putWord(buffer, 47, RendererSettings.waterReflections() ? 1 : 0);
+        putWord(buffer, 48, RendererSettings.temporalQuality().historySamples());
+        putWord(buffer, 49, Float.floatToRawIntBits(RendererSettings.temporalQuality().directHistoryWeight()));
+        putWord(buffer, 50, RendererSettings.denoiseQuality().radius());
     }
 
     private static void packLookupSectionsAndLights(ByteBuffer buffer, List<SectionSnapshot> sections) {
@@ -1366,7 +1416,13 @@ public final class P5StableLookupRenderer {
         buffer.putInt(wordIndex * Integer.BYTES, value);
     }
 
-    private static void recordCommands(VkCommandBuffer commandBuffer, Resources r, int uploadBytes) {
+    private static void recordCommands(
+            VkCommandBuffer commandBuffer,
+            Resources r,
+            int uploadBytes,
+            int renderWidth,
+            int renderHeight
+    ) {
         try (MemoryStack stack = MemoryStack.stackPush()) {
             VkBufferCopy.Buffer uploadCopy = VkBufferCopy.calloc(1, stack);
             uploadCopy.get(0).srcOffset(0).dstOffset(0).size(uploadBytes);
@@ -1398,7 +1454,7 @@ public final class P5StableLookupRenderer {
                     stack.longs(r.program.descriptorSet()),
                     null
             );
-            VK10.vkCmdDispatch(commandBuffer, (r.width + 7) / 8, (r.height + 7) / 8, 1);
+            VK10.vkCmdDispatch(commandBuffer, (renderWidth + 7) / 8, (renderHeight + 7) / 8, 1);
 
             long pixelOffset = (long) r.pixelBaseWord * Integer.BYTES;
             VkBufferMemoryBarrier.Buffer computeToCopy = VkBufferMemoryBarrier.calloc(1, stack);
@@ -1410,7 +1466,7 @@ public final class P5StableLookupRenderer {
                     .dstQueueFamilyIndex(VK10.VK_QUEUE_FAMILY_IGNORED)
                     .buffer(r.scene.vkBuffer())
                     .offset(pixelOffset)
-                    .size(r.pixelBytes);
+                    .size((long) renderWidth * renderHeight * Integer.BYTES);
             VK10.vkCmdPipelineBarrier(
                     commandBuffer,
                     VK10.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
@@ -1439,12 +1495,15 @@ public final class P5StableLookupRenderer {
             );
 
             VkBufferImageCopy.Buffer copy = VkBufferImageCopy.calloc(1, stack);
-            copy.get(0).bufferOffset(pixelOffset).bufferRowLength(r.width).bufferImageHeight(r.height);
+            copy.get(0)
+                    .bufferOffset(pixelOffset)
+                    .bufferRowLength(renderWidth)
+                    .bufferImageHeight(renderHeight);
             copy.get(0).imageSubresource()
                     .aspectMask(VK10.VK_IMAGE_ASPECT_COLOR_BIT)
                     .mipLevel(0).baseArrayLayer(0).layerCount(1);
             copy.get(0).imageOffset().set(0, 0, 0);
-            copy.get(0).imageExtent().set(r.width, r.height, 1);
+            copy.get(0).imageExtent().set(renderWidth, renderHeight, 1);
             VK10.vkCmdCopyBufferToImage(
                     commandBuffer, r.scene.vkBuffer(), r.vkImage,
                     VK10.VK_IMAGE_LAYOUT_GENERAL, copy
@@ -1488,6 +1547,9 @@ public final class P5StableLookupRenderer {
         sceneSignature = Long.MIN_VALUE;
         lastSubmittedFrame = -1;
         dimensionId = null;
+        lastSettingsRevision = Long.MIN_VALUE;
+        activeRenderWidth = 0;
+        activeRenderHeight = 0;
     }
 
     private static void closeQuietly(AutoCloseable closeable) {

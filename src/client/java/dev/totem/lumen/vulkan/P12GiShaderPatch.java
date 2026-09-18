@@ -231,17 +231,19 @@ final class P12GiShaderPatch {
                         uvec2 pixel,
                         uint sampleIndex
                 ) {
+                    uint giSamples = clamp(scene.data[44], 1u, 4u);
                     vec3 sum = vec3(0.0);
-                    for (uint sampleOffset = 0u; sampleOffset < 2u; sampleOffset++) {
+                    for (uint sampleOffset = 0u; sampleOffset < 4u; sampleOffset++) {
+                        if (sampleOffset >= giSamples) break;
                         sum += p13OneBounceIndirectRgb(
                             hit,
                             primaryOrigin,
                             primaryDirection,
                             pixel,
-                            sampleIndex * 2u + sampleOffset
+                            sampleIndex * giSamples + sampleOffset
                         );
                     }
-                    vec3 indirect = sum * 0.5;
+                    vec3 indirect = sum / float(giSamples);
                     float peak = max(indirect.r, max(indirect.g, indirect.b));
                     if (peak > 0.90) {
                         indirect *= 0.90 / peak;
@@ -281,8 +283,9 @@ final class P12GiShaderPatch {
                         hit,
                         unpackRgb(scene.data[historyBase])
                     );
-                    uint previousSamples = clamp(historySampleCount(historyBase), 1u, GI_HISTORY_MAX_SAMPLES);
-                    outputSampleCount = min(previousSamples + 1u, GI_HISTORY_MAX_SAMPLES);
+                    uint historyLimit = max(scene.data[48], 1u);
+                    uint previousSamples = clamp(historySampleCount(historyBase), 1u, historyLimit);
+                    outputSampleCount = min(previousSamples + 1u, historyLimit);
                     float historyWeight = float(previousSamples) / float(previousSamples + 1u);
                     return packRgba(mix(currentRgb, historyRgb, historyWeight), 255u);
                 }
@@ -358,9 +361,7 @@ final class P12GiShaderPatch {
         source = source.substring(0, startIndex) + newMainBranch + source.substring(endIndex);
 
         TotemLumenClient.LOGGER.info(
-                "P12 GI shader correctness patch active: samplesPerFrame={}, progressiveHistoryMaxSamples={}, peakClamp={}, history=indirect-only",
-                SAMPLES_PER_FRAME,
-                HISTORY_MAX_SAMPLES,
+                "P12 GI shader correctness patch active: samplesPerFrame=runtime(1/2/4), progressiveHistory=runtime(off/16/64), peakClamp={}, history=indirect-only",
                 SAMPLE_PEAK_CLAMP
         );
         TotemLumenClient.LOGGER.info(

@@ -105,8 +105,8 @@ public final class P12FullBasePipeline {
         }
     }
 
-    /** Builds the exact pre-P17 production base source without using it as a readiness gate. */
-    static String buildSourceForVerification() {
+    /** Builds P12-P15 plus exact P14E geometry, before optional P17/P14E optical rewrites. */
+    static String buildGeometrySourceForVerification() {
         try {
             Field shaderField = P5StableLookupRenderer.class.getDeclaredField("SHADER");
             shaderField.setAccessible(true);
@@ -117,10 +117,16 @@ public final class P12FullBasePipeline {
                     String.class
             );
             transform.setAccessible(true);
-            return (String) transform.invoke(null, source);
+            String transformed = (String) transform.invoke(null, source);
+            return P14EFluidShaderPatch.apply(transformed);
         } catch (ReflectiveOperationException failure) {
-            throw new IllegalStateException("Failed to build full P12-P15 production shader", failure);
+            throw new IllegalStateException("Failed to build full P12-P15 geometry shader", failure);
         }
+    }
+
+    /** Builds the exact pre-P17 production base source without using it as a readiness gate. */
+    static String buildSourceForVerification() {
+        return P14EFluidOpticsPatch.apply(buildGeometrySourceForVerification());
     }
 
     public static void beginDispatch() {

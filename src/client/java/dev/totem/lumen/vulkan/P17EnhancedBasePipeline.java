@@ -94,7 +94,8 @@ public final class P17EnhancedBasePipeline {
     }
 
     static String buildSourceForVerification() {
-        return P17ShaderIntegration.apply(P12FullBasePipeline.buildSourceForVerification());
+        String p17Geometry = P17ShaderIntegration.apply(P12FullBasePipeline.buildGeometrySourceForVerification());
+        return P14EFluidOpticsPatch.apply(p17Geometry);
     }
 
     /** Snapshot full-base and P17 programs once for one command-recording operation. */

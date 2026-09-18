@@ -2,19 +2,14 @@ package dev.totem.lumen.vulkan;
 
 import com.mojang.blaze3d.vulkan.VulkanDevice;
 import dev.totem.lumen.TotemLumenClient;
+import dev.totem.lumen.render.RendererSettings;
 import dev.totem.lumen.vulkan.resource.VulkanOwnedBuffer;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.vulkan.VK10;
 import org.lwjgl.vulkan.VkBufferMemoryBarrier;
 import org.lwjgl.vulkan.VkCommandBuffer;
 
-/**
- * Owns the split P16 reflection pipeline.
- *
- * <p>The base P12-P15 pass is allowed to become ready independently. Reflection pipeline creation
- * is kicked off only after a scene buffer exists and runs on a daemon worker, so a slow or stuck
- * Metal compiler can never prevent the base Totem Lumen renderer from presenting frames.</p>
- */
+/** Owns the split P16 reflection pipeline. */
 public final class P16MultipassReflection {
     private static final Object LOCK = new Object();
 
@@ -33,9 +28,7 @@ public final class P16MultipassReflection {
         VulkanComputeProgram staleProgram;
         long workerGeneration;
         synchronized (LOCK) {
-            if (attachedScene == scene && (activeProgram != null || failure == null)) {
-                return;
-            }
+            if (attachedScene == scene && (activeProgram != null || failure == null)) return;
             staleProgram = activeProgram;
             activeProgram = null;
             attachedScene = scene;
@@ -54,7 +47,9 @@ public final class P16MultipassReflection {
         VulkanComputeProgram created = null;
         long startedAt = System.nanoTime();
         try {
-            String source = P17ShaderIntegration.apply(P16ReflectionPassShader.build());
+            String geometrySource = P14EFluidShaderPatch.apply(P16ReflectionPassShader.build());
+            String entitySource = P17ShaderIntegration.apply(geometrySource);
+            String source = P14EFluidOpticsPatch.apply(entitySource);
             TotemLumenClient.LOGGER.info(
                     "P16 split pipeline creation START: shader={}, sourceChars={}",
                     P16ReflectionPassShader.SHADER_NAME,
@@ -86,9 +81,7 @@ public final class P16MultipassReflection {
             );
         } catch (Throwable buildFailure) {
             synchronized (LOCK) {
-                if (workerGeneration == generation && attachedScene == scene) {
-                    failure = buildFailure;
-                }
+                if (workerGeneration == generation && attachedScene == scene) failure = buildFailure;
             }
             TotemLumenClient.LOGGER.error(
                     "P16 split reflection pipeline FAILED; keeping P12-P15 base renderer active without reflections",
@@ -99,7 +92,6 @@ public final class P16MultipassReflection {
         }
     }
 
-    /** Called immediately after the base compute dispatch, before its existing buffer-to-image copy. */
     public static void recordAfterBaseDispatch(
             VkCommandBuffer commandBuffer,
             int groupCountX,
@@ -108,7 +100,7 @@ public final class P16MultipassReflection {
     ) {
         VulkanComputeProgram program = activeProgram;
         VulkanOwnedBuffer scene = attachedScene;
-        if (program == null || scene == null) return;
+        if (program == null || scene == null || !RendererSettings.reflectionsEnabled()) return;
 
         try (MemoryStack stack = MemoryStack.stackPush()) {
             VkBufferMemoryBarrier.Buffer baseToReflection = VkBufferMemoryBarrier.calloc(1, stack);
@@ -131,11 +123,7 @@ public final class P16MultipassReflection {
                     null
             );
 
-            VK10.vkCmdBindPipeline(
-                    commandBuffer,
-                    VK10.VK_PIPELINE_BIND_POINT_COMPUTE,
-                    program.pipeline()
-            );
+            VK10.vkCmdBindPipeline(commandBuffer, VK10.VK_PIPELINE_BIND_POINT_COMPUTE, program.pipeline());
             VK10.vkCmdBindDescriptorSets(
                     commandBuffer,
                     VK10.VK_PIPELINE_BIND_POINT_COMPUTE,
@@ -150,7 +138,9 @@ public final class P16MultipassReflection {
         if (!firstDispatchLogged) {
             firstDispatchLogged = true;
             TotemLumenClient.LOGGER.info(
-                    "P16 multipass reflection READY: base=P12-P15+P17, reflection=separate-compute-pass+P17, secondaryRays=1, maxDistance=64"
+                    "P16 multipass reflection READY: base=P12-P15+P14E+P17, reflection=separate-compute-pass+P14E+P17, maxBounces={}, maxDistance={}",
+                    RendererSettings.reflectionBounces(),
+                    RendererSettings.reflectionDistance()
             );
         }
     }

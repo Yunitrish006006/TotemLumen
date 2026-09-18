@@ -4,6 +4,7 @@
   "client": [
     "GpuDeviceAccessor",
     "ClientLevelBlockUpdateMixin",
+    "FluidRendererCaptureMixin",
     "BlockEntityRenderDispatcherMixin",
     "EntityRendererStateMixin",
     "EntityRenderDispatcherMixin",

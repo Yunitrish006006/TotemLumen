@@ -68,10 +68,17 @@ tasks.register('verifyP14DMixinDescriptors', JavaExec) {
     mainClass = 'dev.totem.lumen.geometry.P14DMixinDescriptorVerifier'
 }
 
+tasks.register('verifyP14EFluidMixinDescriptors', JavaExec) {
+    dependsOn tasks.named('clientClasses')
+    classpath = sourceSets.client.runtimeClasspath + sourceSets.main.runtimeClasspath
+    mainClass = 'dev.totem.lumen.geometry.P14EFluidMixinDescriptorVerifier'
+}
+
 tasks.named('check') {
     dependsOn tasks.named('verifyRuntimeShader')
     dependsOn tasks.named('verifyP14DDynamicMeshes')
     dependsOn tasks.named('verifyP14DMixinDescriptors')
+    dependsOn tasks.named('verifyP14EFluidMixinDescriptors')
 }
 
 java {

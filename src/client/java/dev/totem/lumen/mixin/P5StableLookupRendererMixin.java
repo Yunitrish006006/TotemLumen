@@ -2,6 +2,7 @@ package dev.totem.lumen.mixin;
 
 import dev.totem.lumen.scene.SectionSnapshot;
 import dev.totem.lumen.vulkan.P12FullBasePipeline;
+import dev.totem.lumen.vulkan.P14EFluidGpuUploader;
 import dev.totem.lumen.vulkan.P14ModelMeshGpuUploader;
 import dev.totem.lumen.vulkan.P16MultipassReflection;
 import dev.totem.lumen.vulkan.P17DynamicEntityGpuUploader;
@@ -19,13 +20,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import java.nio.ByteBuffer;
 import java.util.List;
 
-/**
- * Shared scene-tail upload hooks plus the optional P16 reflection dispatch.
- *
- * <p>P14 static/mutable block-model meshes and P17 dynamic entities live in separate fixed-capacity
- * regions after the pixel target. Either tail can repack/copy on a camera-only frame without
- * forcing a 64-section voxel upload.</p>
- */
+/** Shared scene-tail upload hooks plus the optional P16 reflection dispatch. */
 @Mixin(targets = "dev.totem.lumen.vulkan.P5StableLookupRenderer", remap = false)
 public abstract class P5StableLookupRendererMixin {
     private static final long CAMERA_UPLOAD_MAX_BYTES = 4096L;
@@ -38,6 +33,7 @@ public abstract class P5StableLookupRendererMixin {
     ) {
         P14ModelMeshGpuUploader.pack(buffer);
         P17DynamicEntityGpuUploader.pack(buffer);
+        P14EFluidGpuUploader.pack(buffer, sections);
     }
 
     @Redirect(
@@ -54,6 +50,7 @@ public abstract class P5StableLookupRendererMixin {
     ) {
         boolean modelChanged = P14ModelMeshGpuUploader.packIfDirty(upload.mappedView());
         boolean entityChanged = P17DynamicEntityGpuUploader.packIfDirty(upload.mappedView());
+        boolean fluidChanged = P14EFluidGpuUploader.packIfDirty(upload.mappedView());
         upload.flush(offset, length);
 
         boolean fullSceneUpload = length > CAMERA_UPLOAD_MAX_BYTES;
@@ -69,6 +66,13 @@ public abstract class P5StableLookupRendererMixin {
                     upload,
                     P17DynamicEntityGpuUploader.lastBaseByteOffset(),
                     P17DynamicEntityGpuUploader.lastCopyBytes()
+            );
+        }
+        if (fullSceneUpload || fluidChanged) {
+            flushTail(
+                    upload,
+                    P14EFluidGpuUploader.lastBaseByteOffset(),
+                    P14EFluidGpuUploader.lastCopyBytes()
             );
         }
     }
@@ -104,6 +108,15 @@ public abstract class P5StableLookupRendererMixin {
                     destinationBuffer,
                     P17DynamicEntityGpuUploader.lastBaseByteOffset(),
                     P17DynamicEntityGpuUploader.lastCopyBytes()
+            );
+        }
+        if (P14EFluidGpuUploader.consumeCopyPending()) {
+            copyTail(
+                    commandBuffer,
+                    sourceBuffer,
+                    destinationBuffer,
+                    P14EFluidGpuUploader.lastBaseByteOffset(),
+                    P14EFluidGpuUploader.lastCopyBytes()
             );
         }
     }

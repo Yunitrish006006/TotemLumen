@@ -365,6 +365,7 @@ public final class VulkanComputeProgram implements AutoCloseable {
         source = P14CommonGeometryPatch.apply(source);
         source = P14GeometryCorrectionPatch.apply(source);
         source = P13SkyOcclusionPatch.apply(source);
+        source = RendererQualityShaderPatch.apply(source);
         source = P16ReflectionRoughnessPatch.apply(source);
         return source;
     }
