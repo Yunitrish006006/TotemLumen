@@ -543,6 +543,7 @@ public final class VulkanComputeProgram implements AutoCloseable {
         public void close() {
             if (closed) return;
             closed = true;
+            VK10.vkDeviceWaitIdle(device.vkDevice());
             destroyPipelineHandles(
                     device,
                     new PipelineHandles(descriptorSetLayout, pipelineLayout, pipeline)
