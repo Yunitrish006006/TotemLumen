@@ -38,6 +38,9 @@ public final class RendererCompileProgressNotifier {
         if (client == null || client.player == null || client.level == null) {
             return;
         }
+        if (!RendererSettings.rendererEnabled()) {
+            return;
+        }
 
         long now = System.nanoTime();
         RendererState rendererState = RendererBootstrap.state();
