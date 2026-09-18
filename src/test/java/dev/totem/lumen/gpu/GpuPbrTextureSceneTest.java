@@ -191,7 +191,8 @@ final class GpuPbrTextureSceneTest {
                 1.75f,
                 0.65f,
                 1.40f,
-                0.50f
+                0.50f,
+                1.25f
         );
 
         ByteBuffer buffer = ByteBuffer
@@ -216,12 +217,16 @@ final class GpuPbrTextureSceneTest {
         int descriptor = GpuPbrTextureScene.DESCRIPTOR_BASE_WORD
                 + handle * GpuPbrTextureScene.DESCRIPTOR_WORDS_PER_RECORD;
 
-        assertEquals(16, GpuPbrTextureScene.DESCRIPTOR_WORDS_PER_RECORD);
+        assertEquals(24, GpuPbrTextureScene.DESCRIPTOR_WORDS_PER_RECORD);
         assertEquals(0.0f, buffer.getFloat((descriptor + 11) * Integer.BYTES));
         assertEquals(1.75f, buffer.getFloat((descriptor + 12) * Integer.BYTES));
         assertEquals(0.65f, buffer.getFloat((descriptor + 13) * Integer.BYTES));
         assertEquals(1.40f, buffer.getFloat((descriptor + 14) * Integer.BYTES));
         assertEquals(0.50f, buffer.getFloat((descriptor + 15) * Integer.BYTES));
+        assertEquals(1.25f, buffer.getFloat((descriptor + 16) * Integer.BYTES));
+        for (int word = 17; word < GpuPbrTextureScene.DESCRIPTOR_WORDS_PER_RECORD; word++) {
+            assertEquals(0, buffer.getInt((descriptor + word) * Integer.BYTES));
+        }
     }
 
     @Test
