@@ -4,8 +4,8 @@
 
 - **P18A renderer-resolved texture identity + LabPBR 1.3 decode contract: IMPLEMENTED / CI pending**
 - **P18B bounded resident PBR texture GPU scene: PENDING**
-- **P18C textured BRDF integration (normal/AO/roughness/F0/metal/emission): PENDING**
-- **P18D alpha cutouts + entity/block-entity material fidelity: PENDING**
+- **P18C textured BRDF + alpha coverage integration (albedo/normal/AO/roughness/F0/metal/emission): PENDING**
+- **P18D entity/block-entity material fidelity: PENDING**
 - **P18E height/POM and secondary LabPBR channels: DEFERRED**
 
 Alpha 44 starts from the accepted Alpha 43 renderer/settings branch and does not widen the existing
@@ -131,11 +131,22 @@ The initial LabPBR fields are:
 
 Height/POM, porosity wetness and subsurface scattering are intentionally later gates.
 
+### Alpha coverage is part of the baseline
+
+Albedo alpha is not discarded during P18 upload/shading.
+
+- alpha = 0: the texel is a hole; the candidate triangle hit is rejected and ray traversal continues;
+- alpha = 255: ordinary opaque textured hit;
+- 0 < alpha < 255: fractional coverage/transmission is retained and must not be promoted to P15 glass semantics.
+
+This alpha test occurs after geometric triangle intersection but before the shared hit is accepted, so
+primary rays, Sun/Moon shadows, local-light shadows, GI and P16 reflection see the same cutout
+silhouette. True glass/water volume/interface transmission remains owned by P15/P14E.
+
 ## P18D — fidelity follow-up
 
 After static blocks are correct:
 
-- diffuse alpha cutout silhouettes instead of conservative opaque geometry;
 - block-entity texture identity;
 - player skin / entity texture sampling;
 - armor/equipment;
@@ -158,4 +169,6 @@ Alpha 44 is not accepted until at least:
 9. full cubes remain on the fast intersection path;
 10. generic P14C meshes use their renderer-resolved per-quad texture identity;
 11. Alpha 43 fluid/entity/render-settings behavior remains functional;
-12. bootstrap readiness remains independent of the larger PBR-aware pipelines.
+12. zero-alpha albedo texels produce true ray-visible holes on P14C surfaces;
+13. intermediate alpha does not become a fake opaque triangle or a fake P15 glass volume;
+14. bootstrap readiness remains independent of the larger PBR-aware pipelines.
