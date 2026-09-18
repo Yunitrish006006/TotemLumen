@@ -353,18 +353,33 @@ public final class P14ShaderCompileVerifier {
         );
         requireSourceMarker(
                 source,
-                "surface.emission = surface.albedo * (emissionStrength * 1.6);",
+                "float baselineEmissionScale = uintBitsToFloat(scene.data[descriptor + 11u]);",
+                label + " runtime baseline emission scale"
+        );
+        requireSourceMarker(
+                source,
+                "float labPbrEmissionScale = uintBitsToFloat(scene.data[descriptor + 12u]);",
+                label + " runtime LabPBR emission scale"
+        );
+        requireSourceMarker(
+                source,
+                "float roughnessScale = uintBitsToFloat(scene.data[descriptor + 13u]);",
+                label + " runtime roughness scale"
+        );
+        requireSourceMarker(
+                source,
+                "float normalStrength = uintBitsToFloat(scene.data[descriptor + 14u]);",
+                label + " runtime normal strength"
+        );
+        requireSourceMarker(
+                source,
+                "float alphaCutoff = uintBitsToFloat(scene.data[descriptor + 15u]);",
+                label + " runtime alpha cutoff"
+        );
+        requireSourceMarker(
+                source,
+                "surface.emission = surface.albedo",
                 label + " LabPBR per-texel emission"
-        );
-        requireSourceMarker(
-                source,
-                "surface.emission = vec3(0.0);",
-                label + " coarse block-emission suppression"
-        );
-        requireSourceMarker(
-                source,
-                "P18_TEXTURE_FLAG_SUPPRESS_BLOCK_EMISSION",
-                label + " mixed-material emission mask"
         );
         if (!reflectionPass) {
             requireSourceMarker(
@@ -393,7 +408,7 @@ public final class P14ShaderCompileVerifier {
         System.out.println(
                 "P18 LabPBR shading verification PASS (" + label + "): "
                         + "albedo=true, normal=true, ao=true, roughness=true, f0=true, "
-                        + "metal=true, emission=true, blockEmissionSeparated=true, reflectionShared="
+                        + "metal=true, emission=true, stableMaterialAbi=true, reflectionShared="
                         + reflectionPass
         );
     }
