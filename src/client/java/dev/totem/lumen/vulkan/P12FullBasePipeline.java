@@ -273,7 +273,8 @@ public final class P12FullBasePipeline {
     }
 
     public static Throwable failure() {
-        return failure;
+        Throwable bindingFailure = failure;
+        return bindingFailure != null ? bindingFailure : prewarmFailure;
     }
 
 
