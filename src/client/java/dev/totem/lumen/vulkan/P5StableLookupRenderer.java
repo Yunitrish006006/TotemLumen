@@ -1490,12 +1490,15 @@ public final class P5StableLookupRenderer {
             );
 
             VkBufferImageCopy.Buffer copy = VkBufferImageCopy.calloc(1, stack);
-            copy.get(0).bufferOffset(pixelOffset).bufferRowLength(r.width).bufferImageHeight(r.height);
+            copy.get(0)
+                    .bufferOffset(pixelOffset)
+                    .bufferRowLength(renderWidth)
+                    .bufferImageHeight(renderHeight);
             copy.get(0).imageSubresource()
                     .aspectMask(VK10.VK_IMAGE_ASPECT_COLOR_BIT)
                     .mipLevel(0).baseArrayLayer(0).layerCount(1);
             copy.get(0).imageOffset().set(0, 0, 0);
-            copy.get(0).imageExtent().set(r.width, r.height, 1);
+            copy.get(0).imageExtent().set(renderWidth, renderHeight, 1);
             VK10.vkCmdCopyBufferToImage(
                     commandBuffer, r.scene.vkBuffer(), r.vkImage,
                     VK10.VK_IMAGE_LAYOUT_GENERAL, copy
