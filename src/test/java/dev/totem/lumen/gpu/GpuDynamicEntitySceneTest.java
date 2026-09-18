@@ -1,5 +1,6 @@
 package dev.totem.lumen.gpu;
 
+import dev.totem.lumen.material.PbrImage;
 import dev.totem.lumen.scene.DynamicEntitySnapshot;
 import org.junit.jupiter.api.Test;
 
@@ -52,6 +53,61 @@ class GpuDynamicEntitySceneTest {
         assertEquals(
                 0,
                 GpuDynamicEntityScene.packedSectionCandidate(buffer, 0, 2, 4, -2, 0)
+        );
+    }
+
+    @Test
+    void packsSpiderFlagsUvsAndResourcePackEyeTexture() {
+        ByteBuffer buffer = buffer();
+        DynamicEntitySnapshot spider = new DynamicEntitySnapshot(
+                11L,
+                "minecraft:overworld",
+                "minecraft:spider",
+                0.0,
+                0.0,
+                0.0,
+                new float[]{
+                        -0.5f, 0.0f, -0.5f,
+                         0.5f, 0.0f, -0.5f,
+                         0.5f, 1.0f,  0.5f,
+                        -0.5f, 1.0f,  0.5f
+                },
+                new float[]{
+                        0.10f, 0.20f,
+                        0.30f, 0.20f,
+                        0.30f, 0.40f,
+                        0.10f, 0.40f
+                }
+        );
+        PbrImage eyes = new PbrImage(
+                2,
+                1,
+                new int[]{0x00FFFFFF, 0xFFFF2200}
+        );
+
+        GpuDynamicEntityScene.pack(buffer, 0, List.of(spider), eyes);
+
+        assertEquals(2, word(buffer, 0));
+        int descriptor = GpuDynamicEntityScene.ENTITY_DESCRIPTOR_BASE_WORD;
+        assertEquals(
+                GpuDynamicEntityScene.FLAG_SPIDER_EYES,
+                word(buffer, descriptor + 16)
+        );
+
+        int quad = GpuDynamicEntityScene.QUAD_POOL_BASE_WORD;
+        assertEquals(0.10f, floatWord(buffer, quad + 12), 0.0001f);
+        assertEquals(0.20f, floatWord(buffer, quad + 13), 0.0001f);
+        assertEquals(0.30f, floatWord(buffer, quad + 16), 0.0001f);
+        assertEquals(0.10f, floatWord(buffer, quad + 18), 0.0001f);
+        assertEquals(0.40f, floatWord(buffer, quad + 19), 0.0001f);
+
+        assertEquals(2, word(buffer, 8));
+        assertEquals(1, word(buffer, 9));
+        assertEquals(2, word(buffer, 10));
+        assertEquals(0x00FFFFFF, word(buffer, GpuDynamicEntityScene.SPIDER_EYE_POOL_BASE_WORD));
+        assertEquals(
+                0xFFFF2200,
+                word(buffer, GpuDynamicEntityScene.SPIDER_EYE_POOL_BASE_WORD + 1)
         );
     }
 

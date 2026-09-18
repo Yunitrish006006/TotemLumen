@@ -555,9 +555,16 @@ public final class P14ShaderCompileVerifier {
 
     private static void verifyP17DynamicEntitySource(String source, String label) {
         requireSourceMarker(source, "const uint P17_ENTITY_MATERIAL_ID = 0xFFFEu;", label + " entity material id");
+        requireSourceMarker(source, "const uint P17_SPIDER_ENTITY_MATERIAL_ID = 0xFFFDu;", label + " spider material id");
+        requireSourceMarker(source, "const uint P17_ENTITY_ABI_VERSION = 2u;", label + " entity ABI v2");
         requireSourceMarker(source, "HitResult p17TraceStaticRayLimited(", label + " static trace preservation");
         requireSourceMarker(source, "bool p17TrySectionEntities(", label + " section broad phase");
         requireSourceMarker(source, "HitResult p17TraceEntityRayLimited(", label + " entity trace");
+        requireSourceMarker(source, "vec2 p17Uv(uint entityBase, uint wordBase)", label + " entity UV fetch");
+        requireSourceMarker(source, "bestUv = uvA * (1.0 - u - v) + uvB * u + uvC * v;", label + " barycentric UV");
+        requireSourceMarker(source, "uint p17SpiderEyeArgb(uint entityBase, vec2 uv)", label + " spider eye texture sampling");
+        requireSourceMarker(source, "p17UnpackUv(hit.steps)", label + " spider hit UV decode");
+        requireSourceMarker(source, "uintBitsToFloat(scene.data[89])", label + " runtime entity emissive gain");
         requireSourceMarker(
                 source,
                 "HitResult traceRayLimited(vec3 origin, vec3 direction, float maxDistance) {",
@@ -565,12 +572,13 @@ public final class P14ShaderCompileVerifier {
         );
         requireSourceMarker(
                 source,
-                "if (candidate.materialId == P17_ENTITY_MATERIAL_ID)",
+                "candidate.materialId == P17_ENTITY_MATERIAL_ID",
                 label + " P15 opaque entity baseline"
         );
         System.out.println(
                 "P17 dynamic-entity shader verification PASS (" + label + "): "
-                        + "sectionBroadPhase=true, triangles=true, nearestHit=true, p15OpaqueBaseline=true"
+                        + "sectionBroadPhase=true, triangles=true, nearestHit=true, uv=true, "
+                        + "spiderEyeMask=true, resourcePackEmission=true, p15OpaqueBaseline=true"
         );
     }
 

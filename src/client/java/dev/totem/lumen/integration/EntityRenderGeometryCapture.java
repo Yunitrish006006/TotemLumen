@@ -86,7 +86,8 @@ public final class EntityRenderGeometryCapture {
                 context.worldX,
                 context.worldY,
                 context.worldZ,
-                toFloatArray(context.positions)
+                toFloatArray(context.positions),
+                toFloatArray(context.uvs)
         );
         EntityRenderGeometryCache.publish(context.renderState, snapshot, context.levelGameTime);
     }
@@ -140,6 +141,8 @@ public final class EntityRenderGeometryCapture {
                         context.positions.add(canonicalFloat(point.x));
                         context.positions.add(canonicalFloat(point.y));
                         context.positions.add(canonicalFloat(point.z));
+                        context.uvs.add(canonicalFloat(vertex.u()));
+                        context.uvs.add(canonicalFloat(vertex.v()));
                     }
                 }
             });
@@ -200,6 +203,7 @@ public final class EntityRenderGeometryCapture {
         final double renderZ;
         final Matrix4f baseInverse;
         final List<Float> positions = new ArrayList<>();
+        final List<Float> uvs = new ArrayList<>();
         final Set<Long> submissions = new HashSet<>();
         boolean hadModelSubmission;
 

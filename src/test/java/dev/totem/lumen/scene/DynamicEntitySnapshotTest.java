@@ -64,6 +64,40 @@ class DynamicEntitySnapshotTest {
     }
 
     @Test
+    void retainsOneUvPairPerCapturedVertex() {
+        float[] positions = {
+                0.0f, 0.0f, 0.0f,
+                1.0f, 0.0f, 0.0f,
+                1.0f, 1.0f, 0.0f,
+                0.0f, 1.0f, 0.0f
+        };
+        float[] uvs = {
+                0.25f, 0.50f,
+                0.50f, 0.50f,
+                0.50f, 0.75f,
+                0.25f, 0.75f
+        };
+        DynamicEntitySnapshot snapshot = new DynamicEntitySnapshot(
+                2L,
+                "minecraft:overworld",
+                "minecraft:spider",
+                0.0,
+                0.0,
+                0.0,
+                positions,
+                uvs
+        );
+
+        uvs[0] = 9.0f;
+        assertArrayEquals(new float[]{
+                0.25f, 0.50f,
+                0.50f, 0.50f,
+                0.50f, 0.75f,
+                0.25f, 0.75f
+        }, snapshot.copyQuadUvs());
+    }
+
+    @Test
     void rejectsNonQuadGeometry() {
         assertThrows(IllegalArgumentException.class, () -> new DynamicEntitySnapshot(
                 1L,
