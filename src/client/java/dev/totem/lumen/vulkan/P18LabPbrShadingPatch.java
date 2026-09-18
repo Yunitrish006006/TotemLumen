@@ -620,11 +620,10 @@ final class P18LabPbrShadingPatch {
         if (start < 0) {
             throw new IllegalStateException("P18C shader marker missing: GI composite");
         }
-        int end = source.indexOf("\n                }", start);
+        int end = source.indexOf("void main() {", start);
         if (end < 0) {
-            throw new IllegalStateException("P18C shader marker missing: GI composite end");
+            throw new IllegalStateException("P18C shader marker missing: main after GI composite");
         }
-        end += "\n                }".length();
 
         String composite = source.substring(start, end);
         composite = replaceRequiredOnce(
