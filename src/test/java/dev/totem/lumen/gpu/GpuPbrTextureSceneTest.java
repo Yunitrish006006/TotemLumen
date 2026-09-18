@@ -181,6 +181,43 @@ final class GpuPbrTextureSceneTest {
     }
 
     @Test
+    void suppressesCoarseBlockEmissionOnCampfireWoodButNotFlame() {
+        String logSprite = "minecraft:block/campfire_log_lit";
+        String fireSprite = "minecraft:block/campfire_fire";
+        int logHandle = PbrTextureHandleRegistry.handleFor(logSprite);
+        int fireHandle = PbrTextureHandleRegistry.handleFor(fireSprite);
+
+        PbrImage still = new PbrImage(1, 1, new int[]{0xFFFFFFFF});
+        ByteBuffer buffer = ByteBuffer
+                .allocate((int) GpuPbrTextureScene.MAX_STORAGE_BYTES)
+                .order(ByteOrder.LITTLE_ENDIAN);
+
+        GpuPbrTextureScene.pack(
+                buffer,
+                0,
+                List.of(
+                        new PbrTextureData(logSprite, still, null, null),
+                        new PbrTextureData(fireSprite, still, null, null)
+                )
+        );
+
+        int logDescriptor = GpuPbrTextureScene.DESCRIPTOR_BASE_WORD
+                + logHandle * GpuPbrTextureScene.DESCRIPTOR_WORDS_PER_RECORD;
+        int fireDescriptor = GpuPbrTextureScene.DESCRIPTOR_BASE_WORD
+                + fireHandle * GpuPbrTextureScene.DESCRIPTOR_WORDS_PER_RECORD;
+
+        int logFlags = buffer.getInt((logDescriptor + 3) * Integer.BYTES);
+        int fireFlags = buffer.getInt((fireDescriptor + 3) * Integer.BYTES);
+
+        assertNotEquals(0, logFlags & GpuPbrTextureScene.FLAG_SUPPRESS_BLOCK_EMISSION);
+        assertEquals(0, fireFlags & GpuPbrTextureScene.FLAG_SUPPRESS_BLOCK_EMISSION);
+        assertTrue(GpuPbrTextureScene.suppressesBaselineBlockEmission("minecraft:block/campfire_log"));
+        assertTrue(GpuPbrTextureScene.suppressesBaselineBlockEmission("minecraft:block/soul_campfire_log_lit"));
+        assertFalse(GpuPbrTextureScene.suppressesBaselineBlockEmission(fireSprite));
+        assertFalse(GpuPbrTextureScene.suppressesBaselineBlockEmission("minecraft:block/glowstone"));
+    }
+
+    @Test
     void boundsLargeTexturesWithoutChangingAspectClass() {
         var dims = GpuPbrTextureScene.boundedDimensions(512, 256);
         assertEquals(128, dims.width());

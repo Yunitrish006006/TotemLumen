@@ -353,8 +353,18 @@ public final class P14ShaderCompileVerifier {
         );
         requireSourceMarker(
                 source,
-                "surface.emission += surface.albedo * (emissionStrength * 1.6);",
-                label + " LabPBR emission"
+                "surface.emission = surface.albedo * (emissionStrength * 1.6);",
+                label + " LabPBR per-texel emission"
+        );
+        requireSourceMarker(
+                source,
+                "surface.emission = vec3(0.0);",
+                label + " coarse block-emission suppression"
+        );
+        requireSourceMarker(
+                source,
+                "P18_TEXTURE_FLAG_SUPPRESS_BLOCK_EMISSION",
+                label + " mixed-material emission mask"
         );
         if (!reflectionPass) {
             requireSourceMarker(
@@ -383,7 +393,8 @@ public final class P14ShaderCompileVerifier {
         System.out.println(
                 "P18 LabPBR shading verification PASS (" + label + "): "
                         + "albedo=true, normal=true, ao=true, roughness=true, f0=true, "
-                        + "metal=true, emission=true, reflectionShared=" + reflectionPass
+                        + "metal=true, emission=true, blockEmissionSeparated=true, reflectionShared="
+                        + reflectionPass
         );
     }
 

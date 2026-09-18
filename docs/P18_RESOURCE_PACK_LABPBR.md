@@ -161,6 +161,18 @@ This alpha test occurs after geometric triangle/AABB intersection but before the
 accepted, so primary rays, Sun/Moon shadows, local-light shadows, GI and P16 reflection see the same
 coverage silhouette. True glass/water volume/interface transmission remains owned by P15/P14E.
 
+## Surface emission separation
+
+Block light emission and visible surface self-emission are separate concerns.
+
+The voxel/material table still keeps a block's Minecraft light-emission level so campfires, lamps and other light sources continue to illuminate nearby geometry. P18 surface shading then resolves self-emission per textured surface:
+
+- when a LabPBR specular map exists, its per-texel emissive channel is authoritative and coarse BlockState emission is not added underneath;
+- vanilla campfire wood sprites (`campfire_log`, `campfire_log_lit`, `soul_campfire_log_lit`) explicitly suppress coarse BlockState self-emission;
+- campfire flame sprites remain eligible for the vanilla block-emission fallback when no LabPBR emissive map is present.
+
+This prevents the entire campfire model from glowing while preserving its local-light contribution and animated flame emission.
+
 ## Animated textures
 
 Animated Minecraft textures are part of the P18 texture scene rather than a per-frame CPU upload.

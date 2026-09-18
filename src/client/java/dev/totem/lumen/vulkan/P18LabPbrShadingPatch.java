@@ -28,6 +28,7 @@ final class P18LabPbrShadingPatch {
         String declarations = ("""
                 const uint P18_TEXTURE_FLAG_HAS_NORMAL = %du;
                 const uint P18_TEXTURE_FLAG_HAS_SPECULAR = %du;
+                const uint P18_TEXTURE_FLAG_SUPPRESS_BLOCK_EMISSION = %du;
 
                 struct P18SurfaceSample {
                     uint textured;
@@ -51,7 +52,8 @@ final class P18LabPbrShadingPatch {
 
                 """).formatted(
                 GpuPbrTextureScene.FLAG_HAS_NORMAL,
-                GpuPbrTextureScene.FLAG_HAS_SPECULAR
+                GpuPbrTextureScene.FLAG_HAS_SPECULAR,
+                GpuPbrTextureScene.FLAG_SUPPRESS_BLOCK_EMISSION
         );
         source = source.replace(declarationMarker, declarations + declarationMarker);
 
@@ -408,6 +410,9 @@ final class P18LabPbrShadingPatch {
 
                     surface.textured = 1u;
                     uint flags = scene.data[descriptor + 3u];
+                    if ((flags & P18_TEXTURE_FLAG_SUPPRESS_BLOCK_EMISSION) != 0u) {
+                        surface.emission = vec3(0.0);
+                    }
                     uint albedoArgb = p18SampleTextureWord(surface.textureHandle, surface.uv, 0u);
                     surface.albedo = p18ArgbRgb(albedoArgb);
 
@@ -429,6 +434,9 @@ final class P18LabPbrShadingPatch {
                     }
 
                     if ((flags & P18_TEXTURE_FLAG_HAS_SPECULAR) != 0u) {
+                        // Once a LabPBR specular map exists, its per-texel emissive channel is
+                        // authoritative. Do not add coarse BlockState emission underneath it.
+                        surface.emission = vec3(0.0);
                         uint specularArgb = p18SampleTextureWord(surface.textureHandle, surface.uv, 2u);
                         float smoothness = float((specularArgb >> 16u) & 255u) / 255.0;
                         surface.roughness = (1.0 - smoothness) * (1.0 - smoothness);
@@ -445,7 +453,7 @@ final class P18LabPbrShadingPatch {
                         uint emissive = (specularArgb >> 24u) & 255u;
                         if (emissive > 0u && emissive < 255u) {
                             float emissionStrength = float(emissive) / 254.0;
-                            surface.emission += surface.albedo * (emissionStrength * 1.6);
+                            surface.emission = surface.albedo * (emissionStrength * 1.6);
                         }
                     }
 
@@ -488,7 +496,7 @@ final class P18LabPbrShadingPatch {
         TotemLumenClient.LOGGER.info(
                 "P18C LabPBR shading active: albedo=true, normal=true, ao=true, roughness=true, "
                         + "dielectricF0=true, hardcodedMetals=230..237, customMetalFallback=true, "
-                        + "emission=true"
+                        + "emission=true, perTexelEmissionAuthoritative=true, mixedSurfaceBlockEmission=true"
         );
         return source;
     }
