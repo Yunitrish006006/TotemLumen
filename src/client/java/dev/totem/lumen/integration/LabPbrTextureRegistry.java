@@ -4,6 +4,7 @@ import com.mojang.blaze3d.platform.NativeImage;
 import dev.totem.lumen.TotemLumenClient;
 import dev.totem.lumen.material.PbrImage;
 import dev.totem.lumen.material.PbrTextureData;
+import dev.totem.lumen.material.PbrTextureHandleRegistry;
 import net.minecraft.client.Minecraft;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.packs.resources.ResourceManager;
@@ -54,6 +55,14 @@ public final class LabPbrTextureRegistry {
 
     public static void observeSprite(String spriteId) {
         if (spriteId == null || spriteId.isBlank()) return;
+        int handle = PbrTextureHandleRegistry.handleFor(spriteId);
+        if (handle < 0) {
+            TotemLumenClient.LOGGER.warn(
+                    "P18 texture-handle capacity exceeded; ignoring sprite {}",
+                    spriteId
+            );
+            return;
+        }
         KNOWN_SPRITES.add(spriteId);
         if (!TEXTURES.containsKey(spriteId) && QUEUED_SPRITES.add(spriteId)) {
             LOAD_QUEUE.add(spriteId);
