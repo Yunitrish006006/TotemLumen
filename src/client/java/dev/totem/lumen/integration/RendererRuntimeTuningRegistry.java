@@ -50,7 +50,11 @@ public final class RendererRuntimeTuningRegistry {
             float lavaEmissionStrength,
             float localAmbient,
             float surfaceEmissionGain,
-            float giDisplayGain
+            float giDisplayGain,
+            float waterReflectionRoughness,
+            float lavaReflectionRoughness,
+            float waterReflectionScale,
+            float lavaReflectionScale
     ) {
         public static final Values DEFAULT = new Values(
                 2.4f,
@@ -72,7 +76,11 @@ public final class RendererRuntimeTuningRegistry {
                 1.00f, 0.12f, 0.015f, 1.0f,
                 0.045f,
                 1.6f,
-                1.35f
+                1.35f,
+                0.025f,
+                0.32f,
+                1.0f,
+                1.0f
         );
 
         public Values {
@@ -107,6 +115,10 @@ public final class RendererRuntimeTuningRegistry {
             localAmbient = finite(localAmbient, 0.0f, 1.0f, "localAmbient");
             surfaceEmissionGain = finite(surfaceEmissionGain, 0.0f, 8.0f, "surfaceEmissionGain");
             giDisplayGain = finite(giDisplayGain, 0.0f, 8.0f, "giDisplayGain");
+            waterReflectionRoughness = normalized(waterReflectionRoughness, "waterReflectionRoughness");
+            lavaReflectionRoughness = normalized(lavaReflectionRoughness, "lavaReflectionRoughness");
+            waterReflectionScale = finite(waterReflectionScale, 0.0f, 4.0f, "waterReflectionScale");
+            lavaReflectionScale = finite(lavaReflectionScale, 0.0f, 4.0f, "lavaReflectionScale");
         }
 
         private static float normalized(float value, String name) {
@@ -203,7 +215,11 @@ public final class RendererRuntimeTuningRegistry {
                         readFloat(object, "lava_emission_strength", d.lavaEmissionStrength()),
                         readFloat(object, "local_ambient", d.localAmbient()),
                         readFloat(object, "surface_emission_gain", d.surfaceEmissionGain()),
-                        readFloat(object, "gi_display_gain", d.giDisplayGain())
+                        readFloat(object, "gi_display_gain", d.giDisplayGain()),
+                        readFloat(object, "water_reflection_roughness", d.waterReflectionRoughness()),
+                        readFloat(object, "lava_reflection_roughness", d.lavaReflectionRoughness()),
+                        readFloat(object, "water_reflection_scale", d.waterReflectionScale()),
+                        readFloat(object, "lava_reflection_scale", d.lavaReflectionScale())
                 );
             }
         } catch (Throwable failure) {
