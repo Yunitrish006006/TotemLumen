@@ -313,27 +313,33 @@ final class P15GlassTransmissionPatch {
         String local = source.substring(localStart, localEnd);
         local = replaceRequiredOnce(
                 local,
+                "float sampleLighting = 0.0;",
+                "vec3 sampleLighting = vec3(0.0);",
+                "area light sample accumulator"
+        );
+        local = replaceRequiredOnce(
+                local,
                 "float visibility = 1.0;",
                 "vec3 lightTransmission = vec3(1.0);",
-                "local light visibility declaration"
+                "local area light visibility declaration"
         );
         local = replaceRequiredOnce(
                 local,
                 "HitResult blocker = traceRayLimited(shadowOrigin, lightDirection, shadowMaxDistance);",
                 "lightTransmission = p15RayTransmission(shadowOrigin, lightDirection, shadowMaxDistance);",
-                "local light blocker trace"
+                "local area light blocker trace"
         );
         local = replaceRequiredOnce(
                 local,
                 "visibility = blocker.hit == 0u ? 1.0 : 0.0;",
                 "// P15 RGB transmission already includes visibility and stained-glass tint.",
-                "local light blocker result"
+                "local area light blocker result"
         );
         local = replaceRequiredOnce(
                 local,
-                "lighting += lightColor * (2.4 * nDotL * attenuation * intensity * visibility);",
-                "lighting += lightColor * lightTransmission * (2.4 * nDotL * attenuation * intensity);",
-                "local light accumulation"
+                "sampleLighting += nDotL * emitterCosine * attenuation * visibility;",
+                "sampleLighting += lightTransmission * (nDotL * emitterCosine * attenuation);",
+                "local area light sample accumulation"
         );
         return source.substring(0, localStart) + local + source.substring(localEnd);
     }
