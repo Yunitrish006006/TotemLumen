@@ -28,7 +28,6 @@ final class P18LabPbrShadingPatch {
         String declarations = ("""
                 const uint P18_TEXTURE_FLAG_HAS_NORMAL = %du;
                 const uint P18_TEXTURE_FLAG_HAS_SPECULAR = %du;
-                const uint P18_TEXTURE_FLAG_SUPPRESS_BLOCK_EMISSION = %du;
 
                 struct P18SurfaceSample {
                     uint textured;
@@ -52,8 +51,7 @@ final class P18LabPbrShadingPatch {
 
                 """).formatted(
                 GpuPbrTextureScene.FLAG_HAS_NORMAL,
-                GpuPbrTextureScene.FLAG_HAS_SPECULAR,
-                GpuPbrTextureScene.FLAG_SUPPRESS_BLOCK_EMISSION
+                GpuPbrTextureScene.FLAG_HAS_SPECULAR
         );
         source = source.replace(declarationMarker, declarations + declarationMarker);
 
@@ -410,16 +408,21 @@ final class P18LabPbrShadingPatch {
 
                     surface.textured = 1u;
                     uint flags = scene.data[descriptor + 3u];
-                    if ((flags & P18_TEXTURE_FLAG_SUPPRESS_BLOCK_EMISSION) != 0u) {
-                        surface.emission = vec3(0.0);
-                    }
+                    float baselineEmissionScale = uintBitsToFloat(scene.data[descriptor + 11u]);
+                    float labPbrEmissionScale = uintBitsToFloat(scene.data[descriptor + 12u]);
+                    float roughnessScale = uintBitsToFloat(scene.data[descriptor + 13u]);
+                    float normalStrength = uintBitsToFloat(scene.data[descriptor + 14u]);
+                    surface.emission *= baselineEmissionScale;
+
                     uint albedoArgb = p18SampleTextureWord(surface.textureHandle, surface.uv, 0u);
                     surface.albedo = p18ArgbRgb(albedoArgb);
 
                     if ((flags & P18_TEXTURE_FLAG_HAS_NORMAL) != 0u) {
                         uint normalArgb = p18SampleTextureWord(surface.textureHandle, surface.uv, 1u);
-                        float normalX = float((normalArgb >> 16u) & 255u) / 255.0 * 2.0 - 1.0;
-                        float normalY = 1.0 - float((normalArgb >> 8u) & 255u) / 255.0 * 2.0;
+                        float normalX = (float((normalArgb >> 16u) & 255u) / 255.0 * 2.0 - 1.0)
+                                * normalStrength;
+                        float normalY = (1.0 - float((normalArgb >> 8u) & 255u) / 255.0 * 2.0)
+                                * normalStrength;
                         float normalZ = sqrt(max(
                             0.0,
                             1.0 - normalX * normalX - normalY * normalY
@@ -453,10 +456,12 @@ final class P18LabPbrShadingPatch {
                         uint emissive = (specularArgb >> 24u) & 255u;
                         if (emissive > 0u && emissive < 255u) {
                             float emissionStrength = float(emissive) / 254.0;
-                            surface.emission = surface.albedo * (emissionStrength * 1.6);
+                            surface.emission = surface.albedo
+                                    * (emissionStrength * 1.6 * labPbrEmissionScale);
                         }
                     }
 
+                    surface.roughness = clamp(surface.roughness * roughnessScale, 0.0, 1.0);
                     return surface;
                 }
 
@@ -496,7 +501,7 @@ final class P18LabPbrShadingPatch {
         TotemLumenClient.LOGGER.info(
                 "P18C LabPBR shading active: albedo=true, normal=true, ao=true, roughness=true, "
                         + "dielectricF0=true, hardcodedMetals=230..237, customMetalFallback=true, "
-                        + "emission=true, perTexelEmissionAuthoritative=true, mixedSurfaceBlockEmission=true"
+                        + "emission=true, stableRuntimeMaterialScalars=true, perTexelEmissionAuthoritative=true"
         );
         return source;
     }
