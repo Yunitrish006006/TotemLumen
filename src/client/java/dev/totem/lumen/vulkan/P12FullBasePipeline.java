@@ -160,8 +160,9 @@ public final class P12FullBasePipeline {
     /**
      * Rebuilds the staged full-renderer pipelines for the currently attached scene.
      *
-     * <p>The small bootstrap pipeline remains available while P12-P15 recompiles. P17 and P16 are
-     * restarted only after the new full base succeeds, matching normal startup ordering.</p>
+     * <p>The small bootstrap pipeline remains an internal compilation fallback while P12-P15
+     * recompiles, but it is not composited to the player. Minecraft's normal world render remains
+     * visible until the new full base succeeds. P17 and P16 are then restarted in normal order.</p>
      *
      * @return true when a rebuild was started; false when no live Vulkan scene is attached
      */
@@ -175,7 +176,9 @@ public final class P12FullBasePipeline {
             return false;
         }
 
-        TotemLumenClient.LOGGER.info("Manual renderer pipeline recompile requested");
+        TotemLumenClient.LOGGER.info(
+                "Manual renderer pipeline recompile requested; Minecraft vanilla/resource-pack presentation remains visible until full base is ready"
+        );
         shutdown();
         attach(device, scene);
         return true;

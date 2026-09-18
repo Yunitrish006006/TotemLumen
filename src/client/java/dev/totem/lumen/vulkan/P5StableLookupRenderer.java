@@ -987,6 +987,19 @@ public final class P5StableLookupRenderer {
         activeRenderWidth = targetWidth;
         activeRenderHeight = targetHeight;
 
+        // Resources/bootstrap exist only to give the full P12-P18 pipeline a live Vulkan scene
+        // to compile against. Do not expose the simplified bootstrap renderer to the player.
+        // Minecraft's own renderer (and the player's currently selected resource pack) stays
+        // visible until the complete material-aware base pipeline is ready.
+        if (!P12FullBasePipeline.ready()) {
+            ready = false;
+            historyValid = false;
+            historyReadIndex = -1;
+            lastCompletedFrame = null;
+            lastCompletedMode = null;
+            return;
+        }
+
         if (!frame.dimensionId().equals(dimensionId)) {
             resetSceneSlots();
             dimensionId = frame.dimensionId();
@@ -1097,7 +1110,9 @@ public final class P5StableLookupRenderer {
     public static void drawHud(GuiGraphicsExtractor graphics) {
         if (!RendererSettings.rendererEnabled()) return;
         Resources r = resources;
-        if (!ready || r == null || r.view.isClosed()) {
+        if (!P12FullBasePipeline.ready() || !ready || r == null || r.view.isClosed()) {
+            // No Totem composite here: leaving the HUD untouched exposes Minecraft's normal
+            // world render as the intentional startup/recompile fallback.
             P5WorldDebugComposite.drawHud(graphics);
             return;
         }
