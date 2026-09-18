@@ -132,7 +132,9 @@ cache/totem-lumen/vulkan-pipelines/<gpu-driver-identity>.bin
 
 The SPIR-V cache is keyed by the complete generated GLSL source, target environment and optimization mode, so any shader change invalidates only the affected entry automatically. The Vulkan pipeline cache is keyed by vendor/device/driver/pipeline-cache UUID and is shared by all Totem compute pipelines for the lifetime of the client session.
 
-Logs report SPIR-V HIT/MISS, Vulkan pipeline-cache session HIT/MISS and per-pipeline driver creation time. These timings are the baseline for deciding whether later work should target shader generation, MoltenVK/Metal compilation or pipeline concurrency.
+Logs report SPIR-V HIT/MISS, Vulkan pipeline-cache session HIT/MISS and per-pipeline driver creation time. These timings are the baseline for deciding whether later work should target shader generation or MoltenVK/Metal compilation.
+
+The shared Vulkan pipeline cache does not serialize the whole `vkCreateComputePipelines` call. Independent player/entity and reflection builds may enter driver compilation concurrently; cache serialization to disk is deferred until all active builds finish. This matters most on a first-run MoltenVK compile, where one large pipeline can otherwise occupy the driver compiler for many minutes.
 
 ### Compile progress HUD
 
