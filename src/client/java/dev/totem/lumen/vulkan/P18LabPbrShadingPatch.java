@@ -482,7 +482,9 @@ final class P18LabPbrShadingPatch {
                         if (emissive > 0u && emissive < 255u) {
                             float emissionStrength = float(emissive) / 254.0;
                             surface.emission = surface.albedo
-                                    * (emissionStrength * 1.6 * labPbrEmissionScale);
+                                    * (emissionStrength
+                                    * uintBitsToFloat(scene.data[83])
+                                    * labPbrEmissionScale);
                         }
                     }
 
@@ -499,7 +501,8 @@ final class P18LabPbrShadingPatch {
                     vec3 normal = resolvedSurfaceNormal(hit, rayDirection);
                     vec3 albedo = materialColor(hit.materialId);
                     vec4 emission = materialEmission(hit.materialId);
-                    vec3 emitted = emission.rgb * emission.a * 1.6;
+                    vec3 emitted = emission.rgb * emission.a
+                            * uintBitsToFloat(scene.data[83]);
                 """,
                 """
                     P18SurfaceSample p18Surface = p18ResolveSurface(hit, rayOrigin, rayDirection);
@@ -643,7 +646,7 @@ final class P18LabPbrShadingPatch {
         );
         local = replaceRequiredOnce(
                 local,
-                "return packRgba(materialColor(hit.materialId) * 0.05 + emitted, 255u);",
+                "return packRgba(materialColor(hit.materialId) * uintBitsToFloat(scene.data[82]) + emitted, 255u);",
                 "return packRgba(p18Diffuse * (uintBitsToFloat(scene.data[82]) * p18Surface.ao) + emitted, 255u);",
                 "local light no-section fallback"
         );
@@ -655,7 +658,7 @@ final class P18LabPbrShadingPatch {
         );
         local = replaceRequiredOnce(
                 local,
-                "vec3 lighting = vec3(0.045);",
+                "vec3 lighting = vec3(uintBitsToFloat(scene.data[82]));",
                 "vec3 lighting = vec3(uintBitsToFloat(scene.data[82]) * p18Surface.ao);",
                 "local light ambient AO"
         );
