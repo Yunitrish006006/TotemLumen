@@ -41,7 +41,9 @@ public final class LabPbr13Decoder {
         float roughness = oneMinusSmoothness * oneMinusSmoothness;
 
         boolean metal = green >= METAL_MIN;
-        float dielectricF0 = metal ? 0.0f : (green / (float) DIELECTRIC_MAX) * 0.08f;
+        // LabPBR 1.3 stores dielectric F0 linearly in the raw green channel.
+        // Values 0..229 therefore map directly to 0/255..229/255.
+        float dielectricF0 = metal ? 0.0f : green / 255.0f;
         int metalCode = metal ? green : 0;
 
         float porosity = blue <= 64 ? blue / 64.0f : 0.0f;
