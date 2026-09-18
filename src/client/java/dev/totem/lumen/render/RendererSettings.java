@@ -108,6 +108,7 @@ public final class RendererSettings {
             .resolve("totem-lumen.properties");
     private static final AtomicLong REVISION = new AtomicLong();
 
+    private static boolean rendererEnabled = true;
     private static Quality giQuality = Quality.BALANCED;
     private static Quality shadowQuality = Quality.BALANCED;
     private static int rayDistance = 256;
@@ -128,6 +129,7 @@ public final class RendererSettings {
         Properties properties = new Properties();
         try (InputStream input = Files.newInputStream(CONFIG_PATH)) {
             properties.load(input);
+            rendererEnabled = parseBoolean(properties, "rendererEnabled", rendererEnabled);
             giQuality = parseEnum(properties, "giQuality", Quality.class, giQuality);
             shadowQuality = parseEnum(properties, "shadowQuality", Quality.class, shadowQuality);
             rayDistance = sanitizeRayDistance(parseInt(properties, "rayDistance", rayDistance));
@@ -160,7 +162,8 @@ public final class RendererSettings {
             );
 
             TotemLumenClient.LOGGER.info(
-                    "Loaded renderer settings: gi={}, shadows={}, rayDistance={}, resolution={}, reflections={}, waterReflections={}, reflectionBounces={}, reflectionDistance={}, temporal={}, denoise={}",
+                    "Loaded renderer settings: rendererEnabled={}, gi={}, shadows={}, rayDistance={}, resolution={}, reflections={}, waterReflections={}, reflectionBounces={}, reflectionDistance={}, temporal={}, denoise={}",
+                    rendererEnabled,
                     giQuality,
                     shadowQuality,
                     rayDistance,
@@ -179,6 +182,16 @@ public final class RendererSettings {
 
     public static long revision() {
         return REVISION.get();
+    }
+
+    public static synchronized boolean rendererEnabled() {
+        return rendererEnabled;
+    }
+
+    public static synchronized boolean toggleRendererEnabled() {
+        rendererEnabled = !rendererEnabled;
+        changed();
+        return rendererEnabled;
     }
 
     public static synchronized Quality giQuality() {
@@ -351,6 +364,7 @@ public final class RendererSettings {
 
     private static void save() {
         Properties properties = new Properties();
+        properties.setProperty("rendererEnabled", Boolean.toString(rendererEnabled));
         properties.setProperty("giQuality", giQuality.name());
         properties.setProperty("shadowQuality", shadowQuality.name());
         properties.setProperty("rayDistance", Integer.toString(rayDistance));
