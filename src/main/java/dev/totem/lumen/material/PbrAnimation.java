@@ -50,7 +50,12 @@ public final class PbrAnimation {
     }
 
     public int frameAtTick(int tick) {
-        return timelineFrames[Math.floorMod(tick, timelineFrames.length)];
+        return frameAtTick((long) tick);
+    }
+
+    public int frameAtTick(long tick) {
+        int index = (int) Math.floorMod(tick, (long) timelineFrames.length);
+        return timelineFrames[index];
     }
 
     public int[] copyTimelineFrames() {
