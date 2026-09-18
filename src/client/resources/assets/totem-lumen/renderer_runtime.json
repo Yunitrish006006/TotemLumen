@@ -19,5 +19,9 @@
   "lava_emission_strength": 1.0,
   "local_ambient": 0.045,
   "surface_emission_gain": 1.6,
-  "gi_display_gain": 1.35
+  "gi_display_gain": 1.35,
+  "water_reflection_roughness": 0.025,
+  "lava_reflection_roughness": 0.32,
+  "water_reflection_scale": 1.0,
+  "lava_reflection_scale": 1.0
 }
