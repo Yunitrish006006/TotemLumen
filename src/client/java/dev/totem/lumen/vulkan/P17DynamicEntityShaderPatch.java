@@ -13,8 +13,7 @@ import dev.totem.lumen.gpu.GpuDynamicEntityScene;
  * reflection rather than creating feature-specific entity geometry paths.</p>
  */
 final class P17DynamicEntityShaderPatch {
-    static final int ENTITY_MATERIAL_ID = 0xFFFE;
-    static final int SPIDER_ENTITY_MATERIAL_ID = 0xFFFD;
+    static final int ENTITY_MATERIAL_BASE = 0xFF00;
 
     private P17DynamicEntityShaderPatch() {
     }
@@ -34,10 +33,10 @@ final class P17DynamicEntityShaderPatch {
         }
 
         String helpers = ("""
-                const uint P17_ENTITY_MATERIAL_ID = 0xFFFEu;
-                const uint P17_SPIDER_ENTITY_MATERIAL_ID = 0xFFFDu;
-                const uint P17_ENTITY_ABI_VERSION = 2u;
-                const uint P17_ENTITY_FLAG_SPIDER_EYES = %du;
+                const uint P17_ENTITY_MATERIAL_BASE = 0xFF00u;
+                const uint P17_ENTITY_ABI_VERSION = 3u;
+                const uint P17_ENTITY_MATERIAL_FLAG_HAS_EMISSIVE = %du;
+                const uint P17_MAX_ENTITY_MATERIALS = %du;
                 const uint P17_MAX_ENTITIES = %du;
                 const uint P17_SECTION_LOOKUP_CAPACITY = %du;
                 const uint P17_SECTION_LOOKUP_MASK = %du;
@@ -46,7 +45,9 @@ final class P17DynamicEntityShaderPatch {
                 const uint P17_SECTION_BUCKET_WORDS = %du;
                 const uint P17_ENTITY_DESCRIPTOR_BASE = %du;
                 const uint P17_SECTION_LOOKUP_BASE = %du;
-                const uint P17_SPIDER_EYE_POOL_BASE = %du;
+                const uint P17_ENTITY_MATERIAL_BASE_WORD = %du;
+                const uint P17_ENTITY_MATERIAL_WORDS = %du;
+                const uint P17_ENTITY_TEXTURE_POOL_BASE = %du;
                 const uint P17_QUAD_POOL_BASE = %du;
                 const uint P17_QUAD_WORDS = %du;
                 const uint P17_P14_MAX_STORAGE_WORDS = %du;
@@ -113,16 +114,52 @@ final class P17DynamicEntityShaderPatch {
                     ) / 255.0;
                 }
 
-                uint p17SpiderEyeArgb(uint entityBase, vec2 uv) {
-                    uint width = scene.data[entityBase + 8u];
-                    uint height = scene.data[entityBase + 9u];
+                bool p17IsEntityMaterial(uint materialId) {
+                    return materialId >= P17_ENTITY_MATERIAL_BASE
+                            && materialId < P17_ENTITY_MATERIAL_BASE + P17_MAX_ENTITY_MATERIALS;
+                }
+
+                uint p17EntityMaterialIndex(uint materialId) {
+                    return materialId - P17_ENTITY_MATERIAL_BASE;
+                }
+
+                uint p17EntityMaterialDescriptor(uint entityBase, uint materialIndex) {
+                    uint materialCount = scene.data[entityBase + 8u];
+                    if (materialIndex >= materialCount || materialIndex >= P17_MAX_ENTITY_MATERIALS) {
+                        return 0u;
+                    }
+                    return entityBase + P17_ENTITY_MATERIAL_BASE_WORD
+                            + materialIndex * P17_ENTITY_MATERIAL_WORDS;
+                }
+
+                uint p17EntityEmissiveArgb(
+                        uint entityBase,
+                        uint materialIndex,
+                        vec2 uv
+                ) {
+                    uint descriptor = p17EntityMaterialDescriptor(entityBase, materialIndex);
+                    if (descriptor == 0u) return 0u;
+                    uint flags = scene.data[descriptor];
+                    if ((flags & P17_ENTITY_MATERIAL_FLAG_HAS_EMISSIVE) == 0u) return 0u;
+
+                    uint texelOffset = scene.data[descriptor + 1u];
+                    uint width = scene.data[descriptor + 2u];
+                    uint height = scene.data[descriptor + 3u];
                     if (width == 0u || height == 0u) return 0u;
+
                     vec2 wrapped = fract(uv);
                     uint x = min(width - 1u, uint(floor(wrapped.x * float(width))));
                     uint y = min(height - 1u, uint(floor(wrapped.y * float(height))));
                     return scene.data[
-                        entityBase + P17_SPIDER_EYE_POOL_BASE + y * width + x
+                        entityBase + P17_ENTITY_TEXTURE_POOL_BASE
+                        + texelOffset + y * width + x
                     ];
+                }
+
+                float p17EntityEmissiveGain(uint entityBase, uint materialIndex) {
+                    uint descriptor = p17EntityMaterialDescriptor(entityBase, materialIndex);
+                    if (descriptor == 0u) return 0.0;
+                    return max(uintBitsToFloat(scene.data[descriptor + 4u]), 0.0);
                 }
 
                 bool p17IntersectAabb(
@@ -278,11 +315,12 @@ final class P17DynamicEntityShaderPatch {
                                 min(maxDistance, bestDistance)
                         )) continue;
 
-                        uint entityFlags = scene.data[descriptor + 16u];
+                        uint entityMaterialIndex = min(
+                            scene.data[descriptor + 16u],
+                            P17_MAX_ENTITY_MATERIALS - 1u
+                        );
                         uint candidateMaterialId =
-                                (entityFlags & P17_ENTITY_FLAG_SPIDER_EYES) != 0u
-                                ? P17_SPIDER_ENTITY_MATERIAL_ID
-                                : P17_ENTITY_MATERIAL_ID;
+                                P17_ENTITY_MATERIAL_BASE + entityMaterialIndex;
                         uint firstQuad = scene.data[descriptor + 14u];
                         uint quadCount = scene.data[descriptor + 15u];
                         for (uint quadIndex = 0u; quadIndex < quadCount; quadIndex++) {
@@ -427,7 +465,8 @@ final class P17DynamicEntityShaderPatch {
                 }
 
                 """).formatted(
-                GpuDynamicEntityScene.FLAG_SPIDER_EYES,
+                GpuDynamicEntityScene.ENTITY_MATERIAL_FLAG_HAS_EMISSIVE,
+                GpuDynamicEntityScene.MAX_ENTITY_MATERIALS,
                 GpuDynamicEntityScene.MAX_ENTITIES,
                 GpuDynamicEntityScene.SECTION_LOOKUP_CAPACITY,
                 GpuDynamicEntityScene.SECTION_LOOKUP_CAPACITY - 1,
@@ -436,7 +475,9 @@ final class P17DynamicEntityShaderPatch {
                 GpuDynamicEntityScene.SECTION_BUCKET_WORDS,
                 GpuDynamicEntityScene.ENTITY_DESCRIPTOR_BASE_WORD,
                 GpuDynamicEntityScene.SECTION_LOOKUP_BASE_WORD,
-                GpuDynamicEntityScene.SPIDER_EYE_POOL_BASE_WORD,
+                GpuDynamicEntityScene.ENTITY_MATERIAL_BASE_WORD,
+                GpuDynamicEntityScene.ENTITY_MATERIAL_WORDS_PER_RECORD,
+                GpuDynamicEntityScene.ENTITY_TEXTURE_POOL_BASE_WORD,
                 GpuDynamicEntityScene.QUAD_POOL_BASE_WORD,
                 GpuDynamicEntityScene.QUAD_WORDS_PER_RECORD,
                 P14ModelMeshGpuLayout.MAX_STORAGE_WORDS
@@ -448,8 +489,7 @@ final class P17DynamicEntityShaderPatch {
                         vec4 optical = p15MaterialTransmission(candidate.materialId, geometryCode);
                 """;
         String p15EntityOpaque = """
-                        if (candidate.materialId == P17_ENTITY_MATERIAL_ID
-                                || candidate.materialId == P17_SPIDER_ENTITY_MATERIAL_ID) {
+                        if (p17IsEntityMaterial(candidate.materialId)) {
                             candidate.distance += traveled;
                             result.hit = candidate;
                             return result;
@@ -469,17 +509,24 @@ final class P17DynamicEntityShaderPatch {
                     // P14E/P17 synthetic materials intentionally keep their dedicated optics.
                     if (hit.materialId >= 0xFFF0u) return surface;
                 """;
-        String p18SpiderEmission = """
-                    if (hit.materialId == P17_SPIDER_ENTITY_MATERIAL_ID) {
-                        surface.albedo = materialColor(P17_ENTITY_MATERIAL_ID);
-                        uint eyeArgb = p17SpiderEyeArgb(
+        String p18EntityMaterial = """
+                    if (p17IsEntityMaterial(hit.materialId)) {
+                        surface.albedo = materialColor(P17_ENTITY_MATERIAL_BASE);
+                        uint materialIndex = p17EntityMaterialIndex(hit.materialId);
+                        uint emissiveArgb = p17EntityEmissiveArgb(
                             p17EntitySceneBase(),
+                            materialIndex,
                             p17UnpackUv(hit.steps)
                         );
-                        float eyeAlpha = float((eyeArgb >> 24u) & 255u) / 255.0;
-                        surface.emission = eyeAlpha > 0.0
-                                ? p17ArgbRgb(eyeArgb)
-                                        * eyeAlpha
+                        float emissiveAlpha = float((emissiveArgb >> 24u) & 255u) / 255.0;
+                        float emissiveGain = p17EntityEmissiveGain(
+                            p17EntitySceneBase(),
+                            materialIndex
+                        );
+                        surface.emission = emissiveAlpha > 0.0
+                                ? p17ArgbRgb(emissiveArgb)
+                                        * emissiveAlpha
+                                        * emissiveGain
                                         * max(uintBitsToFloat(scene.data[89]), 0.0)
                                 : vec3(0.0);
                         return surface;
@@ -491,17 +538,17 @@ final class P17DynamicEntityShaderPatch {
         source = replaceRequiredOnce(
                 source,
                 p18SyntheticMarker,
-                p18SpiderEmission,
-                "P18 spider eye emissive surface"
+                p18EntityMaterial,
+                "P18 generic entity material surface"
         );
 
         TotemLumenClient.LOGGER.info(
-                "P17 dynamic entity shader tracing active: sectionBroadPhase={} buckets, candidatesPerSection={}, maxEntities={}, maxQuads={}, uv=true, spiderEyes=true, materialId=0x{}",
+                "P17 dynamic entity shader tracing active: sectionBroadPhase={} buckets, candidatesPerSection={}, maxEntities={}, maxQuads={}, uv=true, entityMaterials=data, materialBase=0x{}",
                 GpuDynamicEntityScene.SECTION_LOOKUP_CAPACITY,
                 GpuDynamicEntityScene.MAX_ENTITIES_PER_SECTION,
                 GpuDynamicEntityScene.MAX_ENTITIES,
                 GpuDynamicEntityScene.MAX_ENTITY_QUADS,
-                Integer.toHexString(ENTITY_MATERIAL_ID).toUpperCase()
+                Integer.toHexString(ENTITY_MATERIAL_BASE).toUpperCase()
         );
         return source;
     }
