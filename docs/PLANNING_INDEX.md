@@ -8,7 +8,7 @@ This file is the repository index for design plans and decision tables. Architec
 | Renderer phases | [`ROADMAP.md`](ROADMAP.md) | P0+ renderer milestones and runtime validation gates |
 | P13 Overworld moon | [`P13_OVERWORLD_MOON.md`](P13_OVERWORLD_MOON.md) | moon disk, opposite-sun celestial direction, moonlight visibility, phase limitation and runtime gate |
 | P14C generic block models | [`P14C_GENERIC_BLOCK_MODELS.md`](P14C_GENERIC_BLOCK_MODELS.md) | static BlockStateModel quad extraction, generic mesh ABI/GPU layout, geometry-domain completeness matrix and future-proofing rules |
-| P14D block-entity geometry | [`P14D_BLOCK_ENTITY_GEOMETRY.md`](P14D_BLOCK_ENTITY_GEOMETRY.md) | renderer submit capture, static+BE composition, stable mutable mesh ids, model-tail updates, lifecycle and runtime gates |
+| P14D block-entity geometry | [`P14D_BLOCK_ENTITY_GEOMETRY.md`](P14D_BLOCK_ENTITY_GEOMETRY.md) | renderer submit capture, static+BE composition, stable mutable mesh ids, model-tail updates, lifecycle and runtime gates |\n| P14E alpha cutout | [`P14E_ALPHA_CUTOUT.md`](P14E_ALPHA_CUTOUT.md) | sprite-local UV capture, compact alpha masks, shared-ray rejection and runtime gate |
 | P16 reflection / roughness | [`P16_REFLECTION_ROUGHNESS.md`](P16_REFLECTION_ROUGHNESS.md) | surface fallback values, 32-bit voxel packing, Fresnel/reflection model, performance scope and runtime validation |
 | P16 MoltenVK startup stalls | [`P16_MOLTENVK_PIPELINE_STALL.md`](P16_MOLTENVK_PIPELINE_STALL.md) | Alpha 34/35 runtime stalls, non-blocking pipeline prewarm and why waiting/cache alone is insufficient |
 | P16 multi-pass split | [`P16_MULTIPASS_SPLIT.md`](P16_MULTIPASS_SPLIT.md) | Alpha 36 pass boundaries, shared-SSBO synchronization, independent reflection readiness, shader compile policy and fallback semantics |
@@ -41,7 +41,7 @@ This file is the repository index for design plans and decision tables. Architec
 | Specialized BE commands | Model/ModelPart is the generic P14D baseline; text/item/beam/portal/custom command families require explicit adapters rather than being claimed complete |
 | Out-of-cell BE geometry | requires a later instance-bounds/broad-phase extension; owner-voxel DDA is not sufficient for arbitrary protruding models |
 | Fluid geometry | separate renderer domain; exact flowing/sloped surfaces remain pending after P14D |
-| Alpha-cutout geometry | emitted planes are represented; texture-alpha silhouette testing remains pending material integration |
+| Alpha-cutout geometry | P14E stores sprite-local UVs plus deduplicated 32x32 binary masks; transparent texels reject shared camera/shadow/GI/transmission/reflection hits |
 | Out-of-cell / random-offset static models | require instance/broad-phase follow-up; do not destroy mesh dedup by baking position into every mesh id |
 | Reflection baseline | one bounded secondary reflection ray in GI Composite |
 | Roughness | 4-bit full-cube fallback profile; deterministic rough reflection direction |

@@ -81,13 +81,20 @@ public final class MinecraftBlockModelMeshResolver {
         boolean hadStaticGeometry = false;
         boolean registryCapacityFallback = false;
 
-        float[] modelQuads = emitModelQuads(state, level, pos);
-        if (modelQuads.length > 0) {
+        ModelMeshData modelMesh = emitModelQuads(state, level, pos);
+        if (modelMesh.positions().length > 0) {
             hadStaticGeometry = true;
-            if (isCanonicalUnitCube(modelQuads)) {
+            // A leaf-like model can still be a canonical six-face cube geometrically. It must stay
+            // on MODEL_MESH when any sprite contains transparent texels so rays can pass through
+            // the texture silhouette instead of hitting an opaque SURFACE_CUBE.
+            if (isCanonicalUnitCube(modelMesh.positions()) && !modelMesh.hasCutout()) {
                 return BlockGeometryCode.surfaceCube(surface.roughness(), surface.metallic());
             }
-            int meshId = BlockModelMeshRegistry.register(modelQuads);
+            int meshId = BlockModelMeshRegistry.register(
+                    modelMesh.positions(),
+                    modelMesh.uvs(),
+                    modelMesh.alphaMaskWords()
+            );
             if (meshId >= 0) {
                 return BlockGeometryCode.modelMesh(meshId);
             }
@@ -119,7 +126,7 @@ public final class MinecraftBlockModelMeshResolver {
         return BlockGeometryCode.modelMesh(0);
     }
 
-    private static float[] emitModelQuads(BlockState state, ClientLevel level, BlockPos pos) {
+    private static ModelMeshData emitModelQuads(BlockState state, ClientLevel level, BlockPos pos) {
         try {
             var modelSet = Minecraft.getInstance().getModelManager().getBlockStateModelSet();
             observeModelSet(modelSet);
@@ -127,11 +134,19 @@ public final class MinecraftBlockModelMeshResolver {
             FabricBlockStateModel fabricModel = (FabricBlockStateModel) model;
 
             List<Float> positions = new ArrayList<>();
+            List<Float> uvs = new ArrayList<>();
+            List<Integer> alphaMaskWords = new ArrayList<>();
             Renderer renderer = Renderer.get();
-            QuadEmitter emitter = renderer.quadEmitter(quad -> appendQuad(positions, quad));
+            QuadEmitter emitter = renderer.quadEmitter(
+                    quad -> appendQuad(positions, uvs, alphaMaskWords, quad)
+            );
             RandomSource random = RandomSource.create(state.getSeed(pos));
             fabricModel.emitQuads(emitter, level, pos, state, random, direction -> false);
-            return toFloatArray(positions);
+            return new ModelMeshData(
+                    toFloatArray(positions),
+                    toFloatArray(uvs),
+                    toIntArray(alphaMaskWords)
+            );
         } catch (Throwable failure) {
             if (!extractionFailureLogged) {
                 extractionFailureLogged = true;
@@ -140,7 +155,7 @@ public final class MinecraftBlockModelMeshResolver {
                         failure
                 );
             }
-            return new float[0];
+            return ModelMeshData.EMPTY;
         }
     }
 
@@ -160,7 +175,12 @@ public final class MinecraftBlockModelMeshResolver {
         }
     }
 
-    private static void appendQuad(List<Float> positions, MutableQuadView quad) {
+    private static void appendQuad(
+            List<Float> positions,
+            List<Float> uvs,
+            List<Integer> alphaMaskWords,
+            MutableQuadView quad
+    ) {
         Vector3f scratch = new Vector3f();
         for (int vertex = 0; vertex < 4; vertex++) {
             quad.copyPos(vertex, scratch);
@@ -168,6 +188,10 @@ public final class MinecraftBlockModelMeshResolver {
             positions.add(canonicalFloat(scratch.y));
             positions.add(canonicalFloat(scratch.z));
         }
+
+        P14AlphaCutoutMask.Capture capture = P14AlphaCutoutMask.capture(quad);
+        for (float uv : capture.uvs()) uvs.add(canonicalFloat(uv));
+        for (int word : capture.maskWords()) alphaMaskWords.add(word);
     }
 
     private static float canonicalFloat(float value) {
@@ -181,6 +205,14 @@ public final class MinecraftBlockModelMeshResolver {
 
     private static float[] toFloatArray(List<Float> values) {
         float[] result = new float[values.size()];
+        for (int index = 0; index < values.size(); index++) {
+            result[index] = values.get(index);
+        }
+        return result;
+    }
+
+    private static int[] toIntArray(List<Integer> values) {
+        int[] result = new int[values.size()];
         for (int index = 0; index < values.size(); index++) {
             result[index] = values.get(index);
         }
@@ -261,6 +293,22 @@ public final class MinecraftBlockModelMeshResolver {
 
     private static void quad(List<Float> out, double... xyz) {
         for (double value : xyz) out.add((float) value);
+    }
+
+    private record ModelMeshData(
+            float[] positions,
+            float[] uvs,
+            int[] alphaMaskWords
+    ) {
+        private static final ModelMeshData EMPTY =
+                new ModelMeshData(new float[0], new float[0], new int[0]);
+
+        boolean hasCutout() {
+            for (int word : alphaMaskWords) {
+                if (word != -1) return true;
+            }
+            return false;
+        }
     }
 
     private static boolean isTransmissiveGlassPane(String sourceId) {

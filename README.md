@@ -19,14 +19,16 @@ The server gameplay subsystem never initializes or depends on Vulkan. A dedicate
 
 ## Current milestone
 
-`0.1.0-alpha.40` fixes the P13 Overworld night environment so the custom sky no longer loses the moon when Totem Lumen owns the GI Composite output.
+`0.1.0-alpha.41` adds P14E texture-alpha silhouettes to the shared P14C model-mesh ray path.
 
-- the moon direction is the exact celestial opposite of the existing time-of-day sun direction;
-- a procedural moon disk plus low-intensity halo is rendered only while the moon is above the horizon;
-- Overworld surfaces receive a separate weak cool moon directional term with the same ray-traced visibility semantics used by the sun;
-- moonlight therefore participates in environment surface radiance, GI bounce evaluation and the split P16 reflection pass through the existing shared P13 helpers;
-- daylight/sun behavior remains unchanged, and the moon does not add light while below the horizon;
-- current Alpha 40 intentionally uses a full disk because the packed frame environment state does not yet carry Minecraft's 8-step lunar phase/day index. Lunar phases are a follow-up rather than being silently approximated as complete.
+- static block-model extraction now retains sprite-local UVs and compact 32x32 one-bit alpha masks;
+- transparent texture pixels reject triangle hits before they can occlude camera, shadow, GI, P13 environment, P15 transmission or P16 reflection rays;
+- canonical six-face models only keep the full-cube fast path when their emitted sprites are fully opaque, so leaf-like cutout cubes remain alpha-tested model meshes;
+- non-opaque masks are deduplicated and packed after the actually used model-quad records; the 32-bit per-voxel ABI is unchanged;
+- animated sprite masks use the union of unique frames to keep ray geometry stable;
+- texture lookup failures remain conservatively opaque instead of deleting geometry.
+
+Alpha 40's procedural Overworld moon and weak ray-traced moonlight remain the current environment baseline. Lunar phases are still deferred because the packed environment state does not yet carry Minecraft's day/phase index.
 
 Alpha 39's P14D block-entity geometry capture remains the current geometry baseline. `BlockEntityRenderDispatcher` scopes renderer-resolved `Model` / `ModelPart` capture into Totem Lumen-owned block-local quads, stable mutable `MODEL_MESH` ids preserve animation without exhausting the 12-bit mesh space, and chunk/level lifecycle recycles dynamic mesh ids. Bell/chest/shulker animation correctness still requires in-game validation; exact flowing/sloped fluid surfaces remain the next pre-P17 geometry domain.
 
@@ -79,7 +81,7 @@ CI installs Gradle 9.5.1 explicitly.
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — renderer roadmap and completed milestones.
 - [`docs/P13_OVERWORLD_MOON.md`](docs/P13_OVERWORLD_MOON.md) — Overworld moon disk, moonlight transport, limitations and runtime validation.
 - [`docs/P14C_GENERIC_BLOCK_MODELS.md`](docs/P14C_GENERIC_BLOCK_MODELS.md) — generic static block-model extraction, GPU ABI, geometry-domain matrix, limits and validation plan.
-- [`docs/P14D_BLOCK_ENTITY_GEOMETRY.md`](docs/P14D_BLOCK_ENTITY_GEOMETRY.md) — block-entity renderer geometry capture, stable mutable mesh slots, lifecycle, limitations and runtime validation.
+- [`docs/P14D_BLOCK_ENTITY_GEOMETRY.md`](docs/P14D_BLOCK_ENTITY_GEOMETRY.md) — block-entity renderer geometry capture, stable mutable mesh slots, lifecycle, limitations and runtime validation.\n- [`docs/P14E_ALPHA_CUTOUT.md`](docs/P14E_ALPHA_CUTOUT.md) — sprite UV capture, compact alpha masks, shared-ray cutout semantics and runtime validation.
 - [`docs/P16_REFLECTION_ROUGHNESS.md`](docs/P16_REFLECTION_ROUGHNESS.md) — reflection model, surface profiles, ABI choice, limitations and validation plan.
 - [`docs/P16_MOLTENVK_PIPELINE_STALL.md`](docs/P16_MOLTENVK_PIPELINE_STALL.md) — Alpha 34/35 MoltenVK pipeline findings and the Alpha 36 multi-pass resolution.
 - [`docs/P16_MULTIPASS_SPLIT.md`](docs/P16_MULTIPASS_SPLIT.md) — Alpha 36 pass boundaries, synchronization, fallback semantics and runtime validation.

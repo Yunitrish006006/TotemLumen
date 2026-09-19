@@ -62,9 +62,16 @@ tasks.register('verifyP14DDynamicMeshes', JavaExec) {
     mainClass = 'dev.totem.lumen.geometry.P14DDynamicMeshVerifier'
 }
 
+tasks.register('verifyP14EAlphaCutout', JavaExec) {
+    dependsOn tasks.named('clientClasses')
+    classpath = sourceSets.client.runtimeClasspath + sourceSets.main.runtimeClasspath
+    mainClass = 'dev.totem.lumen.geometry.P14EAlphaCutoutVerifier'
+}
+
 tasks.named('check') {
     dependsOn tasks.named('verifyRuntimeShader')
     dependsOn tasks.named('verifyP14DDynamicMeshes')
+    dependsOn tasks.named('verifyP14EAlphaCutout')
 }
 
 java {
