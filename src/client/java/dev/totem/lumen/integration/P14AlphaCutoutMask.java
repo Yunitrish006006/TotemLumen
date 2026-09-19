@@ -50,7 +50,7 @@ final class P14AlphaCutoutMask {
             SpriteContents contents = sprite.contents();
             int width = Math.max(1, contents.width());
             int height = Math.max(1, contents.height());
-            int[] frames = contents.getUniqueFrames().toArray();
+            int[] frames = contents.getUniqueFrames().toIntArray();
             if (frames.length == 0) frames = new int[]{0};
 
             Arrays.fill(maskWords, 0);
