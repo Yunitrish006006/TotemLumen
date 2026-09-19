@@ -19,9 +19,9 @@ The server gameplay subsystem never initializes or depends on Vulkan. A dedicate
 
 ## Current milestone
 
-`0.1.0-alpha.41` adds P14E texture-alpha silhouettes to the shared P14C model-mesh ray path.
+`0.1.0-alpha.42` is the Minecraft 26.2 startup hotfix for the Alpha 41 P14E validation build. It keeps the Alpha 41 renderer changes and updates P14D submit-node capture to the current concrete `submitModel` ABI.
 
-- static block-model extraction now retains sprite-local UVs and compact 32x32 one-bit alpha masks;
+- P14D `SubmitNodeStorage` / `SubmitNodeCollection` mixins now target the exact Minecraft 26.2 `submitModel(Model, state, PoseStack, RenderType, light, overlay, color, TextureAtlasSprite, outlineColor, CrumblingOverlay)` descriptor instead of also registering the removed legacy overload;\n- static block-model extraction retains sprite-local UVs and compact 32x32 one-bit alpha masks;
 - transparent texture pixels reject triangle hits before they can occlude camera, shadow, GI, P13 environment, P15 transmission or P16 reflection rays;
 - canonical six-face models only keep the full-cube fast path when their emitted sprites are fully opaque, so leaf-like cutout cubes remain alpha-tested model meshes;
 - non-opaque masks are deduplicated and packed after the actually used model-quad records; the 32-bit per-voxel ABI is unchanged;
