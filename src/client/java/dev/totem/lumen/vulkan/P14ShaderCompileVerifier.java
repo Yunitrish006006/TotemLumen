@@ -579,6 +579,18 @@ public final class P14ShaderCompileVerifier {
         );
         requireSourceMarker(
                 source,
+                "const uint P17_ENTITY_MATERIAL_FLAG_HAS_ALBEDO = "
+                        + GpuDynamicEntityScene.ENTITY_MATERIAL_FLAG_HAS_ALBEDO + "u;",
+                label + " generic albedo flag"
+        );
+        requireSourceMarker(
+                source,
+                "const uint P17_ENTITY_MATERIAL_FLAG_HAS_EMISSIVE = "
+                        + GpuDynamicEntityScene.ENTITY_MATERIAL_FLAG_HAS_EMISSIVE + "u;",
+                label + " generic emissive flag"
+        );
+        requireSourceMarker(
+                source,
                 "const uint P17_ENTITY_TEXTURE_POOL_BASE = "
                         + GpuDynamicEntityScene.ENTITY_TEXTURE_POOL_BASE_WORD + "u;",
                 label + " entity texture pool"
@@ -599,6 +611,11 @@ public final class P14ShaderCompileVerifier {
         );
         requireSourceMarker(
                 source,
+                "uint p17EntityAlbedoArgb(uint entityBase, uint materialId, vec2 uv)",
+                label + " generic albedo texture sampling"
+        );
+        requireSourceMarker(
+                source,
                 "uint p17EntityEmissiveArgb(uint entityBase, uint materialId, vec2 uv)",
                 label + " generic emissive texture sampling"
         );
@@ -611,6 +628,21 @@ public final class P14ShaderCompileVerifier {
                 source,
                 "float p17EntityAlphaCutoff(uint entityBase, uint materialId)",
                 label + " per-material alpha cutoff"
+        );
+        requireSourceMarker(
+                source,
+                "float p17EntityRoughness(uint entityBase, uint materialId)",
+                label + " per-material roughness"
+        );
+        requireSourceMarker(
+                source,
+                "float p17EntityMetallic(uint entityBase, uint materialId)",
+                label + " per-material metallic"
+        );
+        requireSourceMarker(
+                source,
+                "float p17EntityReflectionScale(uint entityBase, uint materialId)",
+                label + " per-material reflection scale"
         );
         requireSourceMarker(source, "p17UnpackUv(hit.steps)", label + " entity hit UV decode");
         requireSourceMarker(source, "uintBitsToFloat(scene.data[89])", label + " global entity emissive gain");
@@ -634,7 +666,7 @@ public final class P14ShaderCompileVerifier {
         System.out.println(
                 "P17 dynamic-entity shader verification PASS (" + label + "): "
                         + "sectionBroadPhase=true, triangles=true, nearestHit=true, uv=true, "
-                        + "genericMaterials=true, resourcePackEmission=true, "
+                        + "genericMaterials=true, albedo=data, optics=data, resourcePackEmission=true, "
                         + "entitySpecificShaderBranches=false, p15OpaqueBaseline=true"
         );
     }
