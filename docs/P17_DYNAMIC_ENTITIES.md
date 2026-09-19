@@ -5,7 +5,7 @@
 - **P17A capture + CPU broad phase: IMPLEMENTED / CI PASS**
 - **P17B bounded Vulkan scene ABI + independent tail upload: IMPLEMENTED / CI PASS**
 - **P17C shared nearest-hit shader integration: IMPLEMENTED / CI PASS, RUNTIME VALIDATION ACTIVE**
-- **P17D material fidelity: PENDING**
+- **P17D generic entity material ABI: IMPLEMENTED / CI GATED**
 
 Alpha 42 does not yet claim visually complete entity ray tracing until the runtime gate passes.
 
@@ -59,7 +59,8 @@ Absolute world positions and AABBs remain double precision on the CPU. The P17B 
 - entity type id;
 - absolute world position;
 - world-space AABB;
-- copied entity-local quad positions.
+- copied entity-local quad positions;
+- copied per-vertex UV coordinates used for data-driven entity material sampling.
 
 The constructor defensively copies geometry and rejects malformed/non-finite data. No Minecraft client classes appear in this common scene type.
 
@@ -140,7 +141,12 @@ Each entity descriptor stores:
 - integer origin-section coordinates;
 - section-local entity origin;
 - section-local world AABB;
-- first-quad offset and quad count.
+- first-quad offset and quad count;
+- a generic entity-material slot.
+
+Each quad stores four entity-local positions plus four UV pairs. Entity materials use a fixed
+16-word descriptor table and a shared bounded texture pool. Slot 0 is the stable baseline material;
+additional slots are resolved from entity type ids on the CPU.
 
 The section-candidate table reuses the same section hash semantics used by the static voxel lookup. Candidate overflow and maximum probe length are explicit diagnostics.
 
@@ -204,13 +210,47 @@ staticWorld=true, fluids=true, pbr=true, dynamicEntities=true,
 duplicateEntityPipeline=false
 ```
 
-### P17D — material baseline
+### P17D — generic entity material ABI
 
-Status: **PENDING**
+Status: **IMPLEMENTED / CI GATED**
 
-The first accepted visual baseline may use a conservative entity material/color until texture sampling is connected, but entity geometry must not be presented as feature-complete material support.
+Entity materials no longer require entity-specific shader branches. The production shader consumes a
+fixed material slot range and a generic descriptor containing:
 
-Skin/texture alpha, armor/equipment texture semantics, emissive entity layers and resource-pack/PBR data remain separate material work.
+- optional albedo texture;
+- optional emissive texture;
+- emissive gain;
+- alpha cutoff;
+- roughness;
+- metallic;
+- reflection scale;
+- reserved words for later material fields.
+
+Entity type ids, resource paths and per-entity tuning are resolved entirely on the CPU through:
+
+```text
+assets/totem-lumen/entity_material_rules.json
+```
+
+For example, spider/cave-spider albedo and eye overlays are data entries only. The shader does not
+contain spider identifiers, spider flags or spider-specific sampling functions.
+
+This is the required cache-invalidation boundary:
+
+```text
+add/tune entity material rule or texture
+    -> entity GPU data changes
+    -> generated GLSL unchanged
+    -> SPIR-V / MoltenVK pipeline cache stays reusable
+
+change entity tracing algorithm or material ABI layout
+    -> generated GLSL changes
+    -> one-time pipeline rebuild
+```
+
+The generic ABI currently handles entity albedo/emissive sampling and optical scalars. Armor,
+equipment, render-layer-specific materials, texture-alpha hit rejection and non-Model renderer
+families remain separate follow-ups.
 
 ## Runtime gate
 

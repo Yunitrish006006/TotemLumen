@@ -2,8 +2,8 @@ package dev.totem.lumen.vulkan;
 
 import dev.totem.lumen.TotemLumenClient;
 import dev.totem.lumen.gpu.GpuDynamicEntityScene;
+import dev.totem.lumen.integration.EntityMaterialRuleRegistry;
 import dev.totem.lumen.integration.EntityRenderGeometryCache;
-import dev.totem.lumen.integration.SpiderEyeEmissiveTextureRegistry;
 import net.minecraft.client.Minecraft;
 
 import java.nio.ByteBuffer;
@@ -19,7 +19,7 @@ public final class P17DynamicEntityGpuUploader {
     private static volatile long lastBaseByteOffset = -1L;
     private static volatile long lastCopyBytes;
     private static long lastPackedRevision = Long.MIN_VALUE;
-    private static long lastPackedSpiderEyeRevision = Long.MIN_VALUE;
+    private static long lastPackedMaterialRevision = Long.MIN_VALUE;
     private static boolean copyPending;
     private static int lastLoggedEntityCount = -1;
     private static int lastLoggedQuadCount = -1;
@@ -31,17 +31,17 @@ public final class P17DynamicEntityGpuUploader {
 
     /** Force-packs the current entity cache during a full scene rebuild. */
     public static synchronized void pack(ByteBuffer buffer) {
-        ensureSpiderEyeTexture();
+        ensureEntityMaterials();
         packState(buffer, EntityRenderGeometryCache.sceneState());
     }
 
     /** Packs only when entity movement/pose/lifecycle changed since the previous upload. */
     public static synchronized boolean packIfDirty(ByteBuffer buffer) {
-        ensureSpiderEyeTexture();
+        ensureEntityMaterials();
         EntityRenderGeometryCache.SceneState state = EntityRenderGeometryCache.sceneState();
-        long spiderEyeRevision = SpiderEyeEmissiveTextureRegistry.revision();
+        long materialRevision = EntityMaterialRuleRegistry.revision();
         if (state.revision() == lastPackedRevision
-                && spiderEyeRevision == lastPackedSpiderEyeRevision) return false;
+                && materialRevision == lastPackedMaterialRevision) return false;
         packState(buffer, state);
         invalidateHistoryRead(buffer);
         return true;
@@ -59,12 +59,12 @@ public final class P17DynamicEntityGpuUploader {
                 buffer,
                 entityBaseWord,
                 state.entities(),
-                SpiderEyeEmissiveTextureRegistry.image()
+                EntityMaterialRuleRegistry.snapshot()
         );
         lastBaseByteOffset = (long) entityBaseWord * Integer.BYTES;
         lastCopyBytes = packed.usedBytes();
         lastPackedRevision = state.revision();
-        lastPackedSpiderEyeRevision = SpiderEyeEmissiveTextureRegistry.revision();
+        lastPackedMaterialRevision = EntityMaterialRuleRegistry.revision();
         copyPending = true;
 
         if (lastLoggedEntityCount != packed.entityCount()
@@ -76,9 +76,12 @@ public final class P17DynamicEntityGpuUploader {
             lastLoggedBucketCount = packed.sectionBucketCount();
             lastLoggedOverflow = packed.overflowAssignments();
             TotemLumenClient.LOGGER.info(
-                    "P17 entity GPU scene: entities={}, quads={}, sectionBuckets={}, overflow={}, maxProbe={}, bytes={}, maxBytes={}",
+                    "P17 entity GPU scene: entities={}, quads={}, materials={}, emissiveTexels={}, "
+                            + "sectionBuckets={}, overflow={}, maxProbe={}, bytes={}, maxBytes={}",
                     packed.entityCount(),
                     packed.totalQuads(),
+                    packed.materialCount(),
+                    packed.textureTexelCount(),
                     packed.sectionBucketCount(),
                     packed.overflowAssignments(),
                     packed.maxProbe(),
@@ -96,10 +99,10 @@ public final class P17DynamicEntityGpuUploader {
         }
     }
 
-    private static void ensureSpiderEyeTexture() {
+    private static void ensureEntityMaterials() {
         var minecraft = Minecraft.getInstance();
         if (minecraft != null) {
-            SpiderEyeEmissiveTextureRegistry.ensureLoaded(minecraft.getResourceManager());
+            EntityMaterialRuleRegistry.ensureLoaded(minecraft.getResourceManager());
         }
     }
 
