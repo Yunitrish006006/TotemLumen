@@ -1,5 +1,6 @@
 package dev.totem.lumen.gpu;
 
+import dev.totem.lumen.material.EntityMaterialData;
 import dev.totem.lumen.material.PbrImage;
 import dev.totem.lumen.scene.DynamicEntitySnapshot;
 import org.junit.jupiter.api.Test;
@@ -57,7 +58,7 @@ class GpuDynamicEntitySceneTest {
     }
 
     @Test
-    void packsSpiderFlagsUvsAndResourcePackEyeTexture() {
+    void packsGenericEntityMaterialSlotUvsAndEmissiveTexture() {
         ByteBuffer buffer = buffer();
         DynamicEntitySnapshot spider = new DynamicEntitySnapshot(
                 11L,
@@ -84,15 +85,26 @@ class GpuDynamicEntitySceneTest {
                 1,
                 new int[]{0x00FFFFFF, 0xFFFF2200}
         );
-
-        GpuDynamicEntityScene.pack(buffer, 0, List.of(spider), eyes);
-
-        assertEquals(2, word(buffer, 0));
-        int descriptor = GpuDynamicEntityScene.ENTITY_DESCRIPTOR_BASE_WORD;
-        assertEquals(
-                GpuDynamicEntityScene.FLAG_SPIDER_EYES,
-                word(buffer, descriptor + 16)
+        EntityMaterialData material = new EntityMaterialData(
+                "minecraft:spider",
+                eyes,
+                2.0f,
+                0.001f
         );
+
+        GpuDynamicEntityScene.PackResult result = GpuDynamicEntityScene.pack(
+                buffer,
+                0,
+                List.of(spider),
+                List.of(material)
+        );
+
+        assertEquals(3, word(buffer, 0));
+        assertEquals(2, result.materialCount());
+        assertEquals(2, result.textureTexelCount());
+
+        int entityDescriptor = GpuDynamicEntityScene.ENTITY_DESCRIPTOR_BASE_WORD;
+        assertEquals(1, word(buffer, entityDescriptor + 16));
 
         int quad = GpuDynamicEntityScene.QUAD_POOL_BASE_WORD;
         assertEquals(0.10f, floatWord(buffer, quad + 12), 0.0001f);
@@ -101,13 +113,29 @@ class GpuDynamicEntitySceneTest {
         assertEquals(0.10f, floatWord(buffer, quad + 18), 0.0001f);
         assertEquals(0.40f, floatWord(buffer, quad + 19), 0.0001f);
 
+        int materialDescriptor = GpuDynamicEntityScene.ENTITY_MATERIAL_BASE_WORD
+                + GpuDynamicEntityScene.ENTITY_MATERIAL_WORDS_PER_RECORD;
+        assertEquals(
+                GpuDynamicEntityScene.ENTITY_MATERIAL_FLAG_HAS_EMISSIVE,
+                word(buffer, materialDescriptor)
+        );
+        assertEquals(0, word(buffer, materialDescriptor + 1));
+        assertEquals(2, word(buffer, materialDescriptor + 2));
+        assertEquals(1, word(buffer, materialDescriptor + 3));
+        assertEquals(2.0f, floatWord(buffer, materialDescriptor + 4), 0.0001f);
+        assertEquals(0.001f, floatWord(buffer, materialDescriptor + 5), 0.0001f);
+
         assertEquals(2, word(buffer, 8));
-        assertEquals(1, word(buffer, 9));
-        assertEquals(2, word(buffer, 10));
-        assertEquals(0x00FFFFFF, word(buffer, GpuDynamicEntityScene.SPIDER_EYE_POOL_BASE_WORD));
+        assertEquals(GpuDynamicEntityScene.ENTITY_MATERIAL_BASE_WORD, word(buffer, 9));
+        assertEquals(GpuDynamicEntityScene.ENTITY_TEXTURE_POOL_BASE_WORD, word(buffer, 10));
+        assertEquals(2, word(buffer, 11));
+        assertEquals(
+                0x00FFFFFF,
+                word(buffer, GpuDynamicEntityScene.ENTITY_TEXTURE_POOL_BASE_WORD)
+        );
         assertEquals(
                 0xFFFF2200,
-                word(buffer, GpuDynamicEntityScene.SPIDER_EYE_POOL_BASE_WORD + 1)
+                word(buffer, GpuDynamicEntityScene.ENTITY_TEXTURE_POOL_BASE_WORD + 1)
         );
     }
 
