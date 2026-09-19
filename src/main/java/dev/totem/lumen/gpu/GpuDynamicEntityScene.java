@@ -1,5 +1,6 @@
 package dev.totem.lumen.gpu;
 
+import dev.totem.lumen.material.EntityMaterialData;
 import dev.totem.lumen.material.PbrImage;
 import dev.totem.lumen.scene.DynamicEntityBroadPhase;
 import dev.totem.lumen.scene.DynamicEntitySnapshot;
@@ -8,6 +9,7 @@ import dev.totem.lumen.scene.SectionKey;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -15,34 +17,46 @@ import java.util.Objects;
 /**
  * CPU mirror/packer for the bounded P17 dynamic-entity scene tail.
  *
- * <p>Absolute entity coordinates remain double precision in the CPU snapshot. The GPU ABI stores
- * an integer section origin plus section-local floats so large world coordinates do not lose
- * precision before tracing.</p>
+ * <p>The entity material ABI is generic: entity type ids are resolved to material slots on the CPU,
+ * while the shader only sees fixed descriptors and texture handles. Adding another emissive entity
+ * therefore changes data, not generated GLSL.</p>
  */
 public final class GpuDynamicEntityScene {
-    public static final int ABI_VERSION = 2;
+    public static final int ABI_VERSION = 3;
     public static final int MAX_ENTITIES = 256;
     public static final int MAX_ENTITY_QUADS = 65_536;
     public static final int SECTION_LOOKUP_CAPACITY = 512;
-    public static final int MAX_ENTITIES_PER_SECTION = DynamicEntityBroadPhase.DEFAULT_MAX_ENTITIES_PER_SECTION;
+    public static final int MAX_ENTITIES_PER_SECTION =
+            DynamicEntityBroadPhase.DEFAULT_MAX_ENTITIES_PER_SECTION;
 
-    public static final int FLAG_SPIDER_EYES = 1;
-    public static final int MAX_SPIDER_EYE_DIMENSION = 128;
-    public static final int SPIDER_EYE_POOL_WORDS =
-            MAX_SPIDER_EYE_DIMENSION * MAX_SPIDER_EYE_DIMENSION;
+    public static final int MAX_ENTITY_MATERIALS = 64;
+    public static final int ENTITY_MATERIAL_WORDS_PER_RECORD = 16;
+    public static final int ENTITY_MATERIAL_WORDS =
+            MAX_ENTITY_MATERIALS * ENTITY_MATERIAL_WORDS_PER_RECORD;
+    public static final int ENTITY_MATERIAL_FLAG_HAS_EMISSIVE = 1;
+
+    public static final int MAX_ENTITY_TEXTURE_DIMENSION = 128;
+    public static final int MAX_ENTITY_EMISSIVE_TEXELS = 262_144;
 
     public static final int HEADER_WORDS = 16;
     public static final int ENTITY_DESCRIPTOR_WORDS_PER_RECORD = 24;
-    public static final int ENTITY_DESCRIPTOR_WORDS = MAX_ENTITIES * ENTITY_DESCRIPTOR_WORDS_PER_RECORD;
+    public static final int ENTITY_DESCRIPTOR_WORDS =
+            MAX_ENTITIES * ENTITY_DESCRIPTOR_WORDS_PER_RECORD;
     public static final int SECTION_BUCKET_WORDS = 4 + MAX_ENTITIES_PER_SECTION;
-    public static final int SECTION_LOOKUP_WORDS = SECTION_LOOKUP_CAPACITY * SECTION_BUCKET_WORDS;
+    public static final int SECTION_LOOKUP_WORDS =
+            SECTION_LOOKUP_CAPACITY * SECTION_BUCKET_WORDS;
     public static final int QUAD_WORDS_PER_RECORD = 20;
     public static final int QUAD_POOL_WORDS = MAX_ENTITY_QUADS * QUAD_WORDS_PER_RECORD;
 
     public static final int ENTITY_DESCRIPTOR_BASE_WORD = HEADER_WORDS;
-    public static final int SECTION_LOOKUP_BASE_WORD = ENTITY_DESCRIPTOR_BASE_WORD + ENTITY_DESCRIPTOR_WORDS;
-    public static final int SPIDER_EYE_POOL_BASE_WORD = SECTION_LOOKUP_BASE_WORD + SECTION_LOOKUP_WORDS;
-    public static final int QUAD_POOL_BASE_WORD = SPIDER_EYE_POOL_BASE_WORD + SPIDER_EYE_POOL_WORDS;
+    public static final int SECTION_LOOKUP_BASE_WORD =
+            ENTITY_DESCRIPTOR_BASE_WORD + ENTITY_DESCRIPTOR_WORDS;
+    public static final int ENTITY_MATERIAL_BASE_WORD =
+            SECTION_LOOKUP_BASE_WORD + SECTION_LOOKUP_WORDS;
+    public static final int ENTITY_TEXTURE_POOL_BASE_WORD =
+            ENTITY_MATERIAL_BASE_WORD + ENTITY_MATERIAL_WORDS;
+    public static final int QUAD_POOL_BASE_WORD =
+            ENTITY_TEXTURE_POOL_BASE_WORD + MAX_ENTITY_EMISSIVE_TEXELS;
     public static final int MAX_STORAGE_WORDS = QUAD_POOL_BASE_WORD + QUAD_POOL_WORDS;
     public static final long MAX_STORAGE_BYTES = (long) MAX_STORAGE_WORDS * Integer.BYTES;
 
@@ -52,23 +66,23 @@ public final class GpuDynamicEntityScene {
     private GpuDynamicEntityScene() {
     }
 
-    /** Packs one current-dimension entity scene into {@code buffer} starting at {@code baseWord}. */
     public static PackResult pack(
             ByteBuffer buffer,
             int baseWord,
             List<DynamicEntitySnapshot> entities
     ) {
-        return pack(buffer, baseWord, entities, null);
+        return pack(buffer, baseWord, entities, List.of());
     }
 
     public static PackResult pack(
             ByteBuffer buffer,
             int baseWord,
             List<DynamicEntitySnapshot> entities,
-            PbrImage spiderEyeTexture
+            List<EntityMaterialData> materialData
     ) {
         Objects.requireNonNull(buffer, "buffer");
         Objects.requireNonNull(entities, "entities");
+        Objects.requireNonNull(materialData, "materialData");
         if (baseWord < 0) throw new IllegalArgumentException("baseWord must be >= 0");
         if (entities.size() > MAX_ENTITIES) {
             throw new IllegalStateException(
@@ -106,11 +120,13 @@ public final class GpuDynamicEntityScene {
             }
         }
 
-        // Clear all fixed metadata because despawns/movement can leave holes in descriptors/buckets.
-        int fixedWords = QUAD_POOL_BASE_WORD;
-        for (int word = 0; word < fixedWords; word++) {
+        // Clear metadata/lookup/material descriptors. Texture and quad pools are append-only for
+        // this pack and stale payload becomes unreachable through the freshly cleared descriptors.
+        for (int word = 0; word < ENTITY_TEXTURE_POOL_BASE_WORD; word++) {
             putWord(buffer, baseWord + word, 0);
         }
+
+        MaterialPack materials = packMaterials(buffer, baseWord, materialData);
 
         int nextQuad = 0;
         for (int entityIndex = 0; entityIndex < entities.size(); entityIndex++) {
@@ -141,7 +157,11 @@ public final class GpuDynamicEntityScene {
             putFloat(buffer, descriptor + 13, entity.maxZ() - sectionOriginZ);
             putWord(buffer, descriptor + 14, nextQuad);
             putWord(buffer, descriptor + 15, entity.quadCount());
-            putWord(buffer, descriptor + 16, entityFlags(entity.entityTypeId()));
+            putWord(
+                    buffer,
+                    descriptor + 16,
+                    materials.slotByEntityType().getOrDefault(entity.entityTypeId(), 0)
+            );
             for (int reserved = 17; reserved < ENTITY_DESCRIPTOR_WORDS_PER_RECORD; reserved++) {
                 putWord(buffer, descriptor + reserved, 0);
             }
@@ -182,13 +202,9 @@ public final class GpuDynamicEntityScene {
 
         int maxProbe = 0;
         for (Map.Entry<SectionKey, int[]> entry : buckets) {
-            SectionKey key = entry.getKey();
-            int[] indices = entry.getValue();
-            int probe = insertSectionBucket(buffer, baseWord, key, indices);
+            int probe = insertSectionBucket(buffer, baseWord, entry.getKey(), entry.getValue());
             maxProbe = Math.max(maxProbe, probe);
         }
-
-        Dimensions spiderEyes = packSpiderEyeTexture(buffer, baseWord, spiderEyeTexture);
 
         putWord(buffer, baseWord, ABI_VERSION);
         putWord(buffer, baseWord + 1, entities.size());
@@ -198,11 +214,11 @@ public final class GpuDynamicEntityScene {
         putWord(buffer, baseWord + 5, maxProbe);
         putWord(buffer, baseWord + 6, ENTITY_DESCRIPTOR_BASE_WORD);
         putWord(buffer, baseWord + 7, SECTION_LOOKUP_BASE_WORD);
-        putWord(buffer, baseWord + 8, spiderEyes.width());
-        putWord(buffer, baseWord + 9, spiderEyes.height());
-        putWord(buffer, baseWord + 10, spiderEyes.width() * spiderEyes.height());
-        putWord(buffer, baseWord + 11, SPIDER_EYE_POOL_BASE_WORD);
-        putWord(buffer, baseWord + 12, spiderEyes.width() > 0 ? 1 : 0);
+        putWord(buffer, baseWord + 8, materials.materialCount());
+        putWord(buffer, baseWord + 9, ENTITY_MATERIAL_BASE_WORD);
+        putWord(buffer, baseWord + 10, ENTITY_TEXTURE_POOL_BASE_WORD);
+        putWord(buffer, baseWord + 11, materials.textureTexelCount());
+        putWord(buffer, baseWord + 12, ENTITY_MATERIAL_WORDS_PER_RECORD);
         putWord(buffer, baseWord + 13, 0);
         putWord(buffer, baseWord + 14, 0);
         putWord(buffer, baseWord + 15, 0);
@@ -217,46 +233,114 @@ public final class GpuDynamicEntityScene {
                 buckets.size(),
                 broadPhase.overflowAssignments(),
                 maxProbe,
+                materials.materialCount(),
+                materials.textureTexelCount(),
                 usedWords
         );
     }
 
-    private static int entityFlags(String entityTypeId) {
-        return entityTypeId.equals("minecraft:spider")
-                || entityTypeId.equals("minecraft:cave_spider")
-                ? FLAG_SPIDER_EYES
-                : 0;
-    }
-
-    private static Dimensions packSpiderEyeTexture(
+    private static MaterialPack packMaterials(
             ByteBuffer buffer,
             int baseWord,
-            PbrImage image
+            List<EntityMaterialData> materialData
     ) {
-        if (image == null) return new Dimensions(0, 0);
+        List<EntityMaterialData> sorted = new ArrayList<>(materialData);
+        sorted.sort(Comparator.comparing(EntityMaterialData::entityTypeId));
+        if (sorted.size() >= MAX_ENTITY_MATERIALS) {
+            throw new IllegalStateException(
+                    "P17 entity material capacity exceeded: materials=" + sorted.size()
+                            + ", max user materials=" + (MAX_ENTITY_MATERIALS - 1)
+            );
+        }
 
-        int largest = Math.max(image.width(), image.height());
-        float scale = largest <= MAX_SPIDER_EYE_DIMENSION
-                ? 1.0f
-                : MAX_SPIDER_EYE_DIMENSION / (float) largest;
-        int width = Math.max(1, Math.round(image.width() * scale));
-        int height = Math.max(1, Math.round(image.height() * scale));
-
-        for (int y = 0; y < height; y++) {
-            float v = (y + 0.5f) / height;
-            for (int x = 0; x < width; x++) {
-                float u = (x + 0.5f) / width;
-                putWord(
-                        buffer,
-                        baseWord + SPIDER_EYE_POOL_BASE_WORD + y * width + x,
-                        image.sampleNearest(u, v)
+        Map<String, Integer> slots = new HashMap<>();
+        int nextTexel = 0;
+        int slot = 1; // Slot 0 is stable baseline/no-special-material behavior.
+        for (EntityMaterialData material : sorted) {
+            if (slots.containsKey(material.entityTypeId())) {
+                throw new IllegalArgumentException(
+                        "Duplicate P17 entity material rule: " + material.entityTypeId()
                 );
             }
+
+            int descriptor = baseWord + ENTITY_MATERIAL_BASE_WORD
+                    + slot * ENTITY_MATERIAL_WORDS_PER_RECORD;
+            int flags = 0;
+            int texelOffset = 0;
+            int width = 0;
+            int height = 0;
+
+            if (material.hasEmissiveTexture()) {
+                Dimensions dimensions = boundedDimensions(material.emissiveTexture());
+                long required = (long) dimensions.width() * dimensions.height();
+                if ((long) nextTexel + required > MAX_ENTITY_EMISSIVE_TEXELS) {
+                    throw new IllegalStateException(
+                            "P17 entity emissive texture pool exceeded while packing "
+                                    + material.entityTypeId()
+                    );
+                }
+
+                flags |= ENTITY_MATERIAL_FLAG_HAS_EMISSIVE;
+                texelOffset = nextTexel;
+                width = dimensions.width();
+                height = dimensions.height();
+                for (int y = 0; y < height; y++) {
+                    float v = (y + 0.5f) / height;
+                    for (int x = 0; x < width; x++) {
+                        float u = (x + 0.5f) / width;
+                        putWord(
+                                buffer,
+                                baseWord + ENTITY_TEXTURE_POOL_BASE_WORD + nextTexel,
+                                material.emissiveTexture().sampleNearest(u, v)
+                        );
+                        nextTexel++;
+                    }
+                }
+            }
+
+            putWord(buffer, descriptor, flags);
+            putWord(buffer, descriptor + 1, texelOffset);
+            putWord(buffer, descriptor + 2, width);
+            putWord(buffer, descriptor + 3, height);
+            putWord(
+                    buffer,
+                    descriptor + 4,
+                    Float.floatToRawIntBits(material.emissiveGain())
+            );
+            putWord(
+                    buffer,
+                    descriptor + 5,
+                    Float.floatToRawIntBits(material.alphaCutoff())
+            );
+            putWord(buffer, descriptor + 6, material.entityTypeId().hashCode());
+            putWord(buffer, descriptor + 7, slot);
+            for (int reserved = 8; reserved < ENTITY_MATERIAL_WORDS_PER_RECORD; reserved++) {
+                putWord(buffer, descriptor + reserved, 0);
+            }
+
+            slots.put(material.entityTypeId(), slot);
+            slot++;
         }
-        return new Dimensions(width, height);
+
+        return new MaterialPack(
+                Map.copyOf(slots),
+                slot,
+                nextTexel
+        );
     }
 
-    /** Returns the entity index for a packed section candidate, or -1 when absent. Test/debug helper. */
+    private static Dimensions boundedDimensions(PbrImage image) {
+        int largest = Math.max(image.width(), image.height());
+        if (largest <= MAX_ENTITY_TEXTURE_DIMENSION) {
+            return new Dimensions(image.width(), image.height());
+        }
+        float scale = MAX_ENTITY_TEXTURE_DIMENSION / (float) largest;
+        return new Dimensions(
+                Math.max(1, Math.round(image.width() * scale)),
+                Math.max(1, Math.round(image.height() * scale))
+        );
+    }
+
     public static int packedSectionCandidate(
             ByteBuffer buffer,
             int baseWord,
@@ -318,14 +402,18 @@ public final class GpuDynamicEntityScene {
         long block = (long) Math.floor(coordinate);
         long section = Math.floorDiv(block, SECTION_SIZE);
         if (section < Integer.MIN_VALUE || section > Integer.MAX_VALUE) {
-            throw new IllegalArgumentException("P17 entity section coordinate exceeds integer range");
+            throw new IllegalArgumentException(
+                    "P17 entity section coordinate exceeds integer range"
+            );
         }
         return (int) section;
     }
 
     private static void putFloat(ByteBuffer buffer, int wordIndex, double value) {
         if (!Double.isFinite(value) || value < -Float.MAX_VALUE || value > Float.MAX_VALUE) {
-            throw new IllegalArgumentException("P17 section-relative value cannot be represented as float: " + value);
+            throw new IllegalArgumentException(
+                    "P17 section-relative value cannot be represented as float: " + value
+            );
         }
         putWord(buffer, wordIndex, Float.floatToRawIntBits((float) value));
     }
@@ -341,12 +429,21 @@ public final class GpuDynamicEntityScene {
     private record Dimensions(int width, int height) {
     }
 
+    private record MaterialPack(
+            Map<String, Integer> slotByEntityType,
+            int materialCount,
+            int textureTexelCount
+    ) {
+    }
+
     public record PackResult(
             int entityCount,
             int totalQuads,
             int sectionBucketCount,
             int overflowAssignments,
             int maxProbe,
+            int materialCount,
+            int textureTexelCount,
             int usedWords
     ) {
         public long usedBytes() {
