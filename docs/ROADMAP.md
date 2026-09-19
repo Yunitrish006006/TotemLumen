@@ -216,6 +216,9 @@ Runtime gate:
 Target for first meaningful public alpha.
 
 ## P13-P18 - Scene quality
+
+P14E alpha-cutout status: **IMPLEMENTED / CI gate; runtime visual validation pending**. Static model quads retain sprite-local UVs and compact alpha masks so transparent texels do not block shared camera/shadow/GI/transmission/reflection rays.
+
 - Sun/sky/dimension environment lighting.
 - Reflection/roughness.
 - Glass/water transmission.
