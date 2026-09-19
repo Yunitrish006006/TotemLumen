@@ -1,20 +1,34 @@
 {
   "materials": {
     "minecraft:spider": {
+      "albedo_textures": [
+        "minecraft:textures/entity/spider/spider.png",
+        "minecraft:textures/entity/spider.png"
+      ],
       "emissive_textures": [
         "minecraft:textures/entity/spider/spider_eyes.png",
         "minecraft:textures/entity/spider_eyes.png"
       ],
       "emissive_gain": 2.0,
-      "alpha_cutoff": 0.001
+      "alpha_cutoff": 0.001,
+      "roughness": 0.80,
+      "metallic": 0.0,
+      "reflection_scale": 1.0
     },
     "minecraft:cave_spider": {
+      "albedo_textures": [
+        "minecraft:textures/entity/spider/cave_spider.png",
+        "minecraft:textures/entity/cave_spider.png"
+      ],
       "emissive_textures": [
         "minecraft:textures/entity/spider/spider_eyes.png",
         "minecraft:textures/entity/spider_eyes.png"
       ],
       "emissive_gain": 2.0,
-      "alpha_cutoff": 0.001
+      "alpha_cutoff": 0.001,
+      "roughness": 0.80,
+      "metallic": 0.0,
+      "reflection_scale": 1.0
     }
   }
 }
