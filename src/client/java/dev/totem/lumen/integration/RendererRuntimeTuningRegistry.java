@@ -82,7 +82,7 @@ public final class RendererRuntimeTuningRegistry {
                 0.32f,
                 1.0f,
                 1.0f,
-                2.0f
+                1.0f
         );
 
         public Values {
