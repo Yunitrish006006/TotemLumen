@@ -70,7 +70,7 @@ public final class P14ShaderCompileVerifier {
         requireSourceMarker(source, "vec3 bootstrapColor(", "bootstrap output");
         if (source.contains("p13Moon")
                 || source.contains("P14E_FLUID_ABI_VERSION")
-                || source.contains("P17_ENTITY_MATERIAL_ID")
+                || source.contains("P17_ENTITY_MATERIAL_BASE")
                 || source.contains("p16ReflectionRgb")
                 || source.contains("temporalHistoryColor")
                 || source.contains("P18_TEXTURE_ABI_VERSION")) {
