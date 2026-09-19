@@ -42,8 +42,9 @@ public final class EntityMaterialRuleRegistry {
             loaded = true;
             revision++;
             TotemLumenClient.LOGGER.info(
-                    "P17 entity material table loaded: materials={}, emissive={}, revision={}",
+                    "P17 entity material table loaded: materials={}, albedo={}, emissive={}, revision={}",
                     materials.size(),
+                    materials.stream().filter(EntityMaterialData::hasAlbedoTexture).count(),
                     materials.stream().filter(EntityMaterialData::hasEmissiveTexture).count(),
                     revision
             );
@@ -94,15 +95,26 @@ public final class EntityMaterialRuleRegistry {
                     JsonObject object = entry.getValue().getAsJsonObject();
                     float emissiveGain = readFloat(object, "emissive_gain", 0.0f);
                     float alphaCutoff = readFloat(object, "alpha_cutoff", 0.0f);
+                    float roughness = readFloat(object, "roughness", 0.8f);
+                    float metallic = readFloat(object, "metallic", 0.0f);
+                    float reflectionScale = readFloat(object, "reflection_scale", 1.0f);
+                    PbrImage albedo = loadFirstTexture(
+                            resources,
+                            textureCandidates(object, "albedo_textures")
+                    );
                     PbrImage emissive = loadFirstTexture(
                             resources,
                             textureCandidates(object, "emissive_textures")
                     );
                     parsed.add(new EntityMaterialData(
                             entry.getKey(),
+                            albedo,
                             emissive,
                             emissiveGain,
-                            alphaCutoff
+                            alphaCutoff,
+                            roughness,
+                            metallic,
+                            reflectionScale
                     ));
                 }
                 parsed.sort(Comparator.comparing(EntityMaterialData::entityTypeId));
