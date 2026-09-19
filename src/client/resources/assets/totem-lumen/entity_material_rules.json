@@ -1,0 +1,18 @@
+{
+  "materials": {
+    "minecraft:spider": {
+      "emissive_texture": [
+        "minecraft:textures/entity/spider/spider_eyes.png",
+        "minecraft:textures/entity/spider_eyes.png"
+      ],
+      "emissive_gain": 2.0
+    },
+    "minecraft:cave_spider": {
+      "emissive_texture": [
+        "minecraft:textures/entity/spider/spider_eyes.png",
+        "minecraft:textures/entity/spider_eyes.png"
+      ],
+      "emissive_gain": 2.0
+    }
+  }
+}
