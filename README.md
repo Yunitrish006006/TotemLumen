@@ -81,7 +81,7 @@ CI installs Gradle 9.5.1 explicitly.
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — renderer roadmap and completed milestones.
 - [`docs/P13_OVERWORLD_MOON.md`](docs/P13_OVERWORLD_MOON.md) — Overworld moon disk, moonlight transport, limitations and runtime validation.
 - [`docs/P14C_GENERIC_BLOCK_MODELS.md`](docs/P14C_GENERIC_BLOCK_MODELS.md) — generic static block-model extraction, GPU ABI, geometry-domain matrix, limits and validation plan.
-- [`docs/P14D_BLOCK_ENTITY_GEOMETRY.md`](docs/P14D_BLOCK_ENTITY_GEOMETRY.md) — block-entity renderer geometry capture, stable mutable mesh slots, lifecycle, limitations and runtime validation.
+- [`docs/P14D_BLOCK_ENTITY_GEOMETRY.md`](docs/P14D_BLOCK_ENTITY_GEOMETRY.md) — block-entity renderer geometry capture, stable mutable mesh slots, lifecycle, limitations and runtime validation.\n- [`docs/P14E_ALPHA_CUTOUT.md`](docs/P14E_ALPHA_CUTOUT.md) — sprite UV capture, compact alpha masks, shared-ray cutout semantics and runtime validation.
 - [`docs/P16_REFLECTION_ROUGHNESS.md`](docs/P16_REFLECTION_ROUGHNESS.md) — reflection model, surface profiles, ABI choice, limitations and validation plan.
 - [`docs/P16_MOLTENVK_PIPELINE_STALL.md`](docs/P16_MOLTENVK_PIPELINE_STALL.md) — Alpha 34/35 MoltenVK pipeline findings and the Alpha 36 multi-pass resolution.
 - [`docs/P16_MULTIPASS_SPLIT.md`](docs/P16_MULTIPASS_SPLIT.md) — Alpha 36 pass boundaries, synchronization, fallback semantics and runtime validation.
