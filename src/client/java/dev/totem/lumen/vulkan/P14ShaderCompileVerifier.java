@@ -70,7 +70,7 @@ public final class P14ShaderCompileVerifier {
         requireSourceMarker(source, "vec3 bootstrapColor(", "bootstrap output");
         if (source.contains("p13Moon")
                 || source.contains("P14E_FLUID_ABI_VERSION")
-                || source.contains("P17_ENTITY_MATERIAL_ID")
+                || source.contains("P17_ENTITY_MATERIAL_BASE")
                 || source.contains("p16ReflectionRgb")
                 || source.contains("temporalHistoryColor")
                 || source.contains("P18_TEXTURE_ABI_VERSION")) {
@@ -110,7 +110,7 @@ public final class P14ShaderCompileVerifier {
     private static void verifyUnifiedFullLighting(String source) {
         requireSourceMarker(
                 source,
-                "const uint P17_ENTITY_MATERIAL_ID = 0xFFFEu;",
+                "const uint P17_ENTITY_MATERIAL_BASE = 0xFE00u;",
                 "unified dynamic-entity tracing"
         );
         System.out.println(
@@ -554,17 +554,65 @@ public final class P14ShaderCompileVerifier {
     }
 
     private static void verifyP17DynamicEntitySource(String source, String label) {
-        requireSourceMarker(source, "const uint P17_ENTITY_MATERIAL_ID = 0xFFFEu;", label + " entity material id");
-        requireSourceMarker(source, "const uint P17_SPIDER_ENTITY_MATERIAL_ID = 0xFFFDu;", label + " spider material id");
-        requireSourceMarker(source, "const uint P17_ENTITY_ABI_VERSION = 2u;", label + " entity ABI v2");
+        requireSourceMarker(
+                source,
+                "const uint P17_ENTITY_MATERIAL_BASE = 0xFE00u;",
+                label + " generic entity material base"
+        );
+        requireSourceMarker(
+                source,
+                "const uint P17_ENTITY_ABI_VERSION = 3u;",
+                label + " entity ABI v3"
+        );
+        requireSourceMarker(
+                source,
+                "const uint P17_MAX_ENTITY_MATERIALS = "
+                        + GpuDynamicEntityScene.MAX_ENTITY_MATERIALS + "u;",
+                label + " generic material capacity"
+        );
+        requireSourceMarker(
+                source,
+                "const uint P17_ENTITY_MATERIAL_WORDS = "
+                        + GpuDynamicEntityScene.ENTITY_MATERIAL_WORDS_PER_RECORD + "u;",
+                label + " material descriptor stride"
+        );
+        requireSourceMarker(
+                source,
+                "const uint P17_ENTITY_TEXTURE_POOL_BASE = "
+                        + GpuDynamicEntityScene.ENTITY_TEXTURE_POOL_BASE_WORD + "u;",
+                label + " entity texture pool"
+        );
         requireSourceMarker(source, "HitResult p17TraceStaticRayLimited(", label + " static trace preservation");
         requireSourceMarker(source, "bool p17TrySectionEntities(", label + " section broad phase");
         requireSourceMarker(source, "HitResult p17TraceEntityRayLimited(", label + " entity trace");
         requireSourceMarker(source, "vec2 p17Uv(uint entityBase, uint wordBase)", label + " entity UV fetch");
-        requireSourceMarker(source, "bestUv = uvA * (1.0 - u - v) + uvB * u + uvC * v;", label + " barycentric UV");
-        requireSourceMarker(source, "uint p17SpiderEyeArgb(uint entityBase, vec2 uv)", label + " spider eye texture sampling");
-        requireSourceMarker(source, "p17UnpackUv(hit.steps)", label + " spider hit UV decode");
-        requireSourceMarker(source, "uintBitsToFloat(scene.data[89])", label + " runtime entity emissive gain");
+        requireSourceMarker(
+                source,
+                "bestUv = uvA * (1.0 - u - v) + uvB * u + uvC * v;",
+                label + " barycentric UV"
+        );
+        requireSourceMarker(
+                source,
+                "bool p17IsEntityMaterial(uint materialId)",
+                label + " generic material range"
+        );
+        requireSourceMarker(
+                source,
+                "uint p17EntityEmissiveArgb(uint entityBase, uint materialId, vec2 uv)",
+                label + " generic emissive texture sampling"
+        );
+        requireSourceMarker(
+                source,
+                "float p17EntityEmissiveGain(uint entityBase, uint materialId)",
+                label + " per-material emissive gain"
+        );
+        requireSourceMarker(
+                source,
+                "float p17EntityAlphaCutoff(uint entityBase, uint materialId)",
+                label + " per-material alpha cutoff"
+        );
+        requireSourceMarker(source, "p17UnpackUv(hit.steps)", label + " entity hit UV decode");
+        requireSourceMarker(source, "uintBitsToFloat(scene.data[89])", label + " global entity emissive gain");
         requireSourceMarker(
                 source,
                 "HitResult traceRayLimited(vec3 origin, vec3 direction, float maxDistance) {",
@@ -572,13 +620,21 @@ public final class P14ShaderCompileVerifier {
         );
         requireSourceMarker(
                 source,
-                "candidate.materialId == P17_ENTITY_MATERIAL_ID",
+                "if (p17IsEntityMaterial(candidate.materialId))",
                 label + " P15 opaque entity baseline"
         );
+        if (source.contains("SPIDER")
+                || source.contains("Spider")
+                || source.contains("spiderEye")) {
+            throw new IllegalStateException(
+                    "P17 production shader still contains entity-specific spider specialization"
+            );
+        }
         System.out.println(
                 "P17 dynamic-entity shader verification PASS (" + label + "): "
                         + "sectionBroadPhase=true, triangles=true, nearestHit=true, uv=true, "
-                        + "spiderEyeMask=true, resourcePackEmission=true, p15OpaqueBaseline=true"
+                        + "genericMaterials=true, resourcePackEmission=true, "
+                        + "entitySpecificShaderBranches=false, p15OpaqueBaseline=true"
         );
     }
 
