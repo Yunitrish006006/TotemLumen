@@ -33,7 +33,8 @@ public final class GpuDynamicEntityScene {
     public static final int ENTITY_MATERIAL_WORDS_PER_RECORD = 16;
     public static final int ENTITY_MATERIAL_WORDS =
             MAX_ENTITY_MATERIALS * ENTITY_MATERIAL_WORDS_PER_RECORD;
-    public static final int ENTITY_MATERIAL_FLAG_HAS_EMISSIVE = 1;
+    public static final int ENTITY_MATERIAL_FLAG_HAS_ALBEDO = 1;
+    public static final int ENTITY_MATERIAL_FLAG_HAS_EMISSIVE = 1 << 1;
 
     public static final int MAX_ENTITY_TEXTURE_DIMENSION = 128;
     public static final int MAX_ENTITY_EMISSIVE_TEXELS = 262_144;
@@ -266,57 +267,65 @@ public final class GpuDynamicEntityScene {
             int descriptor = baseWord + ENTITY_MATERIAL_BASE_WORD
                     + slot * ENTITY_MATERIAL_WORDS_PER_RECORD;
             int flags = 0;
-            int texelOffset = 0;
-            int width = 0;
-            int height = 0;
 
-            if (material.hasEmissiveTexture()) {
-                Dimensions dimensions = boundedDimensions(material.emissiveTexture());
-                long required = (long) dimensions.width() * dimensions.height();
-                if ((long) nextTexel + required > MAX_ENTITY_EMISSIVE_TEXELS) {
-                    throw new IllegalStateException(
-                            "P17 entity emissive texture pool exceeded while packing "
-                                    + material.entityTypeId()
-                    );
-                }
+            TextureSlice albedo = packTexture(
+                    buffer,
+                    baseWord,
+                    material.albedoTexture(),
+                    nextTexel
+            );
+            if (albedo.texelCount() > 0) {
+                flags |= ENTITY_MATERIAL_FLAG_HAS_ALBEDO;
+                nextTexel += albedo.texelCount();
+            }
 
+            TextureSlice emissive = packTexture(
+                    buffer,
+                    baseWord,
+                    material.hasEmissiveTexture() ? material.emissiveTexture() : null,
+                    nextTexel
+            );
+            if (emissive.texelCount() > 0) {
                 flags |= ENTITY_MATERIAL_FLAG_HAS_EMISSIVE;
-                texelOffset = nextTexel;
-                width = dimensions.width();
-                height = dimensions.height();
-                for (int y = 0; y < height; y++) {
-                    float v = (y + 0.5f) / height;
-                    for (int x = 0; x < width; x++) {
-                        float u = (x + 0.5f) / width;
-                        putWord(
-                                buffer,
-                                baseWord + ENTITY_TEXTURE_POOL_BASE_WORD + nextTexel,
-                                material.emissiveTexture().sampleNearest(u, v)
-                        );
-                        nextTexel++;
-                    }
-                }
+                nextTexel += emissive.texelCount();
             }
 
             putWord(buffer, descriptor, flags);
-            putWord(buffer, descriptor + 1, texelOffset);
-            putWord(buffer, descriptor + 2, width);
-            putWord(buffer, descriptor + 3, height);
+            putWord(buffer, descriptor + 1, albedo.offset());
+            putWord(buffer, descriptor + 2, albedo.width());
+            putWord(buffer, descriptor + 3, albedo.height());
+            putWord(buffer, descriptor + 4, emissive.offset());
+            putWord(buffer, descriptor + 5, emissive.width());
+            putWord(buffer, descriptor + 6, emissive.height());
             putWord(
                     buffer,
-                    descriptor + 4,
+                    descriptor + 7,
                     Float.floatToRawIntBits(material.emissiveGain())
             );
             putWord(
                     buffer,
-                    descriptor + 5,
+                    descriptor + 8,
                     Float.floatToRawIntBits(material.alphaCutoff())
             );
-            putWord(buffer, descriptor + 6, material.entityTypeId().hashCode());
-            putWord(buffer, descriptor + 7, slot);
-            for (int reserved = 8; reserved < ENTITY_MATERIAL_WORDS_PER_RECORD; reserved++) {
-                putWord(buffer, descriptor + reserved, 0);
-            }
+            putWord(
+                    buffer,
+                    descriptor + 9,
+                    Float.floatToRawIntBits(material.roughness())
+            );
+            putWord(
+                    buffer,
+                    descriptor + 10,
+                    Float.floatToRawIntBits(material.metallic())
+            );
+            putWord(
+                    buffer,
+                    descriptor + 11,
+                    Float.floatToRawIntBits(material.reflectionScale())
+            );
+            putWord(buffer, descriptor + 12, material.entityTypeId().hashCode());
+            putWord(buffer, descriptor + 13, slot);
+            putWord(buffer, descriptor + 14, 0);
+            putWord(buffer, descriptor + 15, 0);
 
             slots.put(material.entityTypeId(), slot);
             slot++;
@@ -326,6 +335,44 @@ public final class GpuDynamicEntityScene {
                 Map.copyOf(slots),
                 slot,
                 nextTexel
+        );
+    }
+
+    private static TextureSlice packTexture(
+            ByteBuffer buffer,
+            int baseWord,
+            PbrImage image,
+            int nextTexel
+    ) {
+        if (image == null) return new TextureSlice(0, 0, 0, 0);
+
+        Dimensions dimensions = boundedDimensions(image);
+        int texelCount = Math.multiplyExact(dimensions.width(), dimensions.height());
+        if ((long) nextTexel + texelCount > MAX_ENTITY_EMISSIVE_TEXELS) {
+            throw new IllegalStateException(
+                    "P17 entity texture pool exceeded: nextTexel="
+                            + nextTexel + ", requested=" + texelCount
+            );
+        }
+
+        int cursor = nextTexel;
+        for (int y = 0; y < dimensions.height(); y++) {
+            float v = (y + 0.5f) / dimensions.height();
+            for (int x = 0; x < dimensions.width(); x++) {
+                float u = (x + 0.5f) / dimensions.width();
+                putWord(
+                        buffer,
+                        baseWord + ENTITY_TEXTURE_POOL_BASE_WORD + cursor,
+                        image.sampleNearest(u, v)
+                );
+                cursor++;
+            }
+        }
+        return new TextureSlice(
+                nextTexel,
+                dimensions.width(),
+                dimensions.height(),
+                texelCount
         );
     }
 
@@ -427,6 +474,9 @@ public final class GpuDynamicEntityScene {
     }
 
     private record Dimensions(int width, int height) {
+    }
+
+    private record TextureSlice(int offset, int width, int height, int texelCount) {
     }
 
     private record MaterialPack(
