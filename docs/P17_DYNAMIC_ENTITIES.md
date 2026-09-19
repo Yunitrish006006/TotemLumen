@@ -5,7 +5,7 @@
 - **P17A capture + CPU broad phase: IMPLEMENTED / CI PASS**
 - **P17B bounded Vulkan scene ABI + independent tail upload: IMPLEMENTED / CI PASS**
 - **P17C shared nearest-hit shader integration: IMPLEMENTED / CI PASS, RUNTIME VALIDATION ACTIVE**
-- **P17D material fidelity: PENDING**
+- **P17D material fidelity: IN PROGRESS — generic emissive entity material ABI implemented**
 
 Alpha 42 does not yet claim visually complete entity ray tracing until the runtime gate passes.
 
@@ -59,7 +59,8 @@ Absolute world positions and AABBs remain double precision on the CPU. The P17B 
 - entity type id;
 - absolute world position;
 - world-space AABB;
-- copied entity-local quad positions.
+- copied entity-local quad positions;
+- copied per-vertex UV coordinates.
 
 The constructor defensively copies geometry and rejects malformed/non-finite data. No Minecraft client classes appear in this common scene type.
 
@@ -140,7 +141,12 @@ Each entity descriptor stores:
 - integer origin-section coordinates;
 - section-local entity origin;
 - section-local world AABB;
-- first-quad offset and quad count.
+- first-quad offset and quad count;
+- a stable entity-material table index.
+
+Each quad stores four positions plus four UV pairs. The P17 tail also reserves a fixed generic
+entity-material table and shared texture pool. Material slot 0 is the generic non-emissive baseline;
+other slots are resolved from CPU/resource data.
 
 The section-candidate table reuses the same section hash semantics used by the static voxel lookup. Candidate overflow and maximum probe length are explicit diagnostics.
 
@@ -206,11 +212,41 @@ duplicateEntityPipeline=false
 
 ### P17D — material baseline
 
-Status: **PENDING**
+Status: **IN PROGRESS — generic emissive material ABI implemented**
 
-The first accepted visual baseline may use a conservative entity material/color until texture sampling is connected, but entity geometry must not be presented as feature-complete material support.
+P17 now has a stable, data-driven entity material table. Production GLSL does not specialize on
+entity type names. An entity descriptor points to a material slot; the slot can supply an emissive
+texture and emissive gain from the shared entity texture pool. Per-hit UVs are barycentrically
+interpolated from captured model UVs.
 
-Skin/texture alpha, armor/equipment texture semantics, emissive entity layers and resource-pack/PBR data remain separate material work.
+Built-in rules live at:
+
+```text
+assets/totem-lumen/entity_material_rules.json
+```
+
+Spider and cave-spider eye overlays are the first users. Adding another emissive living entity is a
+data/texture change and does not require new P17 shader branches, new synthetic material IDs, or a
+different pipeline identity.
+
+Example:
+
+```json
+{
+  "materials": {
+    "minecraft:spider": {
+      "emissive_texture": [
+        "minecraft:textures/entity/spider/spider_eyes.png",
+        "minecraft:textures/entity/spider_eyes.png"
+      ],
+      "emissive_gain": 2.0
+    }
+  }
+}
+```
+
+Skin/base-color texture fidelity, texture alpha silhouettes, armor/equipment semantics and full
+entity LabPBR remain separate P17D work.
 
 ## Runtime gate
 
