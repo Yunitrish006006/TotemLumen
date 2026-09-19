@@ -1,5 +1,6 @@
 package dev.totem.lumen.vulkan;
 
+import dev.totem.lumen.gpu.GpuDynamicEntityScene;
 import dev.totem.lumen.gpu.GpuFluidScene;
 import dev.totem.lumen.gpu.GpuPbrTextureScene;
 import org.lwjgl.util.shaderc.Shaderc;
