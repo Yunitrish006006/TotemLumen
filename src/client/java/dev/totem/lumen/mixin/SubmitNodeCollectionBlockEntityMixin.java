@@ -38,7 +38,7 @@ public abstract class SubmitNodeCollectionBlockEntityMixin {
     }
 
     @Inject(
-            method = "submitModelPart(Lnet/minecraft/client/model/geom/ModelPart;Lcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/rendertype/RenderType;IILnet/minecraft/client/renderer/texture/TextureAtlasSprite;ZZILnet/minecraft/client/renderer/feature/ModelFeatureRenderer$CrumblingOverlay;I)V",
+            method = "submitModelPart(Lnet/minecraft/client/model/geom/ModelPart;Lcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/rendertype/RenderType;IILnet/minecraft/client/renderer/texture/TextureAtlasSprite;ILnet/minecraft/client/renderer/feature/ModelFeatureRenderer$CrumblingOverlay;I)V",
             at = @At("HEAD"),
             require = 0
     )
@@ -49,8 +49,6 @@ public abstract class SubmitNodeCollectionBlockEntityMixin {
             int light,
             int overlay,
             TextureAtlasSprite sprite,
-            boolean sheeted,
-            boolean hasFoil,
             int tintedColor,
             ModelFeatureRenderer.CrumblingOverlay crumblingOverlay,
             int outlineColor,
