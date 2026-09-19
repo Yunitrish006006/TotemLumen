@@ -278,7 +278,7 @@ final class P17DynamicEntityShaderPatch {
                     float bestDistance = maxDistance;
                     vec3 bestNormal = vec3(0.0);
                     vec2 bestUv = vec2(0.0);
-                    uint bestMaterialId = P17_ENTITY_MATERIAL_ID;
+                    uint bestMaterialId = P17_ENTITY_MATERIAL_BASE;
 
                     for (uint candidateIndex = 0u; candidateIndex < candidateCount; candidateIndex++) {
                         uint entityIndex = scene.data[bucket + 4u + candidateIndex];
