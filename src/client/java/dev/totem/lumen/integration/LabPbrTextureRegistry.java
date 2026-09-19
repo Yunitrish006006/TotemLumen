@@ -133,7 +133,7 @@ public final class LabPbrTextureRegistry {
         PbrTextureMaterialRuleRegistry.invalidate();
         BlockMaterialRuleRegistry.invalidate();
         RendererRuntimeTuningRegistry.invalidate();
-        SpiderEyeEmissiveTextureRegistry.invalidate();
+        EntityMaterialRuleRegistry.invalidate();
         reloadGeneration++;
         revision++;
         TotemLumenClient.LOGGER.info(
