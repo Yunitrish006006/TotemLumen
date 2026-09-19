@@ -39,6 +39,7 @@ final class P17DynamicEntityShaderPatch {
                 const uint P17_ENTITY_MATERIAL_LIMIT = %du;
                 const uint P17_ENTITY_ABI_VERSION = 3u;
                 const uint P17_MAX_ENTITY_MATERIALS = %du;
+                const uint P17_ENTITY_MATERIAL_FLAG_HAS_ALBEDO = %du;
                 const uint P17_ENTITY_MATERIAL_FLAG_HAS_EMISSIVE = %du;
                 const uint P17_MAX_ENTITIES = %du;
                 const uint P17_SECTION_LOOKUP_CAPACITY = %du;
@@ -135,33 +136,79 @@ final class P17DynamicEntityShaderPatch {
                             + slot * P17_ENTITY_MATERIAL_WORDS;
                 }
 
-                uint p17EntityEmissiveArgb(uint entityBase, uint materialId, vec2 uv) {
-                    uint descriptor = p17EntityMaterialDescriptor(entityBase, materialId);
-                    uint flags = scene.data[descriptor];
-                    if ((flags & P17_ENTITY_MATERIAL_FLAG_HAS_EMISSIVE) == 0u) return 0u;
-
-                    uint width = scene.data[descriptor + 2u];
-                    uint height = scene.data[descriptor + 3u];
+                uint p17EntityTextureArgb(
+                        uint entityBase,
+                        uint descriptor,
+                        uint offsetWord,
+                        uint widthWord,
+                        uint heightWord,
+                        vec2 uv
+                ) {
+                    uint width = scene.data[descriptor + widthWord];
+                    uint height = scene.data[descriptor + heightWord];
                     if (width == 0u || height == 0u) return 0u;
 
                     vec2 wrapped = fract(uv);
                     uint x = min(width - 1u, uint(floor(wrapped.x * float(width))));
                     uint y = min(height - 1u, uint(floor(wrapped.y * float(height))));
-                    uint texelOffset = scene.data[descriptor + 1u];
+                    uint texelOffset = scene.data[descriptor + offsetWord];
                     return scene.data[
                         entityBase + P17_ENTITY_TEXTURE_POOL_BASE
                         + texelOffset + y * width + x
                     ];
                 }
 
+                uint p17EntityAlbedoArgb(uint entityBase, uint materialId, vec2 uv) {
+                    uint descriptor = p17EntityMaterialDescriptor(entityBase, materialId);
+                    uint flags = scene.data[descriptor];
+                    if ((flags & P17_ENTITY_MATERIAL_FLAG_HAS_ALBEDO) == 0u) return 0u;
+                    return p17EntityTextureArgb(
+                        entityBase,
+                        descriptor,
+                        1u,
+                        2u,
+                        3u,
+                        uv
+                    );
+                }
+
+                uint p17EntityEmissiveArgb(uint entityBase, uint materialId, vec2 uv) {
+                    uint descriptor = p17EntityMaterialDescriptor(entityBase, materialId);
+                    uint flags = scene.data[descriptor];
+                    if ((flags & P17_ENTITY_MATERIAL_FLAG_HAS_EMISSIVE) == 0u) return 0u;
+                    return p17EntityTextureArgb(
+                        entityBase,
+                        descriptor,
+                        4u,
+                        5u,
+                        6u,
+                        uv
+                    );
+                }
+
                 float p17EntityEmissiveGain(uint entityBase, uint materialId) {
                     uint descriptor = p17EntityMaterialDescriptor(entityBase, materialId);
-                    return max(uintBitsToFloat(scene.data[descriptor + 4u]), 0.0);
+                    return max(uintBitsToFloat(scene.data[descriptor + 7u]), 0.0);
                 }
 
                 float p17EntityAlphaCutoff(uint entityBase, uint materialId) {
                     uint descriptor = p17EntityMaterialDescriptor(entityBase, materialId);
-                    return clamp(uintBitsToFloat(scene.data[descriptor + 5u]), 0.0, 1.0);
+                    return clamp(uintBitsToFloat(scene.data[descriptor + 8u]), 0.0, 1.0);
+                }
+
+                float p17EntityRoughness(uint entityBase, uint materialId) {
+                    uint descriptor = p17EntityMaterialDescriptor(entityBase, materialId);
+                    return clamp(uintBitsToFloat(scene.data[descriptor + 9u]), 0.0, 1.0);
+                }
+
+                float p17EntityMetallic(uint entityBase, uint materialId) {
+                    uint descriptor = p17EntityMaterialDescriptor(entityBase, materialId);
+                    return clamp(uintBitsToFloat(scene.data[descriptor + 10u]), 0.0, 1.0);
+                }
+
+                float p17EntityReflectionScale(uint entityBase, uint materialId) {
+                    uint descriptor = p17EntityMaterialDescriptor(entityBase, materialId);
+                    return max(uintBitsToFloat(scene.data[descriptor + 11u]), 0.0);
                 }
 
                 bool p17IntersectAabb(
@@ -468,6 +515,7 @@ final class P17DynamicEntityShaderPatch {
                 """).formatted(
                 ENTITY_MATERIAL_LIMIT,
                 GpuDynamicEntityScene.MAX_ENTITY_MATERIALS,
+                GpuDynamicEntityScene.ENTITY_MATERIAL_FLAG_HAS_ALBEDO,
                 GpuDynamicEntityScene.ENTITY_MATERIAL_FLAG_HAS_EMISSIVE,
                 GpuDynamicEntityScene.MAX_ENTITIES,
                 GpuDynamicEntityScene.SECTION_LOOKUP_CAPACITY,
@@ -513,12 +561,42 @@ final class P17DynamicEntityShaderPatch {
                 """;
         String p18EntityMaterial = """
                     if (p17IsEntityMaterial(hit.materialId)) {
-                        surface.albedo = materialColor(P17_ENTITY_MATERIAL_BASE);
                         uint entityBase = p17EntitySceneBase();
+                        vec2 entityUv = p17UnpackUv(hit.steps);
+                        uint albedoArgb = p17EntityAlbedoArgb(
+                            entityBase,
+                            hit.materialId,
+                            entityUv
+                        );
+                        if (albedoArgb != 0u) {
+                            surface.albedo = p17ArgbRgb(albedoArgb);
+                            surface.textured = 1u;
+                        } else {
+                            surface.albedo = materialColor(P17_ENTITY_MATERIAL_BASE);
+                        }
+
+                        surface.roughness = p17EntityRoughness(
+                            entityBase,
+                            hit.materialId
+                        );
+                        surface.metallic = p17EntityMetallic(
+                            entityBase,
+                            hit.materialId
+                        );
+                        surface.reflectionScale = p17EntityReflectionScale(
+                            entityBase,
+                            hit.materialId
+                        );
+                        surface.f0 = mix(
+                            vec3(0.04),
+                            surface.albedo,
+                            surface.metallic
+                        );
+
                         uint emissiveArgb = p17EntityEmissiveArgb(
                             entityBase,
                             hit.materialId,
-                            p17UnpackUv(hit.steps)
+                            entityUv
                         );
                         float emissiveAlpha =
                                 float((emissiveArgb >> 24u) & 255u) / 255.0;
