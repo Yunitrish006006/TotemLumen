@@ -68,10 +68,17 @@ tasks.register('verifyP14EAlphaCutout', JavaExec) {
     mainClass = 'dev.totem.lumen.geometry.P14EAlphaCutoutVerifier'
 }
 
+tasks.register('verifyP14DSubmitMixins', JavaExec) {
+    dependsOn tasks.named('clientClasses')
+    classpath = sourceSets.client.runtimeClasspath + sourceSets.main.runtimeClasspath
+    mainClass = 'dev.totem.lumen.mixin.P14DSubmitMixinVerifier'
+}
+
 tasks.named('check') {
     dependsOn tasks.named('verifyRuntimeShader')
     dependsOn tasks.named('verifyP14DDynamicMeshes')
     dependsOn tasks.named('verifyP14EAlphaCutout')
+    dependsOn tasks.named('verifyP14DSubmitMixins')
 }
 
 java {
