@@ -25,7 +25,9 @@ public final class P14ShaderCompileVerifier {
         baseSource = P16ReflectionRoughnessPatch.apply(baseSource);
 
         verifyP13MoonSource(baseSource);
+        verifyP14EAlphaCutoutSource(baseSource, "P12-P15 base pass");
         String reflectionSource = P16ReflectionPassShader.build();
+        verifyP14EAlphaCutoutSource(reflectionSource, "P16 reflection pass");
 
         long compiler = Shaderc.shaderc_compiler_initialize();
         if (compiler == 0L) {
@@ -54,6 +56,19 @@ public final class P14ShaderCompileVerifier {
         System.out.println(
                 "P13 moon shader verification PASS: disk=true, coldDirectionalLight=true, "
                         + "oppositeSun=true, p15Transmission=true"
+        );
+    }
+
+    private static void verifyP14EAlphaCutoutSource(String source, String label) {
+        requireSourceMarker(source, "bool p14AlphaMaskOpaque(", label + " alpha-mask lookup");
+        requireSourceMarker(source, "vec2 p14ModelUv(", label + " mesh UV lookup");
+        requireSourceMarker(
+                source,
+                "if (!p14AlphaMaskOpaque(alphaMaskId, alphaUv)) return;",
+                label + " transparent-texel rejection"
+        );
+        System.out.println(
+                label + " P14E verification PASS: barycentricUv=true, alphaMask=true"
         );
     }
 
