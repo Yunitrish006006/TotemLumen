@@ -256,6 +256,25 @@ public final class GpuDynamicEntityScene {
 
         Map<String, Integer> slots = new HashMap<>();
         int nextTexel = 0;
+
+        int baselineDescriptor = baseWord + ENTITY_MATERIAL_BASE_WORD;
+        putWord(buffer, baselineDescriptor, 0);
+        putWord(buffer, baselineDescriptor + 1, 0);
+        putWord(buffer, baselineDescriptor + 2, 0);
+        putWord(buffer, baselineDescriptor + 3, 0);
+        putWord(buffer, baselineDescriptor + 4, 0);
+        putWord(buffer, baselineDescriptor + 5, 0);
+        putWord(buffer, baselineDescriptor + 6, 0);
+        putWord(buffer, baselineDescriptor + 7, Float.floatToRawIntBits(0.0f));
+        putWord(buffer, baselineDescriptor + 8, Float.floatToRawIntBits(0.0f));
+        putWord(buffer, baselineDescriptor + 9, Float.floatToRawIntBits(0.80f));
+        putWord(buffer, baselineDescriptor + 10, Float.floatToRawIntBits(0.0f));
+        putWord(buffer, baselineDescriptor + 11, Float.floatToRawIntBits(1.0f));
+        putWord(buffer, baselineDescriptor + 12, 0);
+        putWord(buffer, baselineDescriptor + 13, 0);
+        putWord(buffer, baselineDescriptor + 14, 0);
+        putWord(buffer, baselineDescriptor + 15, 0);
+
         int slot = 1; // Slot 0 is stable baseline/no-special-material behavior.
         for (EntityMaterialData material : sorted) {
             if (slots.containsKey(material.entityTypeId())) {
