@@ -16,8 +16,12 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 /** Covers renderers that submit through collector.order(...), which returns a SubmitNodeCollection. */
 @Mixin(SubmitNodeCollection.class)
 public abstract class SubmitNodeCollectionBlockEntityMixin {
-    @Inject(method = "submitModel", at = @At("HEAD"), require = 0)
-    private <S> void totemLumen$captureModelWithSprite(
+    @Inject(
+            method = "submitModel(Lnet/minecraft/client/model/Model;Ljava/lang/Object;Lcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/rendertype/RenderType;IIILnet/minecraft/client/renderer/texture/TextureAtlasSprite;ILnet/minecraft/client/renderer/feature/ModelFeatureRenderer$CrumblingOverlay;)V",
+            at = @At("HEAD"),
+            require = 0
+    )
+    private <S> void totemLumen$captureModel(
             Model<? super S> model,
             S state,
             PoseStack poseStack,
@@ -33,22 +37,11 @@ public abstract class SubmitNodeCollectionBlockEntityMixin {
         BlockEntityRenderGeometryCapture.captureModel(model, state, poseStack);
     }
 
-    @Inject(method = "submitModel", at = @At("HEAD"), require = 0)
-    private <S> void totemLumen$captureModel(
-            Model<? super S> model,
-            S state,
-            PoseStack poseStack,
-            RenderType renderType,
-            int light,
-            int overlay,
-            int color,
-            ModelFeatureRenderer.CrumblingOverlay crumblingOverlay,
-            CallbackInfo ci
-    ) {
-        BlockEntityRenderGeometryCapture.captureModel(model, state, poseStack);
-    }
-
-    @Inject(method = "submitModelPart", at = @At("HEAD"), require = 0)
+    @Inject(
+            method = "submitModelPart(Lnet/minecraft/client/model/geom/ModelPart;Lcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/rendertype/RenderType;IILnet/minecraft/client/renderer/texture/TextureAtlasSprite;ZZILnet/minecraft/client/renderer/feature/ModelFeatureRenderer$CrumblingOverlay;I)V",
+            at = @At("HEAD"),
+            require = 0
+    )
     private void totemLumen$captureModelPart(
             ModelPart modelPart,
             PoseStack poseStack,
