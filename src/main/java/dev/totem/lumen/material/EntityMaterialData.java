@@ -5,29 +5,65 @@ import java.util.Objects;
 /**
  * Data-driven material payload for one dynamic entity type.
  *
- * <p>The GPU shader consumes only fixed material descriptor fields. Entity type names and resource
- * paths are resolved on the CPU so adding another emissive entity does not specialize GLSL.</p>
+ * <p>The fixed GPU descriptor owns both base and emissive texture handles plus common optical
+ * scalars. Entity type names and resource paths are resolved on the CPU, so adding or tuning an
+ * entity material does not specialize GLSL.</p>
  */
 public record EntityMaterialData(
         String entityTypeId,
+        PbrImage albedoTexture,
         PbrImage emissiveTexture,
         float emissiveGain,
-        float alphaCutoff
+        float alphaCutoff,
+        float roughness,
+        float metallic,
+        float reflectionScale
 ) {
     public EntityMaterialData {
         Objects.requireNonNull(entityTypeId, "entityTypeId");
         if (entityTypeId.isBlank()) {
             throw new IllegalArgumentException("entityTypeId cannot be blank");
         }
-        if (!Float.isFinite(emissiveGain) || emissiveGain < 0.0f || emissiveGain > 8.0f) {
-            throw new IllegalArgumentException("emissiveGain must be finite and in [0, 8]");
-        }
-        if (!Float.isFinite(alphaCutoff) || alphaCutoff < 0.0f || alphaCutoff > 1.0f) {
-            throw new IllegalArgumentException("alphaCutoff must be finite and in [0, 1]");
-        }
+        emissiveGain = finiteRange(emissiveGain, 0.0f, 8.0f, "emissiveGain");
+        alphaCutoff = finiteRange(alphaCutoff, 0.0f, 1.0f, "alphaCutoff");
+        roughness = finiteRange(roughness, 0.0f, 1.0f, "roughness");
+        metallic = finiteRange(metallic, 0.0f, 1.0f, "metallic");
+        reflectionScale = finiteRange(reflectionScale, 0.0f, 4.0f, "reflectionScale");
+    }
+
+    /** Compatibility constructor for emissive-only entity materials. */
+    public EntityMaterialData(
+            String entityTypeId,
+            PbrImage emissiveTexture,
+            float emissiveGain,
+            float alphaCutoff
+    ) {
+        this(
+                entityTypeId,
+                null,
+                emissiveTexture,
+                emissiveGain,
+                alphaCutoff,
+                0.8f,
+                0.0f,
+                1.0f
+        );
+    }
+
+    public boolean hasAlbedoTexture() {
+        return albedoTexture != null;
     }
 
     public boolean hasEmissiveTexture() {
         return emissiveTexture != null && emissiveGain > 0.0f;
+    }
+
+    private static float finiteRange(float value, float min, float max, String name) {
+        if (!Float.isFinite(value) || value < min || value > max) {
+            throw new IllegalArgumentException(
+                    name + " must be finite and in [" + min + ", " + max + "]"
+            );
+        }
+        return value;
     }
 }
