@@ -980,7 +980,8 @@ public final class P5StableLookupRenderer {
         if (sections.size() < MIN_SECTIONS) return;
 
         long settingsRevision = RendererSettings.revision();
-        if (settingsRevision != lastSettingsRevision) {
+        boolean settingsChanged = settingsRevision != lastSettingsRevision;
+        if (settingsChanged) {
             historyValid = false;
             lastSettingsRevision = settingsRevision;
         }
@@ -1007,6 +1008,25 @@ public final class P5StableLookupRenderer {
         int targetHeight = Math.max(1, Math.round(targetWidth * (windowHeight / (float) windowWidth)));
         int capacityWidth = RendererSettings.InternalResolution.HIGH.targetWidth(windowWidth);
         int capacityHeight = Math.max(1, Math.round(capacityWidth * (windowHeight / (float) windowWidth)));
+
+        if (settingsChanged) {
+            TotemLumenClient.LOGGER.info(
+                    "Renderer settings ACTIVE: window={}x{}, render={}x{}, internalResolution={}, giSamples={}, shadowSamples={}, rayDistance={}, reflections={}, reflectionBounces={}, reflectionDistance={}, temporal={}, denoiseRadius={}",
+                    windowWidth,
+                    windowHeight,
+                    targetWidth,
+                    targetHeight,
+                    RendererSettings.internalResolution(),
+                    RendererSettings.giQuality().samples(),
+                    RendererSettings.shadowQuality().samples(),
+                    RendererSettings.rayDistance(),
+                    RendererSettings.reflectionsEnabled(),
+                    RendererSettings.reflectionBounces(),
+                    RendererSettings.reflectionDistance(),
+                    RendererSettings.temporalQuality(),
+                    RendererSettings.denoiseQuality().radius()
+            );
+        }
 
         if (resources == null || resources.width != capacityWidth || resources.height != capacityHeight) {
             destroyResourcesIfSafe();
