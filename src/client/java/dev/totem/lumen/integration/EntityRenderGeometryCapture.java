@@ -13,10 +13,9 @@ import org.joml.Matrix4f;
 import org.joml.Vector3f;
 
 import java.util.ArrayDeque;
-import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Deque;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Set;
 
 /**
@@ -86,8 +85,8 @@ public final class EntityRenderGeometryCapture {
                 context.worldX,
                 context.worldY,
                 context.worldZ,
-                toFloatArray(context.positions),
-                toFloatArray(context.uvs)
+                context.positions.toArray(),
+                context.uvs.toArray()
         );
         EntityRenderGeometryCache.publish(context.renderState, snapshot, context.levelGameTime);
     }
@@ -120,15 +119,12 @@ public final class EntityRenderGeometryCapture {
             PoseStack partStack = new PoseStack();
             part.visit(partStack, (partPose, path, cubeIndex, cube) -> {
                 Matrix4f transform = new Matrix4f(dispatcherLocal).mul(partPose.pose());
+                Vector3f point = new Vector3f();
                 for (ModelPart.Polygon polygon : cube.polygons) {
                     ModelPart.Vertex[] vertices = polygon.vertices();
                     if (vertices == null || vertices.length != 4) continue;
                     for (ModelPart.Vertex vertex : vertices) {
-                        Vector3f point = new Vector3f(
-                                vertex.worldX(),
-                                vertex.worldY(),
-                                vertex.worldZ()
-                        );
+                        point.set(vertex.worldX(), vertex.worldY(), vertex.worldZ());
                         transform.transformPosition(point);
                         // EntityRenderDispatcher translates by the camera-relative render position
                         // before renderer/model transforms. Remove only that placement so the
@@ -170,23 +166,32 @@ public final class EntityRenderGeometryCapture {
         return value;
     }
 
-    private static float[] toFloatArray(List<Float> values) {
-        float[] result = new float[values.size()];
-        for (int i = 0; i < values.size(); i++) result[i] = values.get(i);
-        return result;
-    }
-
     private static long submissionHash(Object source, PoseStack poseStack) {
         long hash = 0xcbf29ce484222325L;
         hash ^= System.identityHashCode(source);
         hash *= 0x100000001b3L;
-        float[] matrix = new float[16];
-        poseStack.last().pose().get(matrix);
-        for (float value : matrix) {
-            hash ^= Float.floatToRawIntBits(value);
-            hash *= 0x100000001b3L;
-        }
-        return hash;
+        Matrix4f matrix = poseStack.last().pose();
+        hash = hashFloat(hash, matrix.m00());
+        hash = hashFloat(hash, matrix.m01());
+        hash = hashFloat(hash, matrix.m02());
+        hash = hashFloat(hash, matrix.m03());
+        hash = hashFloat(hash, matrix.m10());
+        hash = hashFloat(hash, matrix.m11());
+        hash = hashFloat(hash, matrix.m12());
+        hash = hashFloat(hash, matrix.m13());
+        hash = hashFloat(hash, matrix.m20());
+        hash = hashFloat(hash, matrix.m21());
+        hash = hashFloat(hash, matrix.m22());
+        hash = hashFloat(hash, matrix.m23());
+        hash = hashFloat(hash, matrix.m30());
+        hash = hashFloat(hash, matrix.m31());
+        hash = hashFloat(hash, matrix.m32());
+        return hashFloat(hash, matrix.m33());
+    }
+
+    private static long hashFloat(long hash, float value) {
+        hash ^= Float.floatToRawIntBits(value);
+        return hash * 0x100000001b3L;
     }
 
     private static final class CaptureContext {
@@ -202,8 +207,8 @@ public final class EntityRenderGeometryCapture {
         final double renderY;
         final double renderZ;
         final Matrix4f baseInverse;
-        final List<Float> positions = new ArrayList<>();
-        final List<Float> uvs = new ArrayList<>();
+        final FloatAccumulator positions = new FloatAccumulator(512);
+        final FloatAccumulator uvs = new FloatAccumulator(384);
         final Set<Long> submissions = new HashSet<>();
         boolean hadModelSubmission;
 
@@ -237,6 +242,30 @@ public final class EntityRenderGeometryCapture {
 
         boolean markSubmission(Object source, PoseStack poseStack) {
             return submissions.add(submissionHash(source, poseStack));
+        }
+    }
+
+    private static final class FloatAccumulator {
+        private float[] values;
+        private int size;
+
+        FloatAccumulator(int initialCapacity) {
+            values = new float[Math.max(16, initialCapacity)];
+        }
+
+        void add(float value) {
+            if (size == values.length) {
+                values = Arrays.copyOf(values, values.length << 1);
+            }
+            values[size++] = value;
+        }
+
+        boolean isEmpty() {
+            return size == 0;
+        }
+
+        float[] toArray() {
+            return Arrays.copyOf(values, size);
         }
     }
 }
