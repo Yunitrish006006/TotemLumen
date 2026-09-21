@@ -34,6 +34,13 @@ class GpuDynamicEntitySceneTest {
         assertEquals(1, result.entityCount());
         assertEquals(1, result.totalQuads());
         assertEquals(0, result.overflowAssignments());
+        assertEquals(4, word(buffer, 0));
+        assertEquals(0, word(buffer, GpuDynamicEntityScene.GLOBAL_MIN_SECTION_X_WORD));
+        assertEquals(3, word(buffer, GpuDynamicEntityScene.GLOBAL_MIN_SECTION_Y_WORD));
+        assertEquals(-3, word(buffer, GpuDynamicEntityScene.GLOBAL_MIN_SECTION_Z_WORD));
+        assertEquals(3, word(buffer, GpuDynamicEntityScene.GLOBAL_MAX_SECTION_X_WORD));
+        assertEquals(5, word(buffer, GpuDynamicEntityScene.GLOBAL_MAX_SECTION_Y_WORD));
+        assertEquals(-1, word(buffer, GpuDynamicEntityScene.GLOBAL_MAX_SECTION_Z_WORD));
 
         int descriptor = GpuDynamicEntityScene.ENTITY_DESCRIPTOR_BASE_WORD;
         assertEquals(2, word(buffer, descriptor));
@@ -108,7 +115,7 @@ class GpuDynamicEntitySceneTest {
                 List.of(material)
         );
 
-        assertEquals(3, word(buffer, 0));
+        assertEquals(4, word(buffer, 0));
         assertEquals(2, result.materialCount());
         assertEquals(4, result.textureTexelCount());
 
