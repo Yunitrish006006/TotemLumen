@@ -22,7 +22,7 @@ import java.util.Objects;
  * therefore changes data, not generated GLSL.</p>
  */
 public final class GpuDynamicEntityScene {
-    public static final int ABI_VERSION = 3;
+    public static final int ABI_VERSION = 4;
     public static final int MAX_ENTITIES = 256;
     public static final int MAX_ENTITY_QUADS = 65_536;
     public static final int SECTION_LOOKUP_CAPACITY = 512;
@@ -39,7 +39,14 @@ public final class GpuDynamicEntityScene {
     public static final int MAX_ENTITY_TEXTURE_DIMENSION = 128;
     public static final int MAX_ENTITY_EMISSIVE_TEXELS = 262_144;
 
-    public static final int HEADER_WORDS = 16;
+    public static final int HEADER_WORDS = 24;
+    public static final int GLOBAL_MIN_SECTION_X_WORD = 13;
+    public static final int GLOBAL_MIN_SECTION_Y_WORD = 14;
+    public static final int GLOBAL_MIN_SECTION_Z_WORD = 15;
+    public static final int GLOBAL_MAX_SECTION_X_WORD = 16;
+    public static final int GLOBAL_MAX_SECTION_Y_WORD = 17;
+    public static final int GLOBAL_MAX_SECTION_Z_WORD = 18;
+
     public static final int ENTITY_DESCRIPTOR_WORDS_PER_RECORD = 24;
     public static final int ENTITY_DESCRIPTOR_WORDS =
             MAX_ENTITIES * ENTITY_DESCRIPTOR_WORDS_PER_RECORD;
@@ -220,9 +227,39 @@ public final class GpuDynamicEntityScene {
         putWord(buffer, baseWord + 10, ENTITY_TEXTURE_POOL_BASE_WORD);
         putWord(buffer, baseWord + 11, materials.textureTexelCount());
         putWord(buffer, baseWord + 12, ENTITY_MATERIAL_WORDS_PER_RECORD);
-        putWord(buffer, baseWord + 13, 0);
-        putWord(buffer, baseWord + 14, 0);
-        putWord(buffer, baseWord + 15, 0);
+
+        if (buckets.isEmpty()) {
+            for (int word = GLOBAL_MIN_SECTION_X_WORD; word <= GLOBAL_MAX_SECTION_Z_WORD; word++) {
+                putWord(buffer, baseWord + word, 0);
+            }
+        } else {
+            int minSectionX = Integer.MAX_VALUE;
+            int minSectionY = Integer.MAX_VALUE;
+            int minSectionZ = Integer.MAX_VALUE;
+            int maxSectionX = Integer.MIN_VALUE;
+            int maxSectionY = Integer.MIN_VALUE;
+            int maxSectionZ = Integer.MIN_VALUE;
+            for (Map.Entry<SectionKey, int[]> entry : buckets) {
+                SectionKey key = entry.getKey();
+                minSectionX = Math.min(minSectionX, key.x());
+                minSectionY = Math.min(minSectionY, key.y());
+                minSectionZ = Math.min(minSectionZ, key.z());
+                maxSectionX = Math.max(maxSectionX, key.x());
+                maxSectionY = Math.max(maxSectionY, key.y());
+                maxSectionZ = Math.max(maxSectionZ, key.z());
+            }
+            // One-section padding keeps the GPU broad-phase conservative at large world
+            // coordinates where float ray math has lower sub-block precision.
+            putWord(buffer, baseWord + GLOBAL_MIN_SECTION_X_WORD, minSectionX - 1);
+            putWord(buffer, baseWord + GLOBAL_MIN_SECTION_Y_WORD, minSectionY - 1);
+            putWord(buffer, baseWord + GLOBAL_MIN_SECTION_Z_WORD, minSectionZ - 1);
+            putWord(buffer, baseWord + GLOBAL_MAX_SECTION_X_WORD, maxSectionX + 1);
+            putWord(buffer, baseWord + GLOBAL_MAX_SECTION_Y_WORD, maxSectionY + 1);
+            putWord(buffer, baseWord + GLOBAL_MAX_SECTION_Z_WORD, maxSectionZ + 1);
+        }
+        for (int word = GLOBAL_MAX_SECTION_Z_WORD + 1; word < HEADER_WORDS; word++) {
+            putWord(buffer, baseWord + word, 0);
+        }
 
         int usedWords = Math.addExact(
                 QUAD_POOL_BASE_WORD,
