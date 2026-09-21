@@ -129,6 +129,21 @@ public final class P14ShaderCompileVerifier {
         );
         requireSourceMarker(source, "uint p14eFindFluidCell(", label + " block-coordinate fluid lookup");
         requireSourceMarker(source, "bool p14eIntersectFluidCell(", label + " exact fluid quad trace");
+        requireSourceMarker(
+                source,
+                "uint voxelWordAtSection(ivec3 voxel, ivec3 sectionCoord, int slot)",
+                label + " cached section voxel lookup"
+        );
+        requireSourceMarker(
+                source,
+                "int sectionSlot = findSectionSlot(sectionCoord);",
+                label + " section slot cache"
+        );
+        requireSourceMarker(
+                source,
+                "uint p14eFluidIndex = sectionSlot < 0",
+                label + " missing-section fluid lookup skip"
+        );
         requireSourceMarker(source, "bool p14eFluidOnly = false;", label + " pure-fluid suppression state");
         requireSourceMarker(source, "bool p14eStaticHit = false;", label + " waterlogged static coexistence");
         requireSourceMarker(
@@ -141,7 +156,7 @@ public final class P14ShaderCompileVerifier {
         System.out.println(
                 "P14E exact-fluid shader verification PASS (" + label + "): abi="
                         + GpuFluidScene.ABI_VERSION
-                        + ", blockLookup=true, resolvedQuads=true, waterloggedCoexistence=true, nearestHit=true"
+                        + ", blockLookup=true, sectionSlotCache=true, missingSectionFluidSkip=true, resolvedQuads=true, waterloggedCoexistence=true, nearestHit=true"
         );
     }
 
