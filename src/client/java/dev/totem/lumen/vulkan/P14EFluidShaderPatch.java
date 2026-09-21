@@ -205,7 +205,7 @@ final class P14EFluidShaderPatch {
         traceStart = source.indexOf(traceMarker, traceStart + helpers.length());
         String iterationMarker = "for (uint iteration = 0u; iteration < maxSteps; iteration++) {";
         int iterationStart = source.indexOf(iterationMarker, traceStart);
-        String candidateStartMarker = "uint voxelWord = voxelWordAt(voxel);";
+        String candidateStartMarker = "uint voxelWord = voxelWordAtSection(voxel, sectionCoord, sectionSlot);";
         int candidateStart = source.indexOf(candidateStartMarker, iterationStart);
         String traversalMarker = "if (tMax.x <= tMax.y && tMax.x <= tMax.z) {";
         int traversalStart = source.indexOf(traversalMarker, candidateStart);
@@ -220,7 +220,9 @@ final class P14EFluidShaderPatch {
                         float cellExitDistance = min(tMax.x, min(tMax.y, tMax.z));
 
                         uint p14eFluidBase = p14eFluidSceneBase();
-                        uint p14eFluidIndex = p14eFindFluidCell(p14eFluidBase, voxel);
+                        uint p14eFluidIndex = sectionSlot < 0
+                                ? P14E_INVALID_INDEX
+                                : p14eFindFluidCell(p14eFluidBase, voxel);
                         bool p14eHasFluid = p14eFluidIndex != P14E_INVALID_INDEX;
                         bool p14eFluidOnly = false;
                         bool p14eFluidHit = false;
@@ -289,7 +291,7 @@ final class P14EFluidShaderPatch {
         source = patchFluidDebugView(source);
 
         TotemLumenClient.LOGGER.info(
-                "P14E exact fluid tracing active: abi={}, blockLookup={}, maxCells={}, maxQuads={}, waterloggedCoexistence=true, sharedDda=true",
+                "P14E exact fluid tracing active: abi={}, blockLookup={}, maxCells={}, maxQuads={}, waterloggedCoexistence=true, sharedDda=true, missingSectionFluidSkip=true",
                 GpuFluidScene.ABI_VERSION,
                 GpuFluidScene.LOOKUP_CAPACITY,
                 GpuFluidScene.MAX_FLUID_CELLS,
