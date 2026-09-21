@@ -562,8 +562,9 @@ public final class P14ShaderCompileVerifier {
         );
         requireSourceMarker(
                 source,
-                "const uint P17_ENTITY_ABI_VERSION = 3u;",
-                label + " entity ABI v3"
+                "const uint P17_ENTITY_ABI_VERSION = "
+                        + GpuDynamicEntityScene.ABI_VERSION + "u;",
+                label + " entity ABI v" + GpuDynamicEntityScene.ABI_VERSION
         );
         requireSourceMarker(
                 source,
@@ -598,6 +599,16 @@ public final class P14ShaderCompileVerifier {
         requireSourceMarker(source, "HitResult p17TraceStaticRayLimited(", label + " static trace preservation");
         requireSourceMarker(source, "bool p17TrySectionEntities(", label + " section broad phase");
         requireSourceMarker(source, "HitResult p17TraceEntityRayLimited(", label + " entity trace");
+        requireSourceMarker(
+                source,
+                "bool p17EntitySceneInterval(",
+                label + " global entity bounds culling"
+        );
+        requireSourceMarker(
+                source,
+                "float sectionSampleDistance = min(sceneEntry + 0.001, sceneExit);",
+                label + " entity DDA starts at bounds entry"
+        );
         requireSourceMarker(source, "vec2 p17Uv(uint entityBase, uint wordBase)", label + " entity UV fetch");
         requireSourceMarker(
                 source,
@@ -665,7 +676,7 @@ public final class P14ShaderCompileVerifier {
         }
         System.out.println(
                 "P17 dynamic-entity shader verification PASS (" + label + "): "
-                        + "sectionBroadPhase=true, triangles=true, nearestHit=true, uv=true, "
+                        + "sectionBroadPhase=true, globalBounds=true, entrySkip=true, triangles=true, nearestHit=true, uv=true, "
                         + "genericMaterials=true, albedo=data, optics=data, resourcePackEmission=true, "
                         + "entitySpecificShaderBranches=false, p15OpaqueBaseline=true"
         );
