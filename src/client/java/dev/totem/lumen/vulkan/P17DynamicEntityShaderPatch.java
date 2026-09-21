@@ -37,7 +37,7 @@ final class P17DynamicEntityShaderPatch {
         String helpers = ("""
                 const uint P17_ENTITY_MATERIAL_BASE = 0xFE00u;
                 const uint P17_ENTITY_MATERIAL_LIMIT = %du;
-                const uint P17_ENTITY_ABI_VERSION = 3u;
+                const uint P17_ENTITY_ABI_VERSION = %du;
                 const uint P17_MAX_ENTITY_MATERIALS = %du;
                 const uint P17_ENTITY_MATERIAL_FLAG_HAS_ALBEDO = %du;
                 const uint P17_ENTITY_MATERIAL_FLAG_HAS_EMISSIVE = %du;
@@ -253,6 +253,61 @@ final class P17DynamicEntityShaderPatch {
                             && candidate <= maxDistance + 0.00001;
                 }
 
+                bool p17EntitySceneInterval(
+                        uint entityBase,
+                        vec3 origin,
+                        vec3 direction,
+                        float maxDistance,
+                        out float entryDistance,
+                        out float exitDistance
+                ) {
+                    ivec3 minSection = ivec3(
+                        int(scene.data[entityBase + 13u]),
+                        int(scene.data[entityBase + 14u]),
+                        int(scene.data[entityBase + 15u])
+                    );
+                    ivec3 maxSection = ivec3(
+                        int(scene.data[entityBase + 16u]),
+                        int(scene.data[entityBase + 17u]),
+                        int(scene.data[entityBase + 18u])
+                    );
+                    vec3 boundsMin = vec3(minSection) * 16.0;
+                    vec3 boundsMax = vec3(maxSection + ivec3(1)) * 16.0;
+
+                    float nearDistance = -1.0e30;
+                    float farDistance = 1.0e30;
+
+                    if (abs(direction.x) < 0.000001) {
+                        if (origin.x < boundsMin.x || origin.x > boundsMax.x) return false;
+                    } else {
+                        float t0 = (boundsMin.x - origin.x) / direction.x;
+                        float t1 = (boundsMax.x - origin.x) / direction.x;
+                        nearDistance = max(nearDistance, min(t0, t1));
+                        farDistance = min(farDistance, max(t0, t1));
+                    }
+                    if (abs(direction.y) < 0.000001) {
+                        if (origin.y < boundsMin.y || origin.y > boundsMax.y) return false;
+                    } else {
+                        float t0 = (boundsMin.y - origin.y) / direction.y;
+                        float t1 = (boundsMax.y - origin.y) / direction.y;
+                        nearDistance = max(nearDistance, min(t0, t1));
+                        farDistance = min(farDistance, max(t0, t1));
+                    }
+                    if (abs(direction.z) < 0.000001) {
+                        if (origin.z < boundsMin.z || origin.z > boundsMax.z) return false;
+                    } else {
+                        float t0 = (boundsMin.z - origin.z) / direction.z;
+                        float t1 = (boundsMax.z - origin.z) / direction.z;
+                        nearDistance = max(nearDistance, min(t0, t1));
+                        farDistance = min(farDistance, max(t0, t1));
+                    }
+
+                    entryDistance = max(nearDistance, 0.0);
+                    exitDistance = min(farDistance, maxDistance);
+                    return farDistance >= -0.00001
+                            && exitDistance + 0.00001 >= entryDistance;
+                }
+
                 void p17TryTriangle(
                         vec3 origin,
                         vec3 direction,
@@ -419,7 +474,21 @@ final class P17DynamicEntityShaderPatch {
                     float directionLength = length(direction);
                     if (directionLength < 0.000001 || maxDistance <= 0.0) return result;
                     vec3 dir = direction / directionLength;
-                    ivec3 sectionCoord = ivec3(floor(origin / 16.0));
+
+                    float sceneEntry;
+                    float sceneExit;
+                    if (!p17EntitySceneInterval(
+                            entityBase,
+                            origin,
+                            dir,
+                            maxDistance,
+                            sceneEntry,
+                            sceneExit
+                    )) return result;
+
+                    float sectionSampleDistance = min(sceneEntry + 0.001, sceneExit);
+                    vec3 sectionSamplePoint = origin + dir * sectionSampleDistance;
+                    ivec3 sectionCoord = ivec3(floor(sectionSamplePoint / 16.0));
                     ivec3 step = ivec3(
                         dir.x > 0.0 ? 1 : (dir.x < 0.0 ? -1 : 0),
                         dir.y > 0.0 ? 1 : (dir.y < 0.0 ? -1 : 0),
@@ -443,10 +512,11 @@ final class P17DynamicEntityShaderPatch {
                             : (step.z < 0 ? ((float(sectionCoord.z) * 16.0) - origin.z) / dir.z : INF)
                     );
 
-                    float sectionEntry = 0.0;
+                    float sectionEntry = sceneEntry;
                     for (uint sectionStep = 0u; sectionStep < 96u; sectionStep++) {
+                        if (sectionEntry > sceneExit + 0.00001) break;
                         float sectionExit = min(tMax.x, min(tMax.y, tMax.z));
-                        float segmentEnd = min(sectionExit, maxDistance);
+                        float segmentEnd = min(sectionExit, sceneExit);
                         float entityDistance;
                         vec3 entityNormal;
                         uint entityMaterialId;
@@ -477,8 +547,8 @@ final class P17DynamicEntityShaderPatch {
                             return result;
                         }
 
-                        if (sectionExit > maxDistance) break;
-                        sectionEntry = max(sectionExit, 0.0);
+                        if (sectionExit >= sceneExit - 0.00001) break;
+                        sectionEntry = max(sectionExit, sceneEntry);
                         if (tMax.x <= sectionExit + 0.00001) {
                             sectionCoord.x += step.x;
                             tMax.x += tDelta.x;
@@ -514,6 +584,7 @@ final class P17DynamicEntityShaderPatch {
 
                 """).formatted(
                 ENTITY_MATERIAL_LIMIT,
+                GpuDynamicEntityScene.ABI_VERSION,
                 GpuDynamicEntityScene.MAX_ENTITY_MATERIALS,
                 GpuDynamicEntityScene.ENTITY_MATERIAL_FLAG_HAS_ALBEDO,
                 GpuDynamicEntityScene.ENTITY_MATERIAL_FLAG_HAS_EMISSIVE,
