@@ -108,6 +108,28 @@ The existing mixin descriptor verifier checks all P17 Minecraft-facing methods a
 
 These are required mixins. A descriptor drift must fail CI instead of being discovered as an `InvalidInjectionException` at player startup.
 
+## Alpha 45 runtime performance work
+
+Alpha 45 adds a no-quality-loss P17 broad-phase optimization for the low-FPS path observed during
+Alpha 44 validation.
+
+The P17 GPU header now carries conservative global min/max entity section bounds. Every entity-aware
+ray first intersects this global region. Rays that do not cross the region return immediately
+without walking the 512-bucket section hash at all. Rays that do cross it begin their section DDA at
+the global-bounds entry point instead of walking empty sections from the original camera, GI,
+shadow, transmission or reflection ray origin.
+
+This changes only broad-phase work. Dynamic entity triangle/AABB tests and nearest-hit ordering are
+unchanged.
+
+The capture path also removes two high-frequency Java allocation patterns:
+
+- primitive positions/UVs use growable float arrays instead of `ArrayList<Float>` boxing;
+- per-vertex `Vector3f` creation and temporary 16-float matrix arrays are removed from the hot path.
+
+These changes specifically target fixed P17 cost that remained active even when internal resolution,
+GI quality, shadow quality and reflections were reduced.
+
 ## GPU integration
 
 Alpha 42 is developed in explicit gates.
