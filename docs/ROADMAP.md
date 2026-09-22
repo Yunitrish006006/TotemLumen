@@ -312,3 +312,8 @@ Alpha 48's disjoint P17 metadata/texture/quad flush+copy path regressed runtime 
 ## Alpha 51 direct world takeover
 
 Alpha 51 removes the temporary HUD-overlay presentation path. Minecraft 26.2 level extraction continues every frame and Totem compute is submitted from END_EXTRACTION, but once a complete Totem frame is available the LevelRenderer drawing phase is cancelled. The latest Totem output is blitted directly into GameRenderer.mainRenderTarget before later hand/HUD/GUI stages. F1 therefore hides only HUD/GUI and must not reveal the vanilla world underneath. Startup, recompilation and renderer-failure states keep vanilla level drawing as a fallback until takeover is ready. Output/history resources now match the active internal resolution instead of allocating a HIGH-resolution padded presentation texture.
+
+
+## Alpha 52 world-takeover presentation orientation
+
+Alpha 52 keeps the Alpha 51 direct LevelRenderer takeover and fixes Vulkan/world-target vertical orientation by flipping only the final presentation row. Ray generation, temporal history and reprojection stay in the original logical pixel coordinates; the split P16 reflection pass uses the same flipped presentation index before adding reflected radiance.
