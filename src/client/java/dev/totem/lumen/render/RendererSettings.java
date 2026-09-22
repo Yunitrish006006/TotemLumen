@@ -13,6 +13,27 @@ import java.util.concurrent.atomic.AtomicLong;
 
 /** Persistent client-side renderer quality settings. */
 public final class RendererSettings {
+    public enum GiQuality {
+        LOW(1),
+        BALANCED(2),
+        HIGH(3);
+
+        private final int samples;
+
+        GiQuality(int samples) {
+            this.samples = samples;
+        }
+
+        public int samples() {
+            return samples;
+        }
+
+        public GiQuality next() {
+            GiQuality[] values = values();
+            return values[(ordinal() + 1) % values.length];
+        }
+    }
+
     public enum Quality {
         LOW(1),
         BALANCED(2),
@@ -134,9 +155,9 @@ public final class RendererSettings {
     private static final AtomicLong REVISION = new AtomicLong();
 
     private static boolean rendererEnabled = true;
-    private static Quality giQuality = Quality.BALANCED;
+    private static GiQuality giQuality = GiQuality.BALANCED;
     private static Quality shadowQuality = Quality.BALANCED;
-    private static int rayDistance = 256;
+    private static int rayDistance = 64;
     private static InternalResolution internalResolution = InternalResolution.BALANCED;
     private static boolean reflectionsEnabled = true;
     private static boolean waterReflections = true;
@@ -155,7 +176,7 @@ public final class RendererSettings {
         try (InputStream input = Files.newInputStream(CONFIG_PATH)) {
             properties.load(input);
             rendererEnabled = parseBoolean(properties, "rendererEnabled", rendererEnabled);
-            giQuality = parseEnum(properties, "giQuality", Quality.class, giQuality);
+            giQuality = parseEnum(properties, "giQuality", GiQuality.class, giQuality);
             shadowQuality = parseEnum(properties, "shadowQuality", Quality.class, shadowQuality);
             rayDistance = sanitizeRayDistance(parseInt(properties, "rayDistance", rayDistance));
             internalResolution = parseEnum(
@@ -219,7 +240,7 @@ public final class RendererSettings {
         return rendererEnabled;
     }
 
-    public static synchronized Quality giQuality() {
+    public static synchronized GiQuality giQuality() {
         return giQuality;
     }
 
@@ -259,7 +280,7 @@ public final class RendererSettings {
         return denoiseQuality;
     }
 
-    public static synchronized Quality cycleGiQuality() {
+    public static synchronized GiQuality cycleGiQuality() {
         giQuality = giQuality.next();
         changed();
         return giQuality;
@@ -272,7 +293,12 @@ public final class RendererSettings {
     }
 
     public static synchronized int cycleRayDistance() {
-        rayDistance = rayDistance == 64 ? 128 : (rayDistance == 128 ? 256 : 64);
+        rayDistance = switch (rayDistance) {
+            case 32 -> 64;
+            case 64 -> 96;
+            case 96 -> 128;
+            default -> 32;
+        };
         changed();
         return rayDistance;
     }
@@ -354,9 +380,10 @@ public final class RendererSettings {
     }
 
     private static int sanitizeRayDistance(int value) {
+        if (value <= 32) return 32;
         if (value <= 64) return 64;
-        if (value <= 128) return 128;
-        return 256;
+        if (value <= 96) return 96;
+        return 128;
     }
 
     private static int parseInt(Properties properties, String key, int fallback) {
