@@ -337,3 +337,8 @@ Alpha 55 preserves the Alpha 54 reflection-off metallic fallback but removes the
 ## Alpha 56 integrated Video Settings
 
 Alpha 56 moves Totem Lumen's runtime renderer controls directly into Minecraft's Video Settings list. The Totem master toggle remains available there at all times. While Totem Lumen is enabled, vanilla controls that only affect the replaced world renderer are locked: graphics preset, smooth lighting/ambient occlusion, entity shadows, cloud mode/range, weather radius, cutout leaves, improved transparency, chunk-section fade, and vanilla texture filtering. Render distance, simulation distance, entity distance and display/interface controls remain adjustable because they still affect scene availability or non-world presentation. Disabling Totem immediately unlocks the vanilla renderer controls again.
+
+
+## Alpha 57 GI quality and ray-distance tuning
+
+Alpha 57 separates GI sampling from the shared shadow-quality enum so GI tiers can be tuned independently: LOW=1 sample, BALANCED=2, HIGH=3. Shadow quality remains 1/2/4 samples. Ray distance is retuned from 64/128/256 to 32/64/96/128 blocks, with 64 blocks as the default. Existing configurations above 128 are clamped to 128 on load.
