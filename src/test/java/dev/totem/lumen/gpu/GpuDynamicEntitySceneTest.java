@@ -171,6 +171,80 @@ class GpuDynamicEntitySceneTest {
     }
 
     @Test
+    void geometryOnlyRepackPreservesStableMaterialPayload() {
+        ByteBuffer buffer = buffer();
+        PbrImage albedo = new PbrImage(
+                2,
+                1,
+                new int[]{0xFF112233, 0xFF445566}
+        );
+        PbrImage emissive = new PbrImage(
+                2,
+                1,
+                new int[]{0x00FFFFFF, 0xFFFF2200}
+        );
+        EntityMaterialData material = new EntityMaterialData(
+                "minecraft:test_entity",
+                albedo,
+                emissive,
+                2.0f,
+                0.001f,
+                0.35f,
+                0.20f,
+                1.25f
+        );
+
+        DynamicEntitySnapshot first = snapshot(
+                21L,
+                "minecraft:overworld",
+                0.25,
+                1.0,
+                0.25
+        );
+        GpuDynamicEntityScene.pack(
+                buffer,
+                0,
+                List.of(first),
+                List.of(material)
+        );
+
+        int materialDescriptor = GpuDynamicEntityScene.ENTITY_MATERIAL_BASE_WORD
+                + GpuDynamicEntityScene.ENTITY_MATERIAL_WORDS_PER_RECORD;
+        int materialFlags = word(buffer, materialDescriptor);
+        int firstTexel = word(buffer, GpuDynamicEntityScene.ENTITY_TEXTURE_POOL_BASE_WORD);
+        int lastTexel = word(buffer, GpuDynamicEntityScene.ENTITY_TEXTURE_POOL_BASE_WORD + 3);
+
+        DynamicEntitySnapshot moved = snapshot(
+                21L,
+                "minecraft:overworld",
+                16.25,
+                1.0,
+                0.25
+        );
+        GpuDynamicEntityScene.PackResult result = GpuDynamicEntityScene.packGeometryOnly(
+                buffer,
+                0,
+                List.of(moved),
+                List.of(material)
+        );
+
+        assertEquals(1, result.entityCount());
+        assertEquals(2, result.materialCount());
+        assertEquals(4, result.textureTexelCount());
+        assertEquals(materialFlags, word(buffer, materialDescriptor));
+        assertEquals(firstTexel, word(buffer, GpuDynamicEntityScene.ENTITY_TEXTURE_POOL_BASE_WORD));
+        assertEquals(lastTexel, word(buffer, GpuDynamicEntityScene.ENTITY_TEXTURE_POOL_BASE_WORD + 3));
+        assertEquals(
+                0,
+                GpuDynamicEntityScene.packedSectionCandidate(buffer, 0, 1, 0, 0, 0)
+        );
+        assertEquals(
+                -1,
+                GpuDynamicEntityScene.packedSectionCandidate(buffer, 0, 0, 0, 0, 0)
+        );
+    }
+
+    @Test
     void repackClearsStaleDescriptorAndSectionBucket() {
         ByteBuffer buffer = buffer();
         DynamicEntitySnapshot entity = snapshot(
