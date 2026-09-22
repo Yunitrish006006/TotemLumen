@@ -50,6 +50,8 @@ final class P18LabPbrShadingPatch {
                         vec3 rayDirection
                 );
 
+                float p18DiffuseMetalWeight(float metallic);
+
                 """).formatted(
                 GpuPbrTextureScene.FLAG_HAS_NORMAL,
                 GpuPbrTextureScene.FLAG_HAS_SPECULAR
