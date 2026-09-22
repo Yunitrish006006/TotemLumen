@@ -155,11 +155,19 @@ public final class TotemLumenVideoSettingsScreen extends Screen {
         if (denoiseQualityButton != null) denoiseQualityButton.setMessage(denoiseQualityLabel());
     }
 
-    static Component rendererEnabledLabel() {
+    static Component renderProfileLabel() {
         return Component.translatable(
-                "screen.totem-lumen.renderer_enabled",
-                booleanComponent(RendererSettings.rendererEnabled())
+                "screen.totem-lumen.render_profile",
+                Component.translatable(
+                        RendererSettings.renderProfile() == RendererSettings.RenderProfile.TOTEM_LUMEN
+                                ? "screen.totem-lumen.render_profile.totem"
+                                : "screen.totem-lumen.render_profile.minecraft"
+                )
         );
+    }
+
+    static Component rendererEnabledLabel() {
+        return renderProfileLabel();
     }
 
     static Component giQualityLabel() {
