@@ -1351,7 +1351,7 @@ public final class P5StableLookupRenderer {
                 / 1_000_000.0;
         double effectiveFps = averageMs <= 0.0 ? 0.0 : 1000.0 / averageMs;
         TotemLumenClient.LOGGER.info(
-                "Performance probe RESULT: mode={}, render={}x{}, avgSubmitToCompleteMs={}, effectiveTotemFps={}, giSamples={}, shadowSamples={}, reflections={}",
+                "Performance probe RESULT: mode={}, render={}x{}, avgSubmitToCompleteMs={}, effectiveTotemFps={}, giSamples={}, shadowSamples={}, reflections={}, p17PackMs={}, p17UploadBytes={}",
                 submittedMode.label(),
                 activeRenderWidth,
                 activeRenderHeight,
@@ -1359,7 +1359,13 @@ public final class P5StableLookupRenderer {
                 String.format(java.util.Locale.ROOT, "%.1f", effectiveFps),
                 RendererSettings.giQuality().samples(),
                 RendererSettings.shadowQuality().samples(),
-                RendererSettings.reflectionsEnabled()
+                RendererSettings.reflectionsEnabled(),
+                String.format(
+                        java.util.Locale.ROOT,
+                        "%.3f",
+                        P17DynamicEntityGpuUploader.lastPackNanos() / 1_000_000.0
+                ),
+                P17DynamicEntityGpuUploader.lastUploadBytes()
         );
         performanceProbeSamples = 0;
         performanceProbeAccumulatedNanos = 0L;
