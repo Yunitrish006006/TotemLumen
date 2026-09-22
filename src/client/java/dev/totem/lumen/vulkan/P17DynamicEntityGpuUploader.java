@@ -16,8 +16,12 @@ public final class P17DynamicEntityGpuUploader {
     private static final int HISTORY_READ_BASE_WORD = 24;
     private static final int PREVIOUS_FRAME_VALID_WORD = 26;
 
-    private static volatile long lastBaseByteOffset = -1L;
-    private static volatile long lastCopyBytes;
+    private static volatile long lastMetadataByteOffset = -1L;
+    private static volatile long lastMetadataCopyBytes;
+    private static volatile long lastTextureByteOffset = -1L;
+    private static volatile long lastTextureCopyBytes;
+    private static volatile long lastQuadByteOffset = -1L;
+    private static volatile long lastQuadCopyBytes;
     private static long lastPackedRevision = Long.MIN_VALUE;
     private static long lastPackedMaterialRevision = Long.MIN_VALUE;
     private static boolean copyPending;
@@ -32,7 +36,7 @@ public final class P17DynamicEntityGpuUploader {
     /** Force-packs the current entity cache during a full scene rebuild. */
     public static synchronized void pack(ByteBuffer buffer) {
         ensureEntityMaterials();
-        packState(buffer, EntityRenderGeometryCache.sceneState());
+        packState(buffer, EntityRenderGeometryCache.sceneState(), true);
     }
 
     /** Packs only when entity movement/pose/lifecycle changed since the previous upload. */
@@ -42,12 +46,18 @@ public final class P17DynamicEntityGpuUploader {
         long materialRevision = EntityMaterialRuleRegistry.revision();
         if (state.revision() == lastPackedRevision
                 && materialRevision == lastPackedMaterialRevision) return false;
-        packState(buffer, state);
+
+        boolean materialPayloadDirty = materialRevision != lastPackedMaterialRevision;
+        packState(buffer, state, materialPayloadDirty);
         invalidateHistoryRead(buffer);
         return true;
     }
 
-    private static void packState(ByteBuffer buffer, EntityRenderGeometryCache.SceneState state) {
+    private static void packState(
+            ByteBuffer buffer,
+            EntityRenderGeometryCache.SceneState state,
+            boolean writeMaterialPayload
+    ) {
         int pixelBaseWord = buffer.getInt(3 * Integer.BYTES);
         int capacityWidth = buffer.getInt(51 * Integer.BYTES);
         int capacityHeight = buffer.getInt(52 * Integer.BYTES);
@@ -55,14 +65,40 @@ public final class P17DynamicEntityGpuUploader {
         int p14BaseWord = Math.addExact(pixelBaseWord, pixelCount);
         int entityBaseWord = Math.addExact(p14BaseWord, P14ModelMeshGpuLayout.MAX_STORAGE_WORDS);
 
-        GpuDynamicEntityScene.PackResult packed = GpuDynamicEntityScene.pack(
-                buffer,
-                entityBaseWord,
-                state.entities(),
-                EntityMaterialRuleRegistry.snapshot()
-        );
-        lastBaseByteOffset = (long) entityBaseWord * Integer.BYTES;
-        lastCopyBytes = packed.usedBytes();
+        GpuDynamicEntityScene.PackResult packed = writeMaterialPayload
+                ? GpuDynamicEntityScene.pack(
+                        buffer,
+                        entityBaseWord,
+                        state.entities(),
+                        EntityMaterialRuleRegistry.snapshot()
+                )
+                : GpuDynamicEntityScene.packGeometryOnly(
+                        buffer,
+                        entityBaseWord,
+                        state.entities(),
+                        EntityMaterialRuleRegistry.snapshot()
+                );
+
+        long baseByteOffset = (long) entityBaseWord * Integer.BYTES;
+        lastMetadataByteOffset = baseByteOffset;
+        lastMetadataCopyBytes = (long) (
+                writeMaterialPayload
+                        ? GpuDynamicEntityScene.ENTITY_TEXTURE_POOL_BASE_WORD
+                        : GpuDynamicEntityScene.ENTITY_MATERIAL_BASE_WORD
+        ) * Integer.BYTES;
+
+        lastTextureByteOffset = baseByteOffset
+                + (long) GpuDynamicEntityScene.ENTITY_TEXTURE_POOL_BASE_WORD * Integer.BYTES;
+        lastTextureCopyBytes = writeMaterialPayload
+                ? (long) packed.textureTexelCount() * Integer.BYTES
+                : 0L;
+
+        lastQuadByteOffset = baseByteOffset
+                + (long) GpuDynamicEntityScene.QUAD_POOL_BASE_WORD * Integer.BYTES;
+        lastQuadCopyBytes = (long) packed.totalQuads()
+                * GpuDynamicEntityScene.QUAD_WORDS_PER_RECORD
+                * Integer.BYTES;
+
         lastPackedRevision = state.revision();
         lastPackedMaterialRevision = EntityMaterialRuleRegistry.revision();
         copyPending = true;
@@ -77,7 +113,7 @@ public final class P17DynamicEntityGpuUploader {
             lastLoggedOverflow = packed.overflowAssignments();
             TotemLumenClient.LOGGER.info(
                     "P17 entity GPU scene: entities={}, quads={}, materials={}, emissiveTexels={}, "
-                            + "sectionBuckets={}, overflow={}, maxProbe={}, bytes={}, maxBytes={}",
+                            + "sectionBuckets={}, overflow={}, maxProbe={}, uploadBytes={}, materialPayload={}, maxBytes={}",
                     packed.entityCount(),
                     packed.totalQuads(),
                     packed.materialCount(),
@@ -85,7 +121,8 @@ public final class P17DynamicEntityGpuUploader {
                     packed.sectionBucketCount(),
                     packed.overflowAssignments(),
                     packed.maxProbe(),
-                    lastCopyBytes,
+                    lastMetadataCopyBytes + lastTextureCopyBytes + lastQuadCopyBytes,
+                    writeMaterialPayload,
                     GpuDynamicEntityScene.MAX_STORAGE_BYTES
             );
         }
@@ -111,12 +148,28 @@ public final class P17DynamicEntityGpuUploader {
         buffer.putInt(PREVIOUS_FRAME_VALID_WORD * Integer.BYTES, 0);
     }
 
-    public static long lastBaseByteOffset() {
-        return lastBaseByteOffset;
+    public static long lastMetadataByteOffset() {
+        return lastMetadataByteOffset;
     }
 
-    public static long lastCopyBytes() {
-        return lastCopyBytes;
+    public static long lastMetadataCopyBytes() {
+        return lastMetadataCopyBytes;
+    }
+
+    public static long lastTextureByteOffset() {
+        return lastTextureByteOffset;
+    }
+
+    public static long lastTextureCopyBytes() {
+        return lastTextureCopyBytes;
+    }
+
+    public static long lastQuadByteOffset() {
+        return lastQuadByteOffset;
+    }
+
+    public static long lastQuadCopyBytes() {
+        return lastQuadCopyBytes;
     }
 
     public static synchronized boolean consumeCopyPending() {
