@@ -88,6 +88,25 @@ public final class GpuDynamicEntityScene {
             List<DynamicEntitySnapshot> entities,
             List<EntityMaterialData> materialData
     ) {
+        return packInternal(buffer, baseWord, entities, materialData, true);
+    }
+
+    public static PackResult packGeometryOnly(
+            ByteBuffer buffer,
+            int baseWord,
+            List<DynamicEntitySnapshot> entities,
+            List<EntityMaterialData> materialData
+    ) {
+        return packInternal(buffer, baseWord, entities, materialData, false);
+    }
+
+    private static PackResult packInternal(
+            ByteBuffer buffer,
+            int baseWord,
+            List<DynamicEntitySnapshot> entities,
+            List<EntityMaterialData> materialData,
+            boolean writeMaterialPayload
+    ) {
         Objects.requireNonNull(buffer, "buffer");
         Objects.requireNonNull(entities, "entities");
         Objects.requireNonNull(materialData, "materialData");
@@ -128,13 +147,19 @@ public final class GpuDynamicEntityScene {
             }
         }
 
-        // Clear metadata/lookup/material descriptors. Texture and quad pools are append-only for
-        // this pack and stale payload becomes unreachable through the freshly cleared descriptors.
-        for (int word = 0; word < ENTITY_TEXTURE_POOL_BASE_WORD; word++) {
+        // Entity motion changes every frame, while entity material textures usually change only
+        // on resource reload. Geometry-only repacks therefore clear just header/descriptors/section
+        // lookup and preserve the stable material descriptor + texture payload.
+        int clearUntilWord = writeMaterialPayload
+                ? ENTITY_TEXTURE_POOL_BASE_WORD
+                : ENTITY_MATERIAL_BASE_WORD;
+        for (int word = 0; word < clearUntilWord; word++) {
             putWord(buffer, baseWord + word, 0);
         }
 
-        MaterialPack materials = packMaterials(buffer, baseWord, materialData);
+        MaterialPack materials = writeMaterialPayload
+                ? packMaterials(buffer, baseWord, materialData)
+                : describeMaterials(materialData);
 
         int nextQuad = 0;
         for (int entityIndex = 0; entityIndex < entities.size(); entityIndex++) {
@@ -275,6 +300,54 @@ public final class GpuDynamicEntityScene {
                 materials.textureTexelCount(),
                 usedWords
         );
+    }
+
+    private static MaterialPack describeMaterials(List<EntityMaterialData> materialData) {
+        List<EntityMaterialData> sorted = new ArrayList<>(materialData);
+        sorted.sort(Comparator.comparing(EntityMaterialData::entityTypeId));
+        if (sorted.size() >= MAX_ENTITY_MATERIALS) {
+            throw new IllegalStateException(
+                    "P17 entity material capacity exceeded: materials=" + sorted.size()
+                            + ", max user materials=" + (MAX_ENTITY_MATERIALS - 1)
+            );
+        }
+
+        Map<String, Integer> slots = new HashMap<>();
+        int nextTexel = 0;
+        int slot = 1;
+        for (EntityMaterialData material : sorted) {
+            if (slots.containsKey(material.entityTypeId())) {
+                throw new IllegalArgumentException(
+                        "Duplicate P17 entity material rule: " + material.entityTypeId()
+                );
+            }
+
+            if (material.albedoTexture() != null) {
+                Dimensions dimensions = boundedDimensions(material.albedoTexture());
+                nextTexel = Math.addExact(
+                        nextTexel,
+                        Math.multiplyExact(dimensions.width(), dimensions.height())
+                );
+            }
+            if (material.hasEmissiveTexture() && material.emissiveTexture() != null) {
+                Dimensions dimensions = boundedDimensions(material.emissiveTexture());
+                nextTexel = Math.addExact(
+                        nextTexel,
+                        Math.multiplyExact(dimensions.width(), dimensions.height())
+                );
+            }
+            if (nextTexel > MAX_ENTITY_EMISSIVE_TEXELS) {
+                throw new IllegalStateException(
+                        "P17 entity texture pool exceeded while describing materials: texels="
+                                + nextTexel + ", max=" + MAX_ENTITY_EMISSIVE_TEXELS
+                );
+            }
+
+            slots.put(material.entityTypeId(), slot);
+            slot++;
+        }
+
+        return new MaterialPack(Map.copyOf(slots), slot, nextTexel);
     }
 
     private static MaterialPack packMaterials(
