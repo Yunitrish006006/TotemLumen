@@ -5,9 +5,10 @@
 - **P17A capture + CPU broad phase: IMPLEMENTED / CI PASS**
 - **P17B bounded Vulkan scene ABI + independent tail upload: IMPLEMENTED / CI PASS**
 - **P17C shared nearest-hit shader integration: IMPLEMENTED / CI PASS, RUNTIME VALIDATION ACTIVE**
-- **P17D generic entity material ABI: IMPLEMENTED / CI GATED**
+- **P17D generic entity material ABI: IMPLEMENTED / CI GATED; spider-eye emissive behavior runtime-validated**
+- **Alpha 49 upload path: runtime-validated performance baseline; pose-only CPU material repack avoided, one contiguous MoltenVK-friendly GPU upload restored**
 
-Alpha 42 does not yet claim visually complete entity ray tracing until the runtime gate passes.
+The core Player/LivingEntity path is active, but P17 does not claim complete Minecraft entity-renderer coverage. Non-Model renderer families, armor/equipment, alpha silhouettes and first-person view-model rendering remain explicit follow-ups.
 
 ## Goal
 
@@ -198,7 +199,7 @@ Dynamic entity triangles compete with voxel/static-model hits for nearest distan
 
 No separate reflection-only or shadow-only entity geometry implementation is used.
 
-The first P17C material result uses a conservative opaque entity surface identity. P17D will replace that baseline with texture/material fidelity.
+The shared trace path now feeds the generic P17D material ABI. Core albedo/emissive sampling is data-driven; remaining fidelity gaps are listed under P17D/follow-ups rather than requiring entity-specific shader branches.
 
 ### Apple M4 / MoltenVK cold-compile architecture
 
@@ -234,7 +235,7 @@ duplicateEntityPipeline=false
 
 ### P17D — generic entity material ABI
 
-Status: **IMPLEMENTED / CI GATED**
+Status: **IMPLEMENTED / CI GATED; spider-eye emissive behavior runtime-validated**
 
 Entity materials no longer require entity-specific shader branches. The production shader consumes a
 fixed material slot range and a generic descriptor containing:
@@ -274,38 +275,27 @@ The generic ABI currently handles entity albedo/emissive sampling and optical sc
 equipment, render-layer-specific materials, texture-alpha hit rejection and non-Model renderer
 families remain separate follow-ups.
 
-## Runtime gate
+## Runtime validation state
 
-Alpha 42 is accepted only when all of the following are demonstrated in-world:
+Already exercised on the current Apple M4 / MoltenVK path:
 
-1. a remote or third-person player produces captured dynamic geometry;
-2. at least two ordinary living mobs with different skeletons/models produce captured geometry without entity-specific hooks;
-3. walking, turning, crouching and limb animation update geometry without stale trails;
-4. no `temporary instance id` fallback warning appears during the normal Player/LivingEntity validation path;
-5. despawn/chunk movement/world rejoin does not retain stale entities;
-6. `P17 entity GPU scene` reports nonzero entity/quad counts with no unexpected candidate overflow;
-7. the base renderer reaches READY independently of P17 enhanced-pipeline readiness;
-8. entity geometry appears in the Totem Lumen primary ray image after P17 enhanced-pipeline readiness;
-9. entities cast directional/local-light shadows;
-10. entities appear in P16 reflections;
-11. existing P12-P16 static-world rendering remains functional;
-12. no unbounded per-frame mesh-id/resource growth occurs.
+- Player/LivingEntity dynamic geometry is present in the unified full-lighting scene.
+- Generic entity material data reaches the shader path.
+- Spider/cave-spider eye emissive material behavior is visually validated.
+- Alpha 49's contiguous P17 upload path materially improved runtime performance compared with the Alpha 48 split-copy regression.
 
-Expected readiness diagnostics after the split are:
+Still required before P17 is considered broadly complete:
 
-```text
-Background Vulkan pipeline creation COMPLETE: shader=totem_lumen_p12_one_bounce_gi.comp
-Renderer state: READY_FOR_SCENE_EXTRACTION
-P5 stable GPU lookup READY: ...
-P17 enhanced pipeline creation START: shader=totem_lumen_p17_dynamic_entities.comp ...
-```
+1. validate at least two ordinary living mobs with different models across walking/turning/pose animation;
+2. validate despawn/chunk movement/world rejoin cleanup with no stale entities;
+3. validate directional/local-light shadowing on representative entities;
+4. validate P16 reflection visibility when reflections are enabled;
+5. validate armor/equipment and texture-alpha hit rejection after the remaining P17D/P18D material work lands;
+6. add adapters and runtime gates for dropped items, vehicles, projectiles, leashes/flames, text/display and custom renderer families;
+7. validate first-person hand/held-item rendering as its own view-model domain;
+8. replace the current global temporal-history invalidation on entity-scene revision with per-hit/per-entity history identity.
 
-The P17 enhanced pipeline may complete later:
-
-```text
-P17 enhanced pipeline creation COMPLETE: ...
-P17 dynamic entity tracing READY: enhanced base pipeline selected for frame dispatch
-```
+The production architecture no longer creates a second enhanced-base Vulkan pipeline. P17 tracing is compiled into the unified full-lighting base, while P16 remains an independent optional reflection pass.
 
 ## Explicit follow-ups
 
@@ -324,15 +314,16 @@ Separate adapters/follow-ups are expected for:
 - armor/equipment/material fidelity;
 - first-person hand/held-item rendering, which is a separate view-model domain from world entities.
 
-## Relationship to fluid geometry
+## Relationship to later scene-quality work
 
-Exact flowing/sloped water and lava geometry remains required, but it is moved behind P17 because missing players/mobs are a larger scene-completeness gap. The next planned milestone after Dynamic Entities is P14E exact fluid geometry.
+P14E exact fluid geometry and P18A/P18B/P18C LabPBR integration are now implemented, so P17 is no longer a prerequisite blocking those milestones.
 
-Current sequence:
+Current sequence is:
 
 ```text
-Alpha 41 runtime readiness
-  -> Alpha 42 / P17 Dynamic Entities
-  -> Alpha 43 / P14E Exact Fluid Geometry
-  -> P18 Resource Pack / LabPBR integration
+Alpha 59 baseline
+  -> remaining P17 renderer-family/material coverage
+  -> P18D entity/block-entity material fidelity
+  -> shared primary-hit/G-buffer performance architecture
+  -> P19+ advanced rendering
 ```
