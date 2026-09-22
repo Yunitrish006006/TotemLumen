@@ -165,7 +165,7 @@ public final class TotemLumenVideoSettingsScreen extends Screen {
     static Component giQualityLabel() {
         return Component.translatable(
                 "screen.totem-lumen.gi_quality",
-                qualityComponent(RendererSettings.giQuality())
+                qualityName(RendererSettings.giQuality().name())
         );
     }
 
