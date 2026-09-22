@@ -4,8 +4,9 @@
 
 - **P18A renderer-resolved texture identity + LabPBR 1.3 decode contract: IMPLEMENTED / CI PASS**
 - **P18B bounded PBR texture GPU scene + textured-cube surface table: IMPLEMENTED / CI PASS**
-- **P18C shared LabPBR shading + alpha coverage: IMPLEMENTED / SHADER CI PASS; runtime visual validation pending**
-- **P18D entity/block-entity material fidelity: PENDING**
+- **P18C shared LabPBR shading + alpha coverage: IMPLEMENTED / SHADER CI PASS; runtime visual acceptance still active**
+- **Animated PBR frame selection: IMPLEMENTED / CI PASS; discrete game-tick selection active, sub-tick interpolation deferred**
+- **P18D entity/block-entity material fidelity: PARTIAL via generic P17 entity material ABI; broader entity/block-entity fidelity remains**
 - **P18E height/POM and secondary LabPBR channels: DEFERRED**
 
 Alpha 44 starts from the accepted Alpha 43 renderer/settings branch and does not widen the existing
@@ -286,29 +287,35 @@ This path is intended to cover animated block/model surfaces such as campfire/fl
 
 ## P18D — fidelity follow-up
 
-After static blocks are correct:
+The generic P17 entity material ABI now provides data-driven albedo/emissive textures and optical scalars for supported entity material slots. Spider/cave-spider eye emission is runtime-validated through that generic path.
+
+Remaining fidelity work:
 
 - block-entity texture identity;
-- player skin / entity texture sampling;
-- armor/equipment;
-- emissive entity layers.
+- complete player skin/entity texture coverage;
+- armor/equipment and render-layer-specific materials;
+- texture-alpha hit rejection for entities/block entities;
+- emissive layers beyond the currently mapped generic material rules;
+- non-Model renderer-family material identity.
 
-This is where the remaining P17D material-fidelity debt moves.
+This is where the remaining P17 material-fidelity debt converges with P18.
 
 ## CI gate
 
-Run #420 at head `795c32b2d82ea1211261b0ee6a2d5d505e77af7c` passed:
+Current Alpha 59 CI continues to verify:
 
 - Java 25 compile + unit tests;
 - P18 texture/surface ABI tests;
-- P18 textured-surface verification in full base, P17 and P16;
-- P18 LabPBR shading verification in full base, P17 and P16;
-- shaderc compile with zero errors for bootstrap, P12/P14E full base, P17 enhanced base and P16
-  split reflection.
+- P18 textured-surface verification in the unified full base and P16 reflection pass;
+- P18 LabPBR shading verification in the unified full base and P16 reflection pass;
+- animated texture/material selection markers;
+- shaderc compile with zero errors for bootstrap, unified full lighting/P14E/P17/P18 and split P16 reflection.
 
-## Runtime gate
+The old separate P17 enhanced-base shader is no longer a production compile target.
 
-Alpha 44 is not accepted until at least:
+## Runtime validation gate
+
+P18A/B/C are implemented, but broad visual acceptance still requires:
 
 1. a LabPBR 1.3 resource pack is detected after resource reload;
 2. changing/reloading the pack updates retained PBR textures without world restart;
