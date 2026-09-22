@@ -126,7 +126,7 @@ public final class P14ShaderCompileVerifier {
         );
         requireSourceMarker(
                 source,
-                "min(GI_MAX_DISTANCE, uintBitsToFloat(scene.data[7]))",
+                "min(48.0, uintBitsToFloat(scene.data[7]))",
                 "bounded secondary GI visibility distance"
         );
         if (source.contains("incomingRadiance = p13EnvironmentSurfaceRadiance(")) {
