@@ -93,5 +93,9 @@
   "screen.totem-lumen.compile_hud.full": "光照 / 材質 / 玩家與生物",
   "screen.totem-lumen.compile_hud.advanced": "反射",
   "screen.totem-lumen.video_section": "Totem Lumen",
-  "screen.totem-lumen.video_section_hint": "啟用 Totem Lumen 時，由 Totem 接管的原版世界渲染選項會鎖定。"
+  "screen.totem-lumen.video_section_hint": "啟用 Totem Lumen 時，由 Totem 接管的原版世界渲染選項會鎖定。",
+  "screen.totem-lumen.profile_section": "渲染",
+  "screen.totem-lumen.render_profile": "渲染設定檔：%s",
+  "screen.totem-lumen.render_profile.minecraft": "Minecraft 原版",
+  "screen.totem-lumen.render_profile.totem": "Totem Lumen"
 }
