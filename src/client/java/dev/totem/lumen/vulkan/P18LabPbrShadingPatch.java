@@ -50,8 +50,6 @@ final class P18LabPbrShadingPatch {
                         vec3 rayDirection
                 );
 
-                float p18DiffuseMetalWeight(float metallic);
-
                 """).formatted(
                 GpuPbrTextureScene.FLAG_HAS_NORMAL,
                 GpuPbrTextureScene.FLAG_HAS_SPECULAR
@@ -96,13 +94,6 @@ final class P18LabPbrShadingPatch {
                         + texelIndex * P18_TEXTURE_TEXEL_WORDS
                         + lane
                     ];
-                }
-
-                float p18DiffuseMetalWeight(float metallic) {
-                    // Metallic surfaces hand their diffuse energy to P16 only when the reflection
-                    // pass is actually active. If reflections are disabled or still binding after
-                    // a render-target resize, keep a visible diffuse fallback instead of black.
-                    return scene.data[46] != 0u ? (1.0 - metallic) : 1.0;
                 }
 
                 vec3 p18HardcodedMetalF0(uint metalCode, vec3 albedo) {
@@ -532,7 +523,7 @@ final class P18LabPbrShadingPatch {
                 """
                     P18SurfaceSample p18Surface = p18ResolveSurface(hit, rayOrigin, rayDirection);
                     vec3 normal = p18Surface.normal;
-                    vec3 albedo = p18Surface.albedo * p18DiffuseMetalWeight(p18Surface.metallic);
+                    vec3 albedo = p18Surface.albedo * (1.0 - p18Surface.metallic * float(scene.data[46]));
                     vec3 emitted = p18Surface.emission;
                 """,
                 "environment material sample"
@@ -582,7 +573,7 @@ final class P18LabPbrShadingPatch {
                 gi,
                 "return materialColor(primaryHit.materialId) * incomingRadiance * GI_STRENGTH;",
                 "return p18PrimarySurface.albedo\n"
-                        + "            * p18DiffuseMetalWeight(p18PrimarySurface.metallic)\n"
+                        + "            * (1.0 - p18PrimarySurface.metallic * float(scene.data[46]))\n"
                         + "            * p18PrimarySurface.ao\n"
                         + "            * incomingRadiance\n"
                         + "            * GI_STRENGTH;",
@@ -663,7 +654,7 @@ final class P18LabPbrShadingPatch {
                     P18SurfaceSample p18Surface = p18ResolveSurface(
                         hit, primaryOrigin, primaryDirection
                     );
-                    vec3 p18Diffuse = p18Surface.albedo * p18DiffuseMetalWeight(p18Surface.metallic);
+                    vec3 p18Diffuse = p18Surface.albedo * (1.0 - p18Surface.metallic * float(scene.data[46]));
                     vec3 emitted = emissiveMode ? p18Surface.emission : vec3(0.0);
                 """,
                 "local light material"
@@ -720,7 +711,7 @@ final class P18LabPbrShadingPatch {
                     );
                     vec3 emitted = p18Surface.emission;
                     vec3 localBase = p18Surface.albedo
-                            * p18DiffuseMetalWeight(p18Surface.metallic)
+                            * (1.0 - p18Surface.metallic * float(scene.data[46]))
                             * (uintBitsToFloat(scene.data[82]) * p18Surface.ao)
                             + emitted;
                 """,
