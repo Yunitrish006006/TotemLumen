@@ -304,7 +304,7 @@ final class P16ReflectionPassShader {
                     vec3 reflected = p16ReflectionRgb(primaryTrace.hit, origin, direction)
                             * primaryTrace.transmission;
                     uint pixelBase = scene.data[3];
-                    uint pixelIndex = pixelBase + pixel.y * width + pixel.x;
+                    uint pixelIndex = pixelBase + (height - 1u - pixel.y) * width + pixel.x;
                     vec3 baseRadiance = unpackRgb(scene.data[pixelIndex]);
                     scene.data[pixelIndex] = packRgba(baseRadiance + reflected, 255u);
                 }
