@@ -332,3 +332,8 @@ Alpha 54 fixes reflective/metallic materials turning black when the P16 reflecti
 ## Alpha 55 inline metallic fallback
 
 Alpha 55 preserves the Alpha 54 reflection-off metallic fallback but removes the helper-function call from full-base shader hot paths. The production full-base shader is compiled at shaderc O0, so the helper was not guaranteed to inline. Environment, GI, local-light and composite paths now use the direct uniform expression `1.0 - metallic * float(scene.data[46])`, keeping reflection-off metals visible without adding a function-call boundary per shaded surface.
+
+
+## Alpha 56 integrated Video Settings
+
+Alpha 56 moves Totem Lumen's runtime renderer controls directly into Minecraft's Video Settings list. The Totem master toggle remains available there at all times. While Totem Lumen is enabled, vanilla controls that only affect the replaced world renderer are locked: graphics preset, smooth lighting/ambient occlusion, entity shadows, cloud mode/range, weather radius, cutout leaves, improved transparency, chunk-section fade, and vanilla texture filtering. Render distance, simulation distance, entity distance and display/interface controls remain adjustable because they still affect scene availability or non-world presentation. Disabling Totem immediately unlocks the vanilla renderer controls again.
