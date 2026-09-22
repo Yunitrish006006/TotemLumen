@@ -327,3 +327,8 @@ Alpha 53 fixes fullscreen performance scaling after direct world takeover. Inter
 ## Alpha 54 reflective-material fallback
 
 Alpha 54 fixes reflective/metallic materials turning black when the P16 reflection pass is disabled or temporarily unavailable after a render-target resize. P18 now suppresses metallic diffuse energy only while the reflection pass is actually active. Header word 46 now represents effective reflection-pass availability (user setting enabled and P16 bound/ready), so reflection-off and reflection-binding states keep a visible diffuse fallback instead of zeroing metallic surfaces.
+
+
+## Alpha 55 inline metallic fallback
+
+Alpha 55 preserves the Alpha 54 reflection-off metallic fallback but removes the helper-function call from full-base shader hot paths. The production full-base shader is compiled at shaderc O0, so the helper was not guaranteed to inline. Environment, GI, local-light and composite paths now use the direct uniform expression `1.0 - metallic * float(scene.data[46])`, keeping reflection-off metals visible without adding a function-call boundary per shaded surface.
