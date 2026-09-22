@@ -307,3 +307,8 @@ Alpha 48 targets the CPU/upload side exposed by the Alpha 47 performance probe. 
 ## Alpha 49 P17 contiguous-upload regression fix
 
 Alpha 48's disjoint P17 metadata/texture/quad flush+copy path regressed runtime performance on Apple Silicon/MoltenVK. Alpha 49 restores one contiguous P17 GPU upload range, matching the proven Alpha 47 submission shape, while retaining the Alpha 48 CPU optimization that skips entity material texture re-sampling during pose-only updates. The performance probe continues to log P17 pack time and contiguous upload bytes.
+
+
+## Alpha 50 secondary-GI visibility reduction
+
+Alpha 50 targets the GPU cost isolated by the Alpha 47 probe. Primary-surface environment lighting remains unchanged, including sky/sun/moon transmission. Secondary GI hits no longer launch separate sky, sun and moon visibility rays. They use one conservative world-up P15 transmission ray as the environment visibility proxy, preserving colored-glass attenuation and cave/ceiling rejection while reducing the secondary environment ray fan-out. Non-Overworld secondary environment formulas remain unchanged.
