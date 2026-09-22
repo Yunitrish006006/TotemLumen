@@ -249,7 +249,7 @@ final class P15GlassTransmissionPatch {
                         vec3 environmentTransmission = p15RayTransmission(
                             skyOrigin,
                             skyDirection,
-                            min(GI_MAX_DISTANCE, uintBitsToFloat(scene.data[7]))
+                            min(48.0, uintBitsToFloat(scene.data[7]))
                         );
 
                         vec3 sunDirection = p13SunDirection();
