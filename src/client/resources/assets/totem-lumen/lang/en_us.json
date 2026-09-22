@@ -93,5 +93,9 @@
   "screen.totem-lumen.compile_hud.full": "Lighting / materials / entities",
   "screen.totem-lumen.compile_hud.advanced": "Reflections",
   "screen.totem-lumen.video_section": "Totem Lumen",
-  "screen.totem-lumen.video_section_hint": "Totem Lumen replaces Minecraft world-render quality controls while enabled."
+  "screen.totem-lumen.video_section_hint": "Totem Lumen replaces Minecraft world-render quality controls while enabled.",
+  "screen.totem-lumen.profile_section": "Rendering",
+  "screen.totem-lumen.render_profile": "Render profile: %s",
+  "screen.totem-lumen.render_profile.minecraft": "Minecraft",
+  "screen.totem-lumen.render_profile.totem": "Totem Lumen"
 }
