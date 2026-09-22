@@ -70,50 +70,70 @@ public final class TotemLumenVideoSettingsIntegration {
         list.addHeader(Component.translatable("screen.totem-lumen.video_section"));
 
         Button giQualityButton = settingButton(
+                client,
+                screen,
                 TotemLumenVideoSettingsScreen.giQualityLabel(),
                 RendererSettings::cycleGiQuality
         );
         Button shadowQualityButton = settingButton(
+                client,
+                screen,
                 TotemLumenVideoSettingsScreen.shadowQualityLabel(),
                 RendererSettings::cycleShadowQuality
         );
         list.addSmall(giQualityButton, shadowQualityButton);
 
         Button rayDistanceButton = settingButton(
+                client,
+                screen,
                 TotemLumenVideoSettingsScreen.rayDistanceLabel(),
                 RendererSettings::cycleRayDistance
         );
         Button internalResolutionButton = settingButton(
+                client,
+                screen,
                 TotemLumenVideoSettingsScreen.internalResolutionLabel(),
                 RendererSettings::cycleInternalResolution
         );
         list.addSmall(rayDistanceButton, internalResolutionButton);
 
         Button reflectionsEnabledButton = settingButton(
+                client,
+                screen,
                 TotemLumenVideoSettingsScreen.reflectionsEnabledLabel(),
                 RendererSettings::toggleReflectionsEnabled
         );
         Button waterReflectionsButton = settingButton(
+                client,
+                screen,
                 TotemLumenVideoSettingsScreen.waterReflectionsLabel(),
                 RendererSettings::toggleWaterReflections
         );
         list.addSmall(reflectionsEnabledButton, waterReflectionsButton);
 
         Button reflectionBouncesButton = settingButton(
+                client,
+                screen,
                 TotemLumenVideoSettingsScreen.reflectionBouncesLabel(),
                 RendererSettings::cycleReflectionBounces
         );
         Button reflectionDistanceButton = settingButton(
+                client,
+                screen,
                 TotemLumenVideoSettingsScreen.reflectionDistanceLabel(),
                 RendererSettings::cycleReflectionDistance
         );
         list.addSmall(reflectionBouncesButton, reflectionDistanceButton);
 
         Button temporalQualityButton = settingButton(
+                client,
+                screen,
                 TotemLumenVideoSettingsScreen.temporalQualityLabel(),
                 RendererSettings::cycleTemporalQuality
         );
         Button denoiseQualityButton = settingButton(
+                client,
+                screen,
                 TotemLumenVideoSettingsScreen.denoiseQualityLabel(),
                 RendererSettings::cycleDenoiseQuality
         );
