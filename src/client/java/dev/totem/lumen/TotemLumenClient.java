@@ -23,7 +23,7 @@ import net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
-import net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderEvents;
+import net.fabricmc.fabric.api.client.rendering.v1.level.LevelExtractionEvents;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
@@ -136,7 +136,10 @@ public final class TotemLumenClient implements ClientModInitializer {
             }
         });
 
-        LevelRenderEvents.START_MAIN.register(context -> {
+        // Submit Totem compute after the immutable frame snapshot has been extracted. This must
+        // stay outside LevelRenderer.render(): once world takeover is active that vanilla drawing
+        // method is cancelled entirely, while extraction continues every frame.
+        LevelExtractionEvents.END_EXTRACTION.register(context -> {
             // The old P5 world bootstrap is now a zero-GPU compatibility gate.
             P5WorldDebugComposite.runOnceOnRenderThread();
 
@@ -158,14 +161,9 @@ public final class TotemLumenClient implements ClientModInitializer {
             }
         });
 
-        // The ray-traced world composite is still temporarily presented through the HUD pipeline.
-        // Register it first so vanilla HUD elements (hotbar, health, crosshair, chat, etc.) render
-        // afterwards and remain visible. A later renderer milestone will move this composite out of
-        // the HUD pipeline entirely and into the world/composite stage.
-        HudElementRegistry.addFirst(
-                Identifier.fromNamespaceAndPath(MOD_ID, "p5_debug_overlay"),
-                (graphics, deltaTracker) -> P5StableLookupRenderer.drawHud(graphics)
-        );
+        // World presentation is no longer a HUD overlay. LevelRendererTakeoverMixin presents the
+        // latest completed Totem frame into the main world target and skips vanilla level drawing.
+        // HUD elements remain a separate later phase, so F1 affects only the HUD.
         HudElementRegistry.addLast(
                 Identifier.fromNamespaceAndPath(MOD_ID, "compile_progress"),
                 (graphics, deltaTracker) -> RendererCompileProgressNotifier.drawHud(graphics)
