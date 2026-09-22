@@ -530,7 +530,7 @@ final class P18LabPbrShadingPatch {
                 """
                     P18SurfaceSample p18Surface = p18ResolveSurface(hit, rayOrigin, rayDirection);
                     vec3 normal = p18Surface.normal;
-                    vec3 albedo = p18Surface.albedo * (1.0 - p18Surface.metallic);
+                    vec3 albedo = p18Surface.albedo * p18DiffuseMetalWeight(p18Surface.metallic);
                     vec3 emitted = p18Surface.emission;
                 """,
                 "environment material sample"
@@ -580,7 +580,7 @@ final class P18LabPbrShadingPatch {
                 gi,
                 "return materialColor(primaryHit.materialId) * incomingRadiance * GI_STRENGTH;",
                 "return p18PrimarySurface.albedo\n"
-                        + "            * (1.0 - p18PrimarySurface.metallic)\n"
+                        + "            * p18DiffuseMetalWeight(p18PrimarySurface.metallic)\n"
                         + "            * p18PrimarySurface.ao\n"
                         + "            * incomingRadiance\n"
                         + "            * GI_STRENGTH;",
@@ -661,7 +661,7 @@ final class P18LabPbrShadingPatch {
                     P18SurfaceSample p18Surface = p18ResolveSurface(
                         hit, primaryOrigin, primaryDirection
                     );
-                    vec3 p18Diffuse = p18Surface.albedo * (1.0 - p18Surface.metallic);
+                    vec3 p18Diffuse = p18Surface.albedo * p18DiffuseMetalWeight(p18Surface.metallic);
                     vec3 emitted = emissiveMode ? p18Surface.emission : vec3(0.0);
                 """,
                 "local light material"
@@ -718,7 +718,7 @@ final class P18LabPbrShadingPatch {
                     );
                     vec3 emitted = p18Surface.emission;
                     vec3 localBase = p18Surface.albedo
-                            * (1.0 - p18Surface.metallic)
+                            * p18DiffuseMetalWeight(p18Surface.metallic)
                             * (uintBitsToFloat(scene.data[82]) * p18Surface.ao)
                             + emitted;
                 """,
