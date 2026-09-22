@@ -16,7 +16,8 @@
     "P5StableLookupRendererMixin",
     "P5StableLookupRendererP17Mixin",
     "P5RendererResourcesMixin",
-    "VulkanComputeProgramMixin"
+    "VulkanComputeProgramMixin",
+    "VideoSettingsRenderProfileMixin"
   ],
   "injectors": {
     "defaultRequire": 1
