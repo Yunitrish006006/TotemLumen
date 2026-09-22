@@ -317,3 +317,8 @@ Alpha 51 removes the temporary HUD-overlay presentation path. Minecraft 26.2 lev
 ## Alpha 52 world-takeover presentation orientation
 
 Alpha 52 keeps the Alpha 51 direct LevelRenderer takeover and fixes Vulkan/world-target vertical orientation by flipping only the final presentation row. Ray generation, temporal history and reprojection stay in the original logical pixel coordinates; the split P16 reflection pass uses the same flipped presentation index before adding reflected radiance.
+
+
+## Alpha 53 fullscreen RT pixel budgets
+
+Alpha 53 fixes fullscreen performance scaling after direct world takeover. Internal resolution presets are no longer unbounded percentages of the desktop framebuffer: LOW remains 50% up to a 512x288-equivalent pixel budget, BALANCED remains 67% up to 768x432, and HIGH remains native up to 1280x720. Smaller/windowed viewports keep the percentage behavior; larger fullscreen viewports upscale the bounded Totem output instead of multiplying ray-tracing dispatch cost with desktop resolution.
