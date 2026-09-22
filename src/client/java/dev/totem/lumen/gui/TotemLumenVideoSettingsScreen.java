@@ -155,32 +155,32 @@ public final class TotemLumenVideoSettingsScreen extends Screen {
         if (denoiseQualityButton != null) denoiseQualityButton.setMessage(denoiseQualityLabel());
     }
 
-    private static Component rendererEnabledLabel() {
+    static Component rendererEnabledLabel() {
         return Component.translatable(
                 "screen.totem-lumen.renderer_enabled",
                 booleanComponent(RendererSettings.rendererEnabled())
         );
     }
 
-    private static Component giQualityLabel() {
+    static Component giQualityLabel() {
         return Component.translatable(
                 "screen.totem-lumen.gi_quality",
                 qualityComponent(RendererSettings.giQuality())
         );
     }
 
-    private static Component shadowQualityLabel() {
+    static Component shadowQualityLabel() {
         return Component.translatable(
                 "screen.totem-lumen.shadow_quality",
                 qualityComponent(RendererSettings.shadowQuality())
         );
     }
 
-    private static Component rayDistanceLabel() {
+    static Component rayDistanceLabel() {
         return Component.translatable("screen.totem-lumen.ray_distance", RendererSettings.rayDistance());
     }
 
-    private static Component internalResolutionLabel() {
+    static Component internalResolutionLabel() {
         RendererSettings.InternalResolution value = RendererSettings.internalResolution();
         return Component.translatable(
                 "screen.totem-lumen.internal_resolution",
@@ -189,21 +189,21 @@ public final class TotemLumenVideoSettingsScreen extends Screen {
         );
     }
 
-    private static Component reflectionsEnabledLabel() {
+    static Component reflectionsEnabledLabel() {
         return Component.translatable(
                 "screen.totem-lumen.reflections_enabled",
                 booleanComponent(RendererSettings.reflectionsEnabled())
         );
     }
 
-    private static Component waterReflectionsLabel() {
+    static Component waterReflectionsLabel() {
         return Component.translatable(
                 "screen.totem-lumen.water_reflections",
                 booleanComponent(RendererSettings.waterReflections())
         );
     }
 
-    private static Component reflectionBouncesLabel() {
+    static Component reflectionBouncesLabel() {
         return Component.translatable(
                 "screen.totem-lumen.reflection_bounces",
                 Component.translatable(
@@ -213,21 +213,21 @@ public final class TotemLumenVideoSettingsScreen extends Screen {
         );
     }
 
-    private static Component reflectionDistanceLabel() {
+    static Component reflectionDistanceLabel() {
         return Component.translatable(
                 "screen.totem-lumen.reflection_distance",
                 RendererSettings.reflectionDistance()
         );
     }
 
-    private static Component temporalQualityLabel() {
+    static Component temporalQualityLabel() {
         return Component.translatable(
                 "screen.totem-lumen.temporal_quality",
                 qualityName(RendererSettings.temporalQuality().name())
         );
     }
 
-    private static Component denoiseQualityLabel() {
+    static Component denoiseQualityLabel() {
         return Component.translatable(
                 "screen.totem-lumen.denoise_quality",
                 qualityName(RendererSettings.denoiseQuality().name())
