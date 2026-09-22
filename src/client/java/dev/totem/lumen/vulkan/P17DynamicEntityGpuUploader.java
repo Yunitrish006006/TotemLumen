@@ -22,6 +22,8 @@ public final class P17DynamicEntityGpuUploader {
     private static volatile long lastTextureCopyBytes;
     private static volatile long lastQuadByteOffset = -1L;
     private static volatile long lastQuadCopyBytes;
+    private static volatile long lastContiguousByteOffset = -1L;
+    private static volatile long lastContiguousCopyBytes;
     private static volatile long lastPackNanos;
     private static long lastPackedRevision = Long.MIN_VALUE;
     private static long lastPackedMaterialRevision = Long.MIN_VALUE;
@@ -100,6 +102,16 @@ public final class P17DynamicEntityGpuUploader {
         lastQuadCopyBytes = (long) packed.totalQuads()
                 * GpuDynamicEntityScene.QUAD_WORDS_PER_RECORD
                 * Integer.BYTES;
+
+        // MoltenVK/Apple Silicon regressed badly with multiple disjoint flush/copy commands.
+        // Keep the Alpha 48 CPU win (no material texture re-sampling on pose updates), but submit
+        // one contiguous P17 upload exactly like the proven Alpha 47 GPU path.
+        lastContiguousByteOffset = baseByteOffset;
+        lastContiguousCopyBytes = (long) (
+                GpuDynamicEntityScene.QUAD_POOL_BASE_WORD
+                        + packed.totalQuads() * GpuDynamicEntityScene.QUAD_WORDS_PER_RECORD
+        ) * Integer.BYTES;
+
         lastPackNanos = Math.max(0L, System.nanoTime() - packStartedNanos);
 
         lastPackedRevision = state.revision();
@@ -175,12 +187,20 @@ public final class P17DynamicEntityGpuUploader {
         return lastQuadCopyBytes;
     }
 
+    public static long lastContiguousByteOffset() {
+        return lastContiguousByteOffset;
+    }
+
+    public static long lastContiguousCopyBytes() {
+        return lastContiguousCopyBytes;
+    }
+
     public static long lastPackNanos() {
         return lastPackNanos;
     }
 
     public static long lastUploadBytes() {
-        return lastMetadataCopyBytes + lastTextureCopyBytes + lastQuadCopyBytes;
+        return lastContiguousCopyBytes;
     }
 
     public static synchronized boolean consumeCopyPending() {
