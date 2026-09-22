@@ -322,3 +322,8 @@ Alpha 52 keeps the Alpha 51 direct LevelRenderer takeover and fixes Vulkan/world
 ## Alpha 53 fullscreen RT pixel budgets
 
 Alpha 53 fixes fullscreen performance scaling after direct world takeover. Internal resolution presets are no longer unbounded percentages of the desktop framebuffer: LOW remains 50% up to a 512x288-equivalent pixel budget, BALANCED remains 67% up to 768x432, and HIGH remains native up to 1280x720. Smaller/windowed viewports keep the percentage behavior; larger fullscreen viewports upscale the bounded Totem output instead of multiplying ray-tracing dispatch cost with desktop resolution.
+
+
+## Alpha 54 reflective-material fallback
+
+Alpha 54 fixes reflective/metallic materials turning black when the P16 reflection pass is disabled or temporarily unavailable after a render-target resize. P18 now suppresses metallic diffuse energy only while the reflection pass is actually active. Header word 46 now represents effective reflection-pass availability (user setting enabled and P16 bound/ready), so reflection-off and reflection-binding states keep a visible diffuse fallback instead of zeroing metallic surfaces.
