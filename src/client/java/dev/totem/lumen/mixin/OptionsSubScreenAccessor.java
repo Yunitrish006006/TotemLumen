@@ -1,6 +1,7 @@
 package dev.totem.lumen.mixin;
 
 import net.minecraft.client.Options;
+import net.minecraft.client.gui.components.OptionsList;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.options.OptionsSubScreen;
 import org.spongepowered.asm.mixin.Mixin;
@@ -14,4 +15,7 @@ public interface OptionsSubScreenAccessor {
 
     @Accessor("options")
     Options totemLumen$getOptions();
+
+    @Accessor("list")
+    OptionsList totemLumen$getList();
 }
