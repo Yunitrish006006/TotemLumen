@@ -65,7 +65,11 @@ public abstract class P5StableLookupRendererMixin {
             );
         }
         if (fullSceneUpload || entityChanged) {
-            flushP17Tails(upload);
+            flushTail(
+                    upload,
+                    P17DynamicEntityGpuUploader.lastContiguousByteOffset(),
+                    P17DynamicEntityGpuUploader.lastContiguousCopyBytes()
+            );
         }
         if (fullSceneUpload || fluidChanged) {
             flushTail(
@@ -108,7 +112,13 @@ public abstract class P5StableLookupRendererMixin {
             );
         }
         if (P17DynamicEntityGpuUploader.consumeCopyPending()) {
-            copyP17Tails(commandBuffer, sourceBuffer, destinationBuffer);
+            copyTail(
+                    commandBuffer,
+                    sourceBuffer,
+                    destinationBuffer,
+                    P17DynamicEntityGpuUploader.lastContiguousByteOffset(),
+                    P17DynamicEntityGpuUploader.lastContiguousCopyBytes()
+            );
         }
         if (P14EFluidGpuUploader.consumeCopyPending()) {
             copyTail(
@@ -155,52 +165,6 @@ public abstract class P5StableLookupRendererMixin {
     @Inject(method = "shutdown", at = @At("HEAD"))
     private static void totemLumen$shutdownStagedPipelines(CallbackInfo ci) {
         P12FullBasePipeline.shutdown();
-    }
-
-    private static void flushP17Tails(VulkanOwnedBuffer upload) {
-        flushTail(
-                upload,
-                P17DynamicEntityGpuUploader.lastMetadataByteOffset(),
-                P17DynamicEntityGpuUploader.lastMetadataCopyBytes()
-        );
-        flushTail(
-                upload,
-                P17DynamicEntityGpuUploader.lastTextureByteOffset(),
-                P17DynamicEntityGpuUploader.lastTextureCopyBytes()
-        );
-        flushTail(
-                upload,
-                P17DynamicEntityGpuUploader.lastQuadByteOffset(),
-                P17DynamicEntityGpuUploader.lastQuadCopyBytes()
-        );
-    }
-
-    private static void copyP17Tails(
-            VkCommandBuffer commandBuffer,
-            long sourceBuffer,
-            long destinationBuffer
-    ) {
-        copyTail(
-                commandBuffer,
-                sourceBuffer,
-                destinationBuffer,
-                P17DynamicEntityGpuUploader.lastMetadataByteOffset(),
-                P17DynamicEntityGpuUploader.lastMetadataCopyBytes()
-        );
-        copyTail(
-                commandBuffer,
-                sourceBuffer,
-                destinationBuffer,
-                P17DynamicEntityGpuUploader.lastTextureByteOffset(),
-                P17DynamicEntityGpuUploader.lastTextureCopyBytes()
-        );
-        copyTail(
-                commandBuffer,
-                sourceBuffer,
-                destinationBuffer,
-                P17DynamicEntityGpuUploader.lastQuadByteOffset(),
-                P17DynamicEntityGpuUploader.lastQuadCopyBytes()
-        );
     }
 
     private static void flushTail(VulkanOwnedBuffer upload, long offset, long bytes) {
