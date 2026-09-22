@@ -1,5 +1,6 @@
 package dev.totem.lumen.mixin;
 
+import dev.totem.lumen.gui.TotemLumenVideoSettingsIntegration;
 import dev.totem.lumen.render.RendererSettings;
 import net.minecraft.client.OptionInstance;
 import net.minecraft.client.Options;
@@ -7,6 +8,7 @@ import net.minecraft.client.gui.screens.options.VideoSettingsScreen;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 import java.util.Arrays;
@@ -18,6 +20,23 @@ import java.util.Set;
  */
 @Mixin(VideoSettingsScreen.class)
 public abstract class VideoSettingsRenderProfileMixin {
+    @Inject(
+            method = "addOptions",
+            at = @At(
+                    value = "INVOKE",
+                    target = "Lnet/minecraft/client/gui/components/OptionsList;addHeader(Lnet/minecraft/network/chat/Component;)V",
+                    ordinal = 1,
+                    shift = At.Shift.AFTER
+            )
+    )
+    private void totemLumen$addQualitySectionControls(CallbackInfo ci) {
+        OptionsSubScreenAccessor accessor = (OptionsSubScreenAccessor) (Object) this;
+        TotemLumenVideoSettingsIntegration.addQualityControls(
+                (VideoSettingsScreen) (Object) this,
+                accessor.totemLumen$getList()
+        );
+    }
+
     @Inject(method = "qualityOptions", at = @At("RETURN"), cancellable = true)
     private static void totemLumen$filterQualityOptions(
             Options options,
