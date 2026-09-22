@@ -537,6 +537,7 @@ final class P18LabPbrShadingPatch {
                 "environment AO"
         );
         source = patchEnvironmentAmbientAo(source);
+        source = patchSecondaryGiEnvironment(source);
 
         source = patchGiIndirect(source);
         source = patchLocalLight(source);
@@ -545,9 +546,92 @@ final class P18LabPbrShadingPatch {
         TotemLumenClient.LOGGER.info(
                 "P18C LabPBR shading active: albedo=true, normal=true, ao=true, roughness=true, "
                         + "dielectricF0=true, hardcodedMetals=230..237, customMetalFallback=true, "
-                        + "emission=true, stableRuntimeMaterialScalars=true, perTexelEmissionAuthoritative=true"
+                        + "emission=true, secondaryGiMaterial=true, stableRuntimeMaterialScalars=true, perTexelEmissionAuthoritative=true"
         );
         return source;
+    }
+
+    private static String patchSecondaryGiEnvironment(String source) {
+        String startMarker = "vec3 p15SecondaryBounceRadiance(\n";
+        String endMarker = "vec3 p13OneBounceIndirectRgb(\n";
+        int start = source.indexOf(startMarker);
+        int end = source.indexOf(endMarker, start);
+        if (start < 0 || end < 0 || end <= start) {
+            throw new IllegalStateException("P18C shader marker missing: secondary GI environment span");
+        }
+
+        String secondary = source.substring(start, end);
+        secondary = replaceRequiredOnce(
+                secondary,
+                """
+                    vec3 secondaryNormal = resolvedSurfaceNormal(hit, rayDirection);
+                    vec3 secondaryAlbedo = materialColor(hit.materialId);
+                    vec4 secondaryEmission = materialEmission(hit.materialId);
+                    vec3 secondaryEmitted = secondaryEmission.rgb
+                            * secondaryEmission.a
+                            * uintBitsToFloat(scene.data[83]);
+                """,
+                """
+                    P18SurfaceSample p18SecondarySurface = p18ResolveSurface(
+                        hit, rayOrigin, rayDirection
+                    );
+                    vec3 secondaryNormal = p18SecondarySurface.normal;
+                    vec3 secondaryAlbedo = p18SecondarySurface.albedo
+                            * (1.0 - p18SecondarySurface.metallic);
+                    vec3 secondaryEmitted = p18SecondarySurface.emission;
+                """,
+                "secondary GI material sample"
+        );
+        secondary = replaceRequiredOnce(
+                secondary,
+                """
+                        vec3 skyAmbient = p13SkyRadiance(secondaryNormal)
+                                * environmentTransmission
+                                * 0.62;
+                """,
+                """
+                        vec3 skyAmbient = p13SkyRadiance(secondaryNormal)
+                                * environmentTransmission
+                                * (0.62 * p18SecondarySurface.ao);
+                """,
+                "secondary GI ambient AO"
+        );
+
+        String facingNeedle = " * facing + secondaryEmitted;";
+        int firstFacing = secondary.indexOf(facingNeedle);
+        int secondFacing = firstFacing < 0
+                ? -1
+                : secondary.indexOf(facingNeedle, firstFacing + facingNeedle.length());
+        int thirdFacing = secondFacing < 0
+                ? -1
+                : secondary.indexOf(facingNeedle, secondFacing + facingNeedle.length());
+        if (firstFacing < 0 || secondFacing < 0 || thirdFacing >= 0) {
+            throw new IllegalStateException(
+                    "P18C shader marker missing/ambiguous: secondary dimension ambient returns"
+            );
+        }
+        secondary = secondary.substring(0, firstFacing)
+                + " * (facing * p18SecondarySurface.ao) + secondaryEmitted;"
+                + secondary.substring(firstFacing + facingNeedle.length());
+        secondFacing = secondary.indexOf(
+                facingNeedle,
+                firstFacing + " * (facing * p18SecondarySurface.ao) + secondaryEmitted;".length()
+        );
+        if (secondFacing < 0) {
+            throw new IllegalStateException("P18C shader marker missing: secondary second ambient return");
+        }
+        secondary = secondary.substring(0, secondFacing)
+                + " * (facing * p18SecondarySurface.ao) + secondaryEmitted;"
+                + secondary.substring(secondFacing + facingNeedle.length());
+
+        secondary = replaceRequiredOnce(
+                secondary,
+                "return secondaryAlbedo * vec3(0.060, 0.070, 0.090) + secondaryEmitted;",
+                "return secondaryAlbedo * vec3(0.060, 0.070, 0.090)"
+                        + " * p18SecondarySurface.ao + secondaryEmitted;",
+                "secondary fallback ambient AO"
+        );
+        return source.substring(0, start) + secondary + source.substring(end);
     }
 
     private static String patchGiIndirect(String source) {
