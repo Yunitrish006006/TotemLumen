@@ -11,6 +11,7 @@
     "SubmitNodeStorageBlockEntityMixin",
     "SubmitNodeCollectionBlockEntityMixin",
     "MinecraftBlockModelMeshResolverMixin",
+    "LevelRendererTakeoverMixin",
     "SceneExtractionBridgeBlockEntityMixin",
     "P5StableLookupRendererMixin",
     "P5StableLookupRendererP17Mixin",
