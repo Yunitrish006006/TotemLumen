@@ -290,3 +290,10 @@ Alpha 41 runtime readiness
 - Feature-detected Vulkan acceleration structures and RT pipeline.
 - Compute backend remains available and supported.
 - ReSTIR/adaptive sampling/dynamic resolution/upscaling considered only after the baseline renderer is stable.
+
+
+## Alpha 47 performance probe
+
+Alpha 47 adds an F9 pass-isolation probe for the persistent ~17 FPS issue observed even at 50% internal resolution, GI Low, Shadow Low and reflections disabled. F9 cycles Normal -> Hard Shadow -> Local Lights -> Indirect GI -> GI Composite. Each mode discards 10 warmup completions, averages 30 submit-to-complete samples, then logs average milliseconds and effective Totem FPS. This intentionally measures the one-frame-in-flight fence completion interval that currently gates new Totem dispatches.
+
+An Osize experiment for the 132k-character unified full-base shader was rejected before runtime because shaderc failed optimization with SPIR-V ID overflow. The next architecture decision therefore depends on pass-isolation measurements rather than assuming optimizer codegen can rescue the mega-shader.
