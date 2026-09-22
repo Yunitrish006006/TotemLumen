@@ -35,28 +35,39 @@ public final class RendererSettings {
     }
 
     public enum InternalResolution {
-        LOW(0.50f, 50),
-        BALANCED(0.67f, 67),
-        HIGH(1.00f, 100);
-
-        /**
-         * Full native 4K history buffers are disproportionately expensive because the renderer keeps
-         * two 8-word temporal records per pixel in addition to the output buffer. High therefore
-         * remains native through 1440p and uses 2560 pixels as the current safety ceiling above it.
-         */
-        private static final int MAX_RENDER_WIDTH = 2560;
+        // Percentage still controls small/windowed viewports. The pixel budget prevents fullscreen
+        // from multiplying RT work by 4-6x just because the desktop framebuffer is larger.
+        LOW(0.50f, 50, 512 * 288),
+        BALANCED(0.67f, 67, 768 * 432),
+        HIGH(1.00f, 100, 1280 * 720);
 
         private final float scale;
         private final int percent;
+        private final int maxPixels;
 
-        InternalResolution(float scale, int percent) {
+        InternalResolution(float scale, int percent, int maxPixels) {
             this.scale = scale;
             this.percent = percent;
+            this.maxPixels = maxPixels;
         }
 
-        public int targetWidth(int viewportWidth) {
+        public int targetWidth(int viewportWidth, int viewportHeight) {
             int safeViewportWidth = Math.max(1, viewportWidth);
-            return Math.max(1, Math.min(MAX_RENDER_WIDTH, Math.round(safeViewportWidth * scale)));
+            int safeViewportHeight = Math.max(1, viewportHeight);
+
+            int scaledWidth = Math.max(1, Math.round(safeViewportWidth * scale));
+            int scaledHeight = Math.max(1, Math.round(safeViewportHeight * scale));
+            long scaledPixels = (long) scaledWidth * scaledHeight;
+            if (scaledPixels <= maxPixels) {
+                return scaledWidth;
+            }
+
+            double reduction = Math.sqrt(maxPixels / (double) scaledPixels);
+            return Math.max(1, (int) Math.floor(scaledWidth * reduction));
+        }
+
+        public int maxPixels() {
+            return maxPixels;
         }
 
         public int percent() {
