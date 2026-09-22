@@ -114,10 +114,30 @@ public final class P14ShaderCompileVerifier {
                 "const uint P17_ENTITY_MATERIAL_BASE = 0xFE00u;",
                 "unified dynamic-entity tracing"
         );
+        requireSourceMarker(
+                source,
+                "vec3 p15SecondaryBounceRadiance(",
+                "single-visibility secondary GI helper"
+        );
+        requireSourceMarker(
+                source,
+                "incomingRadiance = p15SecondaryBounceRadiance(",
+                "secondary GI cheap environment path"
+        );
+        requireSourceMarker(
+                source,
+                "min(GI_MAX_DISTANCE, uintBitsToFloat(scene.data[7]))",
+                "bounded secondary GI visibility distance"
+        );
+        if (source.contains("incomingRadiance = p13EnvironmentSurfaceRadiance(")) {
+            throw new IllegalStateException(
+                    "Unified full lighting still runs full environment visibility at secondary GI hits"
+            );
+        }
         System.out.println(
                 "Unified full-lighting verification PASS: "
                         + "staticWorld=true, fluids=true, pbr=true, dynamicEntities=true, "
-                        + "duplicateEntityPipeline=false"
+                        + "secondaryGiVisibility=singleSkyRay, duplicateEntityPipeline=false"
         );
     }
 
