@@ -910,6 +910,16 @@ public final class P5StableLookupRenderer {
         }
     }
 
+    private static final DebugMode[] PERFORMANCE_PROBE_MODES = {
+            DebugMode.NORMAL,
+            DebugMode.HARD_SHADOW,
+            DebugMode.LOCAL_LIGHTS,
+            DebugMode.INDIRECT_GI,
+            DebugMode.GI_COMPOSITE
+    };
+    private static final int PERFORMANCE_PROBE_WARMUP_FRAMES = 10;
+    private static final int PERFORMANCE_PROBE_SAMPLE_FRAMES = 30;
+
     private static Resources resources;
     private static DebugMode mode = DebugMode.GI_COMPOSITE;
     private static boolean inFlight;
@@ -940,6 +950,10 @@ public final class P5StableLookupRenderer {
     private static long lastAnimationSignature = Long.MIN_VALUE;
     private static int activeRenderWidth;
     private static int activeRenderHeight;
+    private static DebugMode performanceProbeMode;
+    private static int performanceProbeWarmup;
+    private static int performanceProbeSamples;
+    private static long performanceProbeAccumulatedNanos;
 
     private P5StableLookupRenderer() {
     }
@@ -1105,6 +1119,7 @@ public final class P5StableLookupRenderer {
         lastSubmittedFrame = frame.frameIndex();
 
         try {
+            long submitStartedNanos = System.nanoTime();
             VulkanFrameComputeBatch batch = VulkanFrameComputeBatch.begin(device, capabilities, r.commandPool);
             recordCommands(
                     batch.commandBuffer(),
@@ -1117,7 +1132,8 @@ public final class P5StableLookupRenderer {
                     fullSceneUpload,
                     frame,
                     submittedMode,
-                    historyWriteIndex
+                    historyWriteIndex,
+                    submitStartedNanos
             ));
         } catch (Throwable failure) {
             inFlight = false;
@@ -1144,6 +1160,17 @@ public final class P5StableLookupRenderer {
         return setMode(values[(mode.ordinal() + 1) % values.length]);
     }
 
+    public static DebugMode cyclePerformanceProbeMode() {
+        int current = -1;
+        for (int i = 0; i < PERFORMANCE_PROBE_MODES.length; i++) {
+            if (PERFORMANCE_PROBE_MODES[i] == mode) {
+                current = i;
+                break;
+            }
+        }
+        return setMode(PERFORMANCE_PROBE_MODES[(current + 1) % PERFORMANCE_PROBE_MODES.length]);
+    }
+
     public static DebugMode setMode(DebugMode nextMode) {
         if (nextMode == null) throw new IllegalArgumentException("nextMode is required");
         DebugMode previous = mode;
@@ -1151,6 +1178,19 @@ public final class P5StableLookupRenderer {
         if (!historyCompatible(mode, previous)) {
             historyValid = false;
         }
+        performanceProbeMode = mode;
+        performanceProbeWarmup = 0;
+        performanceProbeSamples = 0;
+        performanceProbeAccumulatedNanos = 0L;
+        TotemLumenClient.LOGGER.info(
+                "Performance probe RESET: mode={}, render={}x{}, giSamples={}, shadowSamples={}, reflections={}",
+                mode.label(),
+                activeRenderWidth,
+                activeRenderHeight,
+                RendererSettings.giQuality().samples(),
+                RendererSettings.shadowQuality().samples(),
+                RendererSettings.reflectionsEnabled()
+        );
         return mode;
     }
 
@@ -1195,7 +1235,8 @@ public final class P5StableLookupRenderer {
             boolean fullSceneUpload,
             FrameSnapshot submittedFrame,
             DebugMode submittedMode,
-            int historyWriteIndex
+            int historyWriteIndex,
+            long submitStartedNanos
     ) {
         inFlight = false;
         ready = true;
@@ -1207,6 +1248,8 @@ public final class P5StableLookupRenderer {
         } else {
             historyValid = false;
         }
+
+        recordPerformanceProbe(submittedMode, submitStartedNanos);
 
         if (!firstFrameLogged) {
             firstFrameLogged = true;
@@ -1283,6 +1326,43 @@ public final class P5StableLookupRenderer {
             resetRequested = false;
             destroyResourcesIfSafe();
         }
+    }
+
+    private static void recordPerformanceProbe(DebugMode submittedMode, long submitStartedNanos) {
+        if (submittedMode != performanceProbeMode) {
+            performanceProbeMode = submittedMode;
+            performanceProbeWarmup = 0;
+            performanceProbeSamples = 0;
+            performanceProbeAccumulatedNanos = 0L;
+        }
+
+        long elapsedNanos = Math.max(0L, System.nanoTime() - submitStartedNanos);
+        if (performanceProbeWarmup < PERFORMANCE_PROBE_WARMUP_FRAMES) {
+            performanceProbeWarmup++;
+            return;
+        }
+
+        performanceProbeAccumulatedNanos += elapsedNanos;
+        performanceProbeSamples++;
+        if (performanceProbeSamples < PERFORMANCE_PROBE_SAMPLE_FRAMES) return;
+
+        double averageMs = performanceProbeAccumulatedNanos
+                / (double) performanceProbeSamples
+                / 1_000_000.0;
+        double effectiveFps = averageMs <= 0.0 ? 0.0 : 1000.0 / averageMs;
+        TotemLumenClient.LOGGER.info(
+                "Performance probe RESULT: mode={}, render={}x{}, avgSubmitToCompleteMs={}, effectiveTotemFps={}, giSamples={}, shadowSamples={}, reflections={}",
+                submittedMode.label(),
+                activeRenderWidth,
+                activeRenderHeight,
+                String.format(java.util.Locale.ROOT, "%.3f", averageMs),
+                String.format(java.util.Locale.ROOT, "%.1f", effectiveFps),
+                RendererSettings.giQuality().samples(),
+                RendererSettings.shadowQuality().samples(),
+                RendererSettings.reflectionsEnabled()
+        );
+        performanceProbeSamples = 0;
+        performanceProbeAccumulatedNanos = 0L;
     }
 
     private static List<SectionSnapshot> nearestSections(FrameSnapshot frame) {
