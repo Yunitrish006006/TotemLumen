@@ -302,3 +302,8 @@ An Osize experiment for the 132k-character unified full-base shader was rejected
 ## Alpha 48 P17 split upload
 
 Alpha 48 targets the CPU/upload side exposed by the Alpha 47 performance probe. Dynamic-entity pose changes no longer repack stable entity material textures. P17 upload is split into metadata, actual used texture texels, and actual used quad ranges instead of copying one contiguous span across the fixed 262,144-texel reserved texture pool. Geometry-only updates preserve the material descriptor and texture payload and copy only metadata plus active quads. Performance-probe logs also include the most recent P17 CPU pack time and upload byte count.
+
+
+## Alpha 49 P17 contiguous-upload regression fix
+
+Alpha 48's disjoint P17 metadata/texture/quad flush+copy path regressed runtime performance on Apple Silicon/MoltenVK. Alpha 49 restores one contiguous P17 GPU upload range, matching the proven Alpha 47 submission shape, while retaining the Alpha 48 CPU optimization that skips entity material texture re-sampling during pose-only updates. The performance probe continues to log P17 pack time and contiguous upload bytes.
