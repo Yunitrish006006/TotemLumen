@@ -7,8 +7,12 @@ import dev.totem.lumen.mixin.EntityRenderDispatcherMixin;
 import dev.totem.lumen.mixin.EntityRendererStateMixin;
 import dev.totem.lumen.mixin.LevelRendererTakeoverMixin;
 import dev.totem.lumen.mixin.SubmitNodeCollectionBlockEntityMixin;
+import dev.totem.lumen.mixin.VideoSettingsRenderProfileMixin;
 import dev.totem.lumen.mixin.SubmitNodeStorageBlockEntityMixin;
 import net.minecraft.client.DeltaTracker;
+import net.minecraft.client.OptionInstance;
+import net.minecraft.client.Options;
+import net.minecraft.client.gui.screens.options.VideoSettingsScreen;
 import net.minecraft.client.model.Model;
 import net.minecraft.client.renderer.LevelRenderer;
 import net.minecraft.client.renderer.SubmitNodeCollection;
@@ -88,12 +92,14 @@ public final class P14DMixinDescriptorVerifier {
         verifyEntityStateBinding();
         verifyEntitySubmit();
         verifyLevelRenderTakeover();
+        verifyVideoSettingsProfileHooks();
         System.out.println(
                 "P14D/P17 mixin descriptor verification PASS: minecraft=26.2, "
                         + "submitModel=Model+Object+PoseStack+RenderType+III+TextureAtlasSprite+I+CrumblingOverlay, "
                         + "createRenderState=Entity+F->EntityRenderState, "
                         + "entitySubmit=EntityRenderState+CameraRenderState+DDD+PoseStack+SubmitNodeCollector, "
-                        + "levelRender=GraphicsResourceAllocator+DeltaTracker+Z+CameraRenderState+Matrix4fc+GpuBufferSlice+Vector4f+Z"
+                        + "levelRender=GraphicsResourceAllocator+DeltaTracker+Z+CameraRenderState+Matrix4fc+GpuBufferSlice+Vector4f+Z, "
+                        + "videoSettings=qualityOptions/displayOptions/preferenceOptions/addOptions"
         );
     }
 
@@ -211,6 +217,57 @@ public final class P14DMixinDescriptorVerifier {
         if (callback[callback.length - 1] != CallbackInfo.class) {
             throw new IllegalStateException(
                     "LevelRenderer takeover callback must end with CallbackInfo"
+            );
+        }
+    }
+
+    private static void verifyVideoSettingsProfileHooks() throws Exception {
+        for (String methodName : new String[] {
+                "qualityOptions",
+                "displayOptions",
+                "preferenceOptions"
+        }) {
+            Method target = VideoSettingsScreen.class.getDeclaredMethod(methodName, Options.class);
+            if (!target.getReturnType().isArray()
+                    || target.getReturnType().getComponentType() != OptionInstance.class) {
+                throw new IllegalStateException(
+                        "VideoSettingsScreen." + methodName + " must return OptionInstance[]"
+                );
+            }
+        }
+
+        Method addOptions = VideoSettingsScreen.class.getDeclaredMethod("addOptions");
+        if (addOptions.getReturnType() != void.class) {
+            throw new IllegalStateException("VideoSettingsScreen.addOptions must return void");
+        }
+
+        Method qualityHandler = Arrays.stream(VideoSettingsRenderProfileMixin.class.getDeclaredMethods())
+                .filter(method -> method.getName().equals("totemLumen$filterQualityOptions"))
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException(
+                        "Missing Video Settings quality-profile filter callback"
+                ));
+        Class<?>[] qualityCallback = qualityHandler.getParameterTypes();
+        if (qualityCallback.length != 2
+                || qualityCallback[0] != Options.class
+                || qualityCallback[1] != CallbackInfoReturnable.class) {
+            throw new IllegalStateException(
+                    "Video Settings quality-profile callback descriptor mismatch: "
+                            + Arrays.toString(qualityCallback)
+            );
+        }
+
+        Method addHandler = Arrays.stream(VideoSettingsRenderProfileMixin.class.getDeclaredMethods())
+                .filter(method -> method.getName().equals("totemLumen$addQualitySectionControls"))
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException(
+                        "Missing Video Settings quality-section injection callback"
+                ));
+        Class<?>[] addCallback = addHandler.getParameterTypes();
+        if (addCallback.length != 1 || addCallback[0] != CallbackInfo.class) {
+            throw new IllegalStateException(
+                    "Video Settings quality-section callback descriptor mismatch: "
+                            + Arrays.toString(addCallback)
             );
         }
     }
