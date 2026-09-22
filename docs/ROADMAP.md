@@ -297,3 +297,8 @@ Alpha 41 runtime readiness
 Alpha 47 adds an F9 pass-isolation probe for the persistent ~17 FPS issue observed even at 50% internal resolution, GI Low, Shadow Low and reflections disabled. F9 cycles Normal -> Hard Shadow -> Local Lights -> Indirect GI -> GI Composite. Each mode discards 10 warmup completions, averages 30 submit-to-complete samples, then logs average milliseconds and effective Totem FPS. This intentionally measures the one-frame-in-flight fence completion interval that currently gates new Totem dispatches.
 
 An Osize experiment for the 132k-character unified full-base shader was rejected before runtime because shaderc failed optimization with SPIR-V ID overflow. The next architecture decision therefore depends on pass-isolation measurements rather than assuming optimizer codegen can rescue the mega-shader.
+
+
+## Alpha 48 P17 split upload
+
+Alpha 48 targets the CPU/upload side exposed by the Alpha 47 performance probe. Dynamic-entity pose changes no longer repack stable entity material textures. P17 upload is split into metadata, actual used texture texels, and actual used quad ranges instead of copying one contiguous span across the fixed 262,144-texel reserved texture pool. Geometry-only updates preserve the material descriptor and texture payload and copy only metadata plus active quads. Performance-probe logs also include the most recent P17 CPU pack time and upload byte count.
