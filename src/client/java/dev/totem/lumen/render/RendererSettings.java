@@ -13,6 +13,16 @@ import java.util.concurrent.atomic.AtomicLong;
 
 /** Persistent client-side renderer quality settings. */
 public final class RendererSettings {
+    public enum RenderProfile {
+        MINECRAFT,
+        TOTEM_LUMEN;
+
+        public RenderProfile next() {
+            RenderProfile[] values = values();
+            return values[(ordinal() + 1) % values.length];
+        }
+    }
+
     public enum GiQuality {
         LOW(1),
         BALANCED(2),
@@ -154,7 +164,7 @@ public final class RendererSettings {
             .resolve("totem-lumen.properties");
     private static final AtomicLong REVISION = new AtomicLong();
 
-    private static boolean rendererEnabled = true;
+    private static RenderProfile renderProfile = RenderProfile.TOTEM_LUMEN;
     private static GiQuality giQuality = GiQuality.BALANCED;
     private static Quality shadowQuality = Quality.BALANCED;
     private static int rayDistance = 64;
@@ -175,7 +185,20 @@ public final class RendererSettings {
         Properties properties = new Properties();
         try (InputStream input = Files.newInputStream(CONFIG_PATH)) {
             properties.load(input);
-            rendererEnabled = parseBoolean(properties, "rendererEnabled", rendererEnabled);
+            String savedProfile = properties.getProperty("renderProfile");
+            if (savedProfile != null) {
+                renderProfile = parseEnum(
+                        properties,
+                        "renderProfile",
+                        RenderProfile.class,
+                        renderProfile
+                );
+            } else {
+                // Alpha 57 and earlier stored only rendererEnabled. Preserve the user's choice.
+                renderProfile = parseBoolean(properties, "rendererEnabled", true)
+                        ? RenderProfile.TOTEM_LUMEN
+                        : RenderProfile.MINECRAFT;
+            }
             giQuality = parseEnum(properties, "giQuality", GiQuality.class, giQuality);
             shadowQuality = parseEnum(properties, "shadowQuality", Quality.class, shadowQuality);
             rayDistance = sanitizeRayDistance(parseInt(properties, "rayDistance", rayDistance));
@@ -208,8 +231,8 @@ public final class RendererSettings {
             );
 
             TotemLumenClient.LOGGER.info(
-                    "Loaded renderer settings: rendererEnabled={}, gi={}, shadows={}, rayDistance={}, resolution={}, reflections={}, waterReflections={}, reflectionBounces={}, reflectionDistance={}, temporal={}, denoise={}",
-                    rendererEnabled,
+                    "Loaded renderer settings: renderProfile={}, gi={}, shadows={}, rayDistance={}, resolution={}, reflections={}, waterReflections={}, reflectionBounces={}, reflectionDistance={}, temporal={}, denoise={}",
+                    renderProfile,
                     giQuality,
                     shadowQuality,
                     rayDistance,
@@ -230,14 +253,27 @@ public final class RendererSettings {
         return REVISION.get();
     }
 
-    public static synchronized boolean rendererEnabled() {
-        return rendererEnabled;
+    public static synchronized RenderProfile renderProfile() {
+        return renderProfile;
     }
 
+    public static synchronized boolean rendererEnabled() {
+        return renderProfile == RenderProfile.TOTEM_LUMEN;
+    }
+
+    /** Legacy compatibility for callers that still think in terms of an enable toggle. */
     public static synchronized boolean toggleRendererEnabled() {
-        rendererEnabled = !rendererEnabled;
+        renderProfile = rendererEnabled()
+                ? RenderProfile.MINECRAFT
+                : RenderProfile.TOTEM_LUMEN;
         changed();
-        return rendererEnabled;
+        return rendererEnabled();
+    }
+
+    public static synchronized RenderProfile cycleRenderProfile() {
+        renderProfile = renderProfile.next();
+        changed();
+        return renderProfile;
     }
 
     public static synchronized GiQuality giQuality() {
@@ -416,7 +452,8 @@ public final class RendererSettings {
 
     private static void save() {
         Properties properties = new Properties();
-        properties.setProperty("rendererEnabled", Boolean.toString(rendererEnabled));
+        properties.setProperty("renderProfile", renderProfile.name());
+        properties.setProperty("rendererEnabled", Boolean.toString(rendererEnabled()));
         properties.setProperty("giQuality", giQuality.name());
         properties.setProperty("shadowQuality", shadowQuality.name());
         properties.setProperty("rayDistance", Integer.toString(rayDistance));
