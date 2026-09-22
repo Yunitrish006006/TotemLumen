@@ -111,7 +111,7 @@ Totem Lumen no longer exposes the simplified bootstrap renderer as a player-visi
 - Totem does not cancel vanilla level drawing until the full base pipeline is ready **and** a complete Totem frame has finished.
 - If the full base compile fails, Minecraft's normal renderer remains usable for the rest of the session.
 - Pressing **Recompile Renderer Pipelines** returns presentation ownership to Minecraft until the replacement full-base frame is ready.
-- P17 dynamic entities and P16 reflections remain optional staged upgrades after the base presentation is already active.
+- P17 dynamic-entity tracing is part of the unified production base; only P16 reflections remain an independent optional staged pipeline.
 
 This provides the intended "ordinary Minecraft first, advanced lighting when ready" startup path without an expensive resource reload.
 
