@@ -307,3 +307,8 @@ Alpha 48 targets the CPU/upload side exposed by the Alpha 47 performance probe. 
 ## Alpha 49 P17 contiguous-upload regression fix
 
 Alpha 48's disjoint P17 metadata/texture/quad flush+copy path regressed runtime performance on Apple Silicon/MoltenVK. Alpha 49 restores one contiguous P17 GPU upload range, matching the proven Alpha 47 submission shape, while retaining the Alpha 48 CPU optimization that skips entity material texture re-sampling during pose-only updates. The performance probe continues to log P17 pack time and contiguous upload bytes.
+
+
+## Alpha 51 direct world takeover
+
+Alpha 51 removes the temporary HUD-overlay presentation path. Minecraft 26.2 level extraction continues every frame and Totem compute is submitted from END_EXTRACTION, but once a complete Totem frame is available the LevelRenderer drawing phase is cancelled. The latest Totem output is blitted directly into GameRenderer.mainRenderTarget before later hand/HUD/GUI stages. F1 therefore hides only HUD/GUI and must not reveal the vanilla world underneath. Startup, recompilation and renderer-failure states keep vanilla level drawing as a fallback until takeover is ready. Output/history resources now match the active internal resolution instead of allocating a HIGH-resolution padded presentation texture.
