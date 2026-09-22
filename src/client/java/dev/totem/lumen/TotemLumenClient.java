@@ -35,6 +35,7 @@ public final class TotemLumenClient implements ClientModInitializer {
     public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
 
     private static KeyMapping cycleDebugMode;
+    private static KeyMapping cyclePerformanceProbe;
     private static boolean rendererRuntimeFailed;
 
     @Override
@@ -82,6 +83,14 @@ public final class TotemLumenClient implements ClientModInitializer {
                         debugCategory
                 )
         );
+        cyclePerformanceProbe = KeyMappingHelper.registerKeyMapping(
+                new KeyMapping(
+                        "key.totem-lumen.cycle_performance_probe",
+                        InputConstants.Type.KEYSYM,
+                        InputConstants.KEY_F9,
+                        debugCategory
+                )
+        );
 
         TotemLumenVideoSettingsIntegration.initialize();
         RendererBootstrap.initialize();
@@ -114,6 +123,16 @@ public final class TotemLumenClient implements ClientModInitializer {
                     client.player.sendSystemMessage(Component.literal("Totem Lumen debug: " + mode.label()));
                 }
                 LOGGER.info("P5 stable lookup debug mode changed to {}", mode.label());
+            }
+            while (cyclePerformanceProbe.consumeClick()) {
+                P5StableLookupRenderer.DebugMode mode = P5StableLookupRenderer.cyclePerformanceProbeMode();
+                if (client.player != null) {
+                    client.player.sendSystemMessage(Component.literal(
+                            "Totem Lumen perf probe: " + mode.label()
+                                    + " — keep camera still until the next result is logged"
+                    ));
+                }
+                LOGGER.info("Totem Lumen performance probe mode changed to {}", mode.label());
             }
         });
 
