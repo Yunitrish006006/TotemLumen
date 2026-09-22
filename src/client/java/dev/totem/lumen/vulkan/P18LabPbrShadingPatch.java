@@ -96,6 +96,13 @@ final class P18LabPbrShadingPatch {
                     ];
                 }
 
+                float p18DiffuseMetalWeight(float metallic) {
+                    // Metallic surfaces hand their diffuse energy to P16 only when the reflection
+                    // pass is actually active. If reflections are disabled or still binding after
+                    // a render-target resize, keep a visible diffuse fallback instead of black.
+                    return scene.data[46] != 0u ? (1.0 - metallic) : 1.0;
+                }
+
                 vec3 p18HardcodedMetalF0(uint metalCode, vec3 albedo) {
                     if (metalCode == 230u) return vec3(0.531229, 0.512357, 0.495829);
                     if (metalCode == 231u) return vec3(0.944230, 0.776102, 0.373402);
