@@ -47,18 +47,29 @@ public final class P14ShaderCompileVerifier {
         }
 
         try {
-            compileAndVerify(compiler, BOOTSTRAP_SHADER_NAME, bootstrapSource, "Vulkan bootstrap readiness pass");
+            compileAndVerify(
+                    compiler,
+                    BOOTSTRAP_SHADER_NAME,
+                    bootstrapSource,
+                    "Vulkan bootstrap readiness pass",
+                    Shaderc.shaderc_optimization_level_zero,
+                    "O0"
+            );
             compileAndVerify(
                     compiler,
                     P12FullBasePipeline.SHADER_NAME,
                     baseSource,
-                    "unified full lighting + dynamic entities pass"
+                    "unified full lighting + dynamic entities pass",
+                    Shaderc.shaderc_optimization_level_size,
+                    "Osize"
             );
             compileAndVerify(
                     compiler,
                     P16ReflectionPassShader.SHADER_NAME,
                     reflectionSource,
-                    "P14E+P16+P17 split reflection pass"
+                    "P14E+P16+P17 split reflection pass",
+                    Shaderc.shaderc_optimization_level_zero,
+                    "O0"
             );
         } finally {
             Shaderc.shaderc_compiler_release(compiler);
@@ -703,7 +714,14 @@ public final class P14ShaderCompileVerifier {
         }
     }
 
-    private static void compileAndVerify(long compiler, String shaderName, String source, String label) {
+    private static void compileAndVerify(
+            long compiler,
+            String shaderName,
+            String source,
+            String label,
+            int optimizationLevel,
+            String optimizationLabel
+    ) {
         long options = Shaderc.shaderc_compile_options_initialize();
         if (options == 0L) {
             throw new IllegalStateException("Failed to initialize shaderc options for " + label);
@@ -711,8 +729,9 @@ public final class P14ShaderCompileVerifier {
 
         try {
             Shaderc.shaderc_compile_options_set_target_env(options, 0, 4202496);
-            Shaderc.shaderc_compile_options_set_optimization_level(options, Shaderc.shaderc_optimization_level_zero);
-            System.out.println(label + " verification START: chars=" + source.length() + ", optimization=O0");
+            Shaderc.shaderc_compile_options_set_optimization_level(options, optimizationLevel);
+            System.out.println(label + " verification START: chars=" + source.length()
+                    + ", optimization=" + optimizationLabel);
 
             long result = ShadercNativeHeap.compileIntoSpv(
                     compiler,
