@@ -1036,7 +1036,7 @@ public final class P5StableLookupRenderer {
 
         if (settingsChanged) {
             TotemLumenClient.LOGGER.info(
-                    "Renderer settings ACTIVE: window={}x{}, render={}x{}, internalResolution={}, pixelBudget={}, giSamples={}, shadowSamples={}, rayDistance={}, reflections={}, reflectionBounces={}, reflectionDistance={}, temporal={}, denoiseRadius={}",
+                    "Renderer settings ACTIVE: window={}x{}, render={}x{}, internalResolution={}, pixelBudget={}, giSamples={}, shadowSamples={}, rayDistance={}, reflections={}, reflectionPassReady={}, reflectionBounces={}, reflectionDistance={}, temporal={}, denoiseRadius={}",
                     windowWidth,
                     windowHeight,
                     targetWidth,
@@ -1047,6 +1047,7 @@ public final class P5StableLookupRenderer {
                     RendererSettings.shadowQuality().samples(),
                     RendererSettings.rayDistance(),
                     RendererSettings.reflectionsEnabled(),
+                    P16MultipassReflection.ready(),
                     RendererSettings.reflectionBounces(),
                     RendererSettings.reflectionDistance(),
                     RendererSettings.temporalQuality(),
@@ -1556,7 +1557,9 @@ public final class P5StableLookupRenderer {
         putWord(buffer, 43, Float.floatToRawIntBits((float) RendererSettings.reflectionDistance()));
         putWord(buffer, 44, RendererSettings.giQuality().samples());
         putWord(buffer, 45, RendererSettings.shadowQuality().samples());
-        putWord(buffer, 46, RendererSettings.reflectionsEnabled() ? 1 : 0);
+        boolean reflectionPassActive = RendererSettings.reflectionsEnabled()
+                && P16MultipassReflection.ready();
+        putWord(buffer, 46, reflectionPassActive ? 1 : 0);
         putWord(buffer, 47, RendererSettings.waterReflections() ? 1 : 0);
         putWord(buffer, 48, RendererSettings.temporalQuality().historySamples());
         putWord(buffer, 49, Float.floatToRawIntBits(RendererSettings.temporalQuality().directHistoryWeight()));
