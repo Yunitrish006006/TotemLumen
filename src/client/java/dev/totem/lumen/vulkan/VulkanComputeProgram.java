@@ -386,8 +386,8 @@ public final class VulkanComputeProgram implements AutoCloseable {
 
     private static int optimizationLevelFor(String name) {
         return switch (name) {
-            case "totem_lumen_p12_full_gi.comp",
-                 "totem_lumen_p17_dynamic_entities.comp",
+            case "totem_lumen_p12_full_gi.comp" -> Shaderc.shaderc_optimization_level_size;
+            case "totem_lumen_p17_dynamic_entities.comp",
                  "totem_lumen_p16_reflection.comp" -> Shaderc.shaderc_optimization_level_zero;
             default -> Shaderc.shaderc_optimization_level_performance;
         };
