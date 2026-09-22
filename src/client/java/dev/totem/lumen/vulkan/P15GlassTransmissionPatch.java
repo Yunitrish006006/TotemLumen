@@ -138,6 +138,61 @@ final class P15GlassTransmissionPatch {
                     return filtered.hit.hit == 0u ? filtered.transmission : vec3(0.0);
                 }
 
+                vec3 p15SecondaryBounceRadiance(
+                        HitResult hit,
+                        vec3 rayOrigin,
+                        vec3 rayDirection
+                ) {
+                    vec3 normal = resolvedSurfaceNormal(hit, rayDirection);
+                    vec3 albedo = materialColor(hit.materialId);
+                    vec4 emission = materialEmission(hit.materialId);
+                    vec3 emitted = emission.rgb * emission.a * uintBitsToFloat(scene.data[83]);
+                    uint environment = p13EnvironmentCode();
+
+                    if (environment == 0u) {
+                        vec3 hitPoint = rayOrigin + rayDirection * hit.distance;
+
+                        // Secondary GI used to launch independent sky, sun and moon visibility
+                        // rays. Reuse one conservative world-up transmission ray as the visibility
+                        // proxy for all environment terms. Primary-surface lighting remains exact.
+                        vec3 skyDirection = vec3(0.0, 1.0, 0.0);
+                        vec3 skyOrigin = hitPoint + normal * 0.035;
+                        vec3 environmentTransmission = p15RayTransmission(
+                            skyOrigin,
+                            skyDirection,
+                            min(GI_MAX_DISTANCE, uintBitsToFloat(scene.data[7]))
+                        );
+
+                        vec3 sunDirection = p13SunDirection();
+                        float nDotL = max(dot(normal, sunDirection), 0.0);
+                        float sunStrength = p13SunStrength(sunDirection);
+
+                        vec3 moonDirection = p13MoonDirection();
+                        float moonNDotL = max(dot(normal, moonDirection), 0.0);
+                        float moonStrength = p13MoonStrength(moonDirection);
+
+                        vec3 skyAmbient = p13SkyRadiance(normal)
+                                * environmentTransmission
+                                * 0.62;
+                        vec3 sun = p13SunColor(sunDirection)
+                                * environmentTransmission
+                                * (0.92 * nDotL * sunStrength);
+                        vec3 moon = p13MoonColor()
+                                * environmentTransmission
+                                * (0.08 * moonNDotL * moonStrength);
+                        return albedo * (skyAmbient + sun + moon) + emitted;
+                    }
+                    if (environment == 1u) {
+                        float facing = 0.70 + 0.30 * max(normal.y, 0.0);
+                        return albedo * vec3(0.145, 0.040, 0.018) * facing + emitted;
+                    }
+                    if (environment == 2u) {
+                        float facing = 0.76 + 0.24 * max(normal.y, 0.0);
+                        return albedo * vec3(0.070, 0.046, 0.115) * facing + emitted;
+                    }
+                    return albedo * vec3(0.060, 0.070, 0.090) + emitted;
+                }
+
                 """;
         source = source.replace(skyVisibilityMarker, helpers + skyVisibilityMarker);
 
@@ -253,7 +308,7 @@ final class P15GlassTransmissionPatch {
                     if (bounceHit.hit == 0u) {
                         incomingRadiance = p13SkyRadiance(bounceDirection) * bounceTrace.transmission;
                     } else {
-                        incomingRadiance = p13EnvironmentSurfaceRadiance(
+                        incomingRadiance = p15SecondaryBounceRadiance(
                             bounceHit,
                             bounceOrigin,
                             bounceDirection
@@ -291,7 +346,7 @@ final class P15GlassTransmissionPatch {
         source = patchGiCompositeCall(source);
 
         TotemLumenClient.LOGGER.info(
-                "P15 transmission active: materialTable=true, runtimeLayers=true, runtimeAttenuation=true, panes=true, sun+moon+sky+local+GI=true, refraction=false"
+                "P15 transmission active: materialTable=true, runtimeLayers=true, runtimeAttenuation=true, panes=true, sun+moon+sky+local+GI=true, secondaryGiVisibility=singleSkyRay, refraction=false"
         );
         return source;
     }
