@@ -1,6 +1,8 @@
 package dev.totem.lumen.vulkan;
 
 import com.mojang.blaze3d.GpuFormat;
+import com.mojang.blaze3d.pipeline.RenderTarget;
+import com.mojang.blaze3d.systems.RenderPass;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.textures.FilterMode;
 import com.mojang.blaze3d.textures.GpuTexture;
@@ -22,6 +24,7 @@ import dev.totem.lumen.scene.SectionVoxelData;
 import dev.totem.lumen.vulkan.resource.VulkanOwnedBuffer;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.renderer.RenderPipelines;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.vulkan.VK10;
 import org.lwjgl.vulkan.VkBufferCopy;
@@ -35,6 +38,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -954,6 +958,7 @@ public final class P5StableLookupRenderer {
     private static int performanceProbeWarmup;
     private static int performanceProbeSamples;
     private static long performanceProbeAccumulatedNanos;
+    private static boolean worldTakeoverLogged;
 
     private P5StableLookupRenderer() {
     }
@@ -1020,8 +1025,11 @@ public final class P5StableLookupRenderer {
         int windowHeight = Math.max(1, Minecraft.getInstance().getWindow().getHeight());
         int targetWidth = RendererSettings.internalResolution().targetWidth(windowWidth);
         int targetHeight = Math.max(1, Math.round(targetWidth * (windowHeight / (float) windowWidth)));
-        int capacityWidth = RendererSettings.InternalResolution.HIGH.targetWidth(windowWidth);
-        int capacityHeight = Math.max(1, Math.round(capacityWidth * (windowHeight / (float) windowWidth)));
+        // The world-takeover blit samples the whole output texture. Keep the resource extent
+        // equal to the active internal resolution so there is no unused HIGH-resolution padding
+        // and no HUD-only UV crop dependency.
+        int capacityWidth = targetWidth;
+        int capacityHeight = targetHeight;
 
         if (settingsChanged) {
             TotemLumenClient.LOGGER.info(
@@ -1196,6 +1204,53 @@ public final class P5StableLookupRenderer {
 
     public static DebugMode mode() {
         return mode;
+    }
+
+    public static boolean readyForWorldTakeover() {
+        Resources r = resources;
+        return RendererSettings.rendererEnabled()
+                && P12FullBasePipeline.ready()
+                && ready
+                && r != null
+                && !r.view.isClosed();
+    }
+
+    /**
+     * Presents the latest completed Totem Lumen frame directly into Minecraft's main world target.
+     * This is intentionally independent of HUD visibility; F1 must hide only HUD/GUI, never the
+     * ray-traced world itself.
+     */
+    public static void presentToWorldTarget() {
+        if (!readyForWorldTakeover()) return;
+
+        Resources r = resources;
+        RenderTarget target = Minecraft.getInstance().gameRenderer.mainRenderTarget();
+        if (target == null || target.getColorTextureView() == null) return;
+
+        try (RenderPass pass = RenderSystem.getDevice()
+                .createCommandEncoder()
+                .createRenderPass(
+                        () -> "Totem Lumen world takeover",
+                        target.getColorTextureView(),
+                        Optional.empty()
+                )) {
+            pass.setPipeline(RenderPipelines.TRACY_BLIT);
+            pass.bindTexture(
+                    "InSampler",
+                    r.view,
+                    RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST)
+            );
+            pass.draw(3, 1, 0, 0);
+        }
+
+        if (!worldTakeoverLogged) {
+            worldTakeoverLogged = true;
+            TotemLumenClient.LOGGER.info(
+                    "Totem Lumen WORLD TAKEOVER active: vanilla level drawing skipped, output={}x{}, HUD remains independent",
+                    activeRenderWidth,
+                    activeRenderHeight
+            );
+        }
     }
 
     public static void drawHud(GuiGraphicsExtractor graphics) {
@@ -1833,6 +1888,7 @@ public final class P5StableLookupRenderer {
         lastSettingsRevision = Long.MIN_VALUE;
         activeRenderWidth = 0;
         activeRenderHeight = 0;
+        worldTakeoverLogged = false;
     }
 
     private static void closeQuietly(AutoCloseable closeable) {
