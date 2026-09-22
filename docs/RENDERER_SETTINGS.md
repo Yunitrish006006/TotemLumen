@@ -2,26 +2,34 @@
 
 ## Status
 
-**Alpha 43 runtime settings UI: IMPLEMENTED / CI PASS; in-world UX/performance validation pending**
+**Alpha 59 render-profile Video Settings integration: IMPLEMENTED / CI PASS; in-world UX validation pending**
 
 Entry point:
 
 ```text
-Options -> Video Settings -> Totem Lumen...
+Options -> Video Settings -> Quality & Performance
 ```
 
-The main page contains user-facing renderer quality and feature controls. Pipeline status and developer Render View controls live on the separate **Diagnostics & Render View** page.
+The native **Quality & Performance** section contains a persistent render-profile selector:
+
+```text
+Render profile: Minecraft / Totem Lumen
+```
+
+Minecraft profile keeps the vanilla world-render quality controls. Totem Lumen profile removes only the vanilla controls whose world-render effect is replaced by Totem and shows Totem GI/shadow/ray-distance/internal-resolution/reflection/temporal/denoise controls in the same section. Shared display/interface and scene-availability settings remain visible in both profiles.
+
+Pipeline status and developer Render View controls remain on **Diagnostics & Render View**.
 
 ## Defaults and ranges
 
 | Setting | Values | Default | Runtime effect |
 | --- | --- | --- | --- |
-| Totem Lumen renderer | Off / On | On | Stops/starts Totem Lumen compute submission and final composite; Minecraft Vulkan rendering remains active |
-| GI quality | Low / Balanced / High | Balanced | 1 / 2 / 4 one-bounce GI samples per frame |
+| Render profile | Minecraft / Totem Lumen | Totem Lumen | Selects which world-renderer owns presentation and which quality controls are shown |
+| GI quality | Low / Balanced / High | Balanced | 1 / 2 / 3 one-bounce GI samples per frame |
 | Shadow quality | Low / Balanced / High | Balanced | 1 / 2 / 4 Sun/Moon soft-shadow rays and 1 / 2 / 4 samples across each local emissive face |
-| Ray distance | 64 / 128 / 256 blocks | 256 | Primary/shared scene trace distance |
-| Internal resolution | Low / Balanced / High | Balanced | 50% / 67% / 100% of viewport width; height follows window aspect. High is native through 2560 px wide and capped there above 1440p-class widths. |
-| Reflections | Off / On | On | Skips or records the P16 reflection compute pass |
+| Ray distance | 32 / 64 / 96 / 128 blocks | 64 | Primary/shared scene trace distance |
+| Internal resolution | Low / Balanced / High | Balanced | 50% / 67% / 100% scale until the preset pixel ceiling is reached; LOW ≈512x288 budget, BALANCED ≈768x432, HIGH ≈1280x720 |
+| Reflections | Off / On | On | Enables the independent P16 reflection compute pass when it is ready |
 | Water reflections | Off / On | On | Includes/excludes exact P14E water surfaces as reflection interfaces |
 | Reflection bounces | 1 / 2 | 1 | Maximum iterative P16 reflection bounces |
 | Reflection distance | 16 / 32 / 64 blocks | 64 | Per-bounce P16 trace distance |
@@ -34,20 +42,20 @@ All values persist in:
 config/totem-lumen.properties
 ```
 
-Legacy configs with `reflectionBounces=0` are interpreted as reflections disabled and migrated in memory to the new master-toggle model.
+Legacy configs without `renderProfile` migrate from the old `rendererEnabled` boolean automatically. Legacy `reflectionBounces=0` remains interpreted as reflections disabled.
 
 ## Runtime ABI
 
-The existing 64-word scene header has enough reserved room; no voxel ABI widening is required.
+The current 96-word scene header carries runtime quality/state fields without widening the per-voxel record.
 
 | Word | Meaning |
 | ---: | --- |
 | 7 | primary/shared ray distance as float bits |
 | 42 | reflection bounce count (1..2) |
 | 43 | reflection distance as float bits |
-| 44 | GI samples per frame (1/2/4) |
+| 44 | GI samples per frame (1/2/3) |
 | 45 | Sun/Moon shadow samples (1/2/4) |
-| 46 | reflection master toggle |
+| 46 | effective reflection-pass-active flag (user enabled and P16 ready) |
 | 47 | exact-water reflection toggle |
 | 48 | temporal history sample limit (0/16/64) |
 | 49 | direct temporal history weight as float bits |
@@ -57,31 +65,24 @@ Changing a runtime setting increments a renderer settings revision. P5 invalidat
 
 ## Internal-resolution ownership
 
-### Active-copy regression fix
+Alpha 53 changed internal resolution from an unbounded viewport percentage into a percentage plus per-preset pixel budget. This prevents fullscreen desktop resolution from multiplying ray-tracing work by several times.
 
-The initial fixed-capacity implementation dispatched only the selected active extent but still copied the pixel buffer into the Vulkan image using the maximum-capacity row length and image extent. Because shader output is packed linearly using the active width, low-resolution modes were interpreted with the wrong row stride and only part of the screen appeared rendered.
+Current budgets:
 
-The copy path now uses the same active dimensions for all three Vulkan copy fields:
+- LOW: 50% scale, capped near a 512x288-equivalent pixel count;
+- BALANCED: 67% scale, capped near 768x432;
+- HIGH: native scale, capped near 1280x720.
 
-```text
-bufferRowLength  = active render width
-bufferImageHeight = active render height
-imageExtent       = active render width x active render height
-```
+For viewports below the cap, the configured percentage is used normally. Above it, width is reduced by the square root of the pixel-budget ratio while preserving the viewport aspect ratio.
 
-The final GUI composite then samples the corresponding active UV rectangle from the fixed-capacity texture and scales it across the full Minecraft viewport.
+Alpha 51 also removed the old HUD-overlay presentation model. Render/history resources now match the active internal extent. Totem compute output is presented directly into Minecraft's main render target, and vanilla level drawing is cancelled only after a complete Totem frame is ready.
 
+Consequences:
 
-Changing internal resolution must not cause the large MoltenVK pipelines to be recompiled.
-
-P5 therefore allocates its render/history resources once at the maximum **High** extent for the current window, capped at 2560 pixels wide with aspect-correct height. The selected quality controls only the active render extent:
-
-- compute dispatch uses the active width/height;
-- pixel-buffer barriers/copies cover only the active area;
-- the fixed-capacity output texture receives only the active rectangle;
-- HUD composition samples only the active UV rectangle and scales it to the screen.
-
-Window aspect changes can still require a safe resource rebuild because the maximum capacity height changes. A quality switch alone does not replace the scene buffer and therefore does not reattach/recompile P12/P17/P16 pipelines.
+- changing fullscreen/window size can change the active internal extent without scaling RT work without bound;
+- the final screen image is an upscale of the bounded Totem output when the framebuffer exceeds the preset budget;
+- F1 affects HUD/GUI only and does not reveal a second vanilla world beneath Totem;
+- internal-resolution changes still rebuild size-dependent output/history resources, but do not require shader source changes.
 
 ## Shadow ordering
 
@@ -104,12 +105,12 @@ Local emissive blocks are no longer shaded as center-point emitters. For each re
 
 Totem Lumen no longer exposes the simplified bootstrap renderer as a player-visible presentation.
 
-- Minecraft's normal world render stays visible while the Vulkan bootstrap and full P12-P18 material-aware base compile.
+- Minecraft's normal world render stays visible while the Vulkan bootstrap and full P12-P18 material-aware base compile or whenever the Minecraft render profile is selected.
 - The player's currently selected resource pack stays selected; Totem Lumen does not force a resource-pack reload or replace the user's pack.
 - The bootstrap program exists only to establish the live Vulkan scene/storage contract needed to compile the full renderer.
-- No Totem full-screen composite is drawn until the full base pipeline is ready **and** a complete Totem frame has finished.
+- Totem does not cancel vanilla level drawing until the full base pipeline is ready **and** a complete Totem frame has finished.
 - If the full base compile fails, Minecraft's normal renderer remains usable for the rest of the session.
-- Pressing **Recompile Renderer Pipelines** immediately returns presentation ownership to Minecraft until the replacement full-base frame is ready.
+- Pressing **Recompile Renderer Pipelines** returns presentation ownership to Minecraft until the replacement full-base frame is ready.
 - P17 dynamic entities and P16 reflections remain optional staged upgrades after the base presentation is already active.
 
 This provides the intended "ordinary Minecraft first, advanced lighting when ready" startup path without an expensive resource reload.
@@ -154,17 +155,18 @@ Current staged weights:
 
 A manual **Recompile Renderer Pipelines** resets the visible staged progress and the HUD appears again.
 
-## Renderer master toggle
+## Render profile
 
-`rendererEnabled=false` is a runtime renderer bypass, not a mod unload:
+Alpha 58 replaces the user-facing renderer on/off toggle with a persistent render profile:
 
-- P5 does not submit Totem Lumen compute frames;
-- the Totem Lumen full-screen composite is skipped, revealing Minecraft's normal Vulkan output;
-- compile-progress chat messages are suppressed while disabled;
-- existing GPU resources/pipelines remain resident so re-enabling is immediate;
-- captured scene data may continue to update in the background so re-enabling does not require a world reload.
+- `Minecraft`: Totem compute/presentation is bypassed and Minecraft owns normal level drawing;
+- `Totem Lumen`: Totem submits compute frames and takes over level drawing after a complete Totem frame is ready.
 
-The value is persistent and defaults to enabled.
+Alpha 59 places this selector directly in the native **Quality & Performance** section. Switching profile reconstructs the Video Settings screen so the visible controls match the active renderer instead of leaving stale disabled rows.
+
+When Totem Lumen is selected, vanilla controls that only affect the replaced world renderer are filtered from the page. Render distance, simulation distance, entity distance, fullscreen/resolution, FPS/VSync and interface settings remain available because they still affect scene availability or non-world presentation.
+
+The profile is persistent. The old `rendererEnabled` property is retained only for backward compatibility/migration.
 
 ## Reflection semantics
 
