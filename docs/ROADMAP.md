@@ -342,3 +342,8 @@ Alpha 56 moves Totem Lumen's runtime renderer controls directly into Minecraft's
 ## Alpha 57 GI quality and ray-distance tuning
 
 Alpha 57 separates GI sampling from the shared shadow-quality enum so GI tiers can be tuned independently: LOW=1 sample, BALANCED=2, HIGH=3. Shadow quality remains 1/2/4 samples. Ray distance is retuned from 64/128/256 to 32/64/96/128 blocks, with 64 blocks as the default. Existing configurations above 128 are clamped to 128 on load.
+
+
+## Alpha 58 render profiles
+
+Alpha 58 replaces the Totem renderer on/off control with a persistent render profile selector: Minecraft or Totem Lumen. Video Settings is rebuilt when the profile changes. Minecraft profile shows the normal vanilla renderer controls and omits Totem-specific quality controls. Totem Lumen profile filters vanilla world-render-only options from the native Video Settings option arrays and inserts Totem GI, shadow, ray-distance, internal-resolution, reflection, temporal and denoise controls. Shared display/interface controls plus render/simulation/entity distance remain available in both profiles. Legacy rendererEnabled config is migrated automatically when renderProfile is absent.
