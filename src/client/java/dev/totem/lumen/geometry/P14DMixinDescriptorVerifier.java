@@ -1,11 +1,16 @@
 package dev.totem.lumen.geometry;
 
+import com.mojang.blaze3d.buffers.GpuBufferSlice;
+import com.mojang.blaze3d.resource.GraphicsResourceAllocator;
 import com.mojang.blaze3d.vertex.PoseStack;
 import dev.totem.lumen.mixin.EntityRenderDispatcherMixin;
 import dev.totem.lumen.mixin.EntityRendererStateMixin;
+import dev.totem.lumen.mixin.LevelRendererTakeoverMixin;
 import dev.totem.lumen.mixin.SubmitNodeCollectionBlockEntityMixin;
 import dev.totem.lumen.mixin.SubmitNodeStorageBlockEntityMixin;
+import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.model.Model;
+import net.minecraft.client.renderer.LevelRenderer;
 import net.minecraft.client.renderer.SubmitNodeCollection;
 import net.minecraft.client.renderer.SubmitNodeCollector;
 import net.minecraft.client.renderer.SubmitNodeStorage;
@@ -17,6 +22,8 @@ import net.minecraft.client.renderer.rendertype.RenderType;
 import net.minecraft.client.renderer.state.level.CameraRenderState;
 import net.minecraft.client.renderer.texture.TextureAtlasSprite;
 import net.minecraft.world.entity.Entity;
+import org.joml.Matrix4fc;
+import org.joml.Vector4f;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
@@ -55,6 +62,17 @@ public final class P14DMixinDescriptorVerifier {
             SubmitNodeCollector.class
     };
 
+    private static final Class<?>[] LEVEL_RENDER_26_2 = {
+            GraphicsResourceAllocator.class,
+            DeltaTracker.class,
+            boolean.class,
+            CameraRenderState.class,
+            Matrix4fc.class,
+            GpuBufferSlice.class,
+            Vector4f.class,
+            boolean.class
+    };
+
     private P14DMixinDescriptorVerifier() {
     }
 
@@ -69,11 +87,13 @@ public final class P14DMixinDescriptorVerifier {
         );
         verifyEntityStateBinding();
         verifyEntitySubmit();
+        verifyLevelRenderTakeover();
         System.out.println(
                 "P14D/P17 mixin descriptor verification PASS: minecraft=26.2, "
                         + "submitModel=Model+Object+PoseStack+RenderType+III+TextureAtlasSprite+I+CrumblingOverlay, "
                         + "createRenderState=Entity+F->EntityRenderState, "
-                        + "entitySubmit=EntityRenderState+CameraRenderState+DDD+PoseStack+SubmitNodeCollector"
+                        + "entitySubmit=EntityRenderState+CameraRenderState+DDD+PoseStack+SubmitNodeCollector, "
+                        + "levelRender=GraphicsResourceAllocator+DeltaTracker+Z+CameraRenderState+Matrix4fc+GpuBufferSlice+Vector4f+Z"
         );
     }
 
@@ -157,6 +177,42 @@ public final class P14DMixinDescriptorVerifier {
 
         verifyEntityCallback("totemLumen$beginEntityCapture");
         verifyEntityCallback("totemLumen$endEntityCapture");
+    }
+
+    private static void verifyLevelRenderTakeover() throws Exception {
+        Method target = LevelRenderer.class.getDeclaredMethod("render", LEVEL_RENDER_26_2);
+        if (target.getReturnType() != void.class) {
+            throw new IllegalStateException("LevelRenderer.render must return void");
+        }
+
+        Method handler = Arrays.stream(LevelRendererTakeoverMixin.class.getDeclaredMethods())
+                .filter(method -> method.getName().equals("totemLumen$replaceVanillaWorldDrawing"))
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException(
+                        "Missing LevelRenderer world-takeover callback"
+                ));
+
+        Class<?>[] callback = handler.getParameterTypes();
+        if (callback.length != LEVEL_RENDER_26_2.length + 1) {
+            throw new IllegalStateException(
+                    "LevelRenderer takeover callback parameter count mismatch: "
+                            + callback.length
+            );
+        }
+        for (int i = 0; i < LEVEL_RENDER_26_2.length; i++) {
+            if (callback[i] != LEVEL_RENDER_26_2[i]) {
+                throw new IllegalStateException(
+                        "LevelRenderer takeover callback parameter " + i + " mismatch: expected "
+                                + LEVEL_RENDER_26_2[i].getName() + " but found "
+                                + callback[i].getName()
+                );
+            }
+        }
+        if (callback[callback.length - 1] != CallbackInfo.class) {
+            throw new IllegalStateException(
+                    "LevelRenderer takeover callback must end with CallbackInfo"
+            );
+        }
     }
 
     private static void verifyEntityCallback(String methodName) {
