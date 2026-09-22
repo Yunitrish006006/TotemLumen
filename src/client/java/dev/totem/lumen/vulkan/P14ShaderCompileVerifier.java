@@ -114,6 +114,11 @@ public final class P14ShaderCompileVerifier {
                 "const uint P17_ENTITY_MATERIAL_BASE = 0xFE00u;",
                 "unified dynamic-entity tracing"
         );
+        requireSourceMarker(
+                source,
+                "scene.data[pixelBase + (height - 1u - pixel.y) * width + pixel.x] = color;",
+                "world-takeover presentation Y flip"
+        );
         System.out.println(
                 "Unified full-lighting verification PASS: "
                         + "staticWorld=true, fluids=true, pbr=true, dynamicEntities=true, "
