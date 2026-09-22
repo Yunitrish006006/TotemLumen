@@ -19,57 +19,22 @@ The server gameplay subsystem never initializes or depends on Vulkan. A dedicate
 
 ## Current milestone
 
-`0.1.0-alpha.42` advances P17 Dynamic Entities. P17A capture/broad-phase and P17B bounded Vulkan scene upload are implemented and passing CI; P17C shared nearest-hit shader integration is implemented and passing CI, with runtime visual validation active.
+The current development baseline is **Alpha 59**.
 
-- `EntityRenderer.createRenderState(...)` binds temporary Minecraft render states to stable `(dimension, Entity.getId())` identities;
-- `EntityRenderDispatcher.submit(...)` establishes one capture scope around each entity renderer submission;
-- the existing Minecraft 26.2 `submitModel(...)` interception is shared by P14D block entities and P17 living entities instead of adding mob-specific hooks;
-- captured entity meshes retain Minecraft's resolved animation/pose transforms while removing camera-relative entity placement;
-- `DynamicEntitySnapshot` stores only copied entity-local geometry, double-precision absolute world position and derived world AABB; no live Minecraft entity/model/render-state object enters the retained scene;
-- `DynamicEntityBroadPhase` bins AABBs into overlapping 16x16x16 sections with a bounded 32-candidate baseline and explicit overflow accounting;
-- the P17B GPU ABI uses integer section origins plus section-local floats, up to 256 entity descriptors, 65,536 quads and 512 section-candidate hash buckets;
-- P17 entity revisions repack/flush/copy only the dedicated entity scene tail instead of forcing static voxel re-uploads;
-- entity-scene changes conservatively disable temporal-history reads for that frame to avoid moving-entity trails before P17 hit identity is integrated into history validation;
-- required Minecraft 26.2 entity/mixin descriptors are verified against the actual client runtime classes in CI;
-- P17C uses a section-level DDA + AABB/triangle intersection path so entity geometry competes with static voxel/model geometry for the shared nearest hit;
-- P17C is no longer part of renderer readiness: P12-P15 becomes ready first, while the larger P17-enhanced pipeline compiles independently in the background and is selected only after its complete Vulkan program is ready.
+Client renderer state:
 
-Alpha 42 runtime testing on Apple M4 + MoltenVK 1.4.2 exposed a regression when the 81k-character P17 shader was injected directly into the readiness-gating main pipeline: entity capture worked, but the renderer remained in `WAITING_FOR_PIPELINE` with no matching pipeline-complete event. The accepted fix restores the P12-P15 base pipeline as the readiness gate and makes P17 optional during startup. A slow P17 compile must never return Totem Lumen to vanilla-only rendering.
+- Alpha 51+ uses direct world takeover: once a complete Totem frame is ready, Totem presents into Minecraft's main render target and vanilla level drawing is skipped. HUD/GUI remain independent.
+- Alpha 53 bounds internal ray-tracing pixel work per quality preset so fullscreen framebuffer size no longer multiplies RT cost without limit.
+- Alpha 57 retunes GI to 1/2/3 samples and ray distance to 32/64/96/128 blocks with 64 as the default.
+- Alpha 58/59 replace the old renderer on/off UI with a persistent **Minecraft / Totem Lumen render profile** directly inside Video Settings -> Quality & Performance.
+- P14E exact water/lava geometry is implemented and shares the nearest-hit path with static geometry, entities and reflection; detailed runtime geometry/optics validation remains.
+- P17 Player/LivingEntity dynamic geometry and the generic entity material ABI are implemented. Spider-eye emissive behavior is runtime-validated. Items, vehicles, projectiles, display/text/custom renderers, armor/equipment, alpha silhouettes and first-person view models remain follow-ups.
+- P18A/P18B/P18C LabPBR integration is implemented: renderer-resolved texture identity, bounded PBR texture data, shared normal/AO/roughness/metal/emission shading, alpha coverage and animated PBR frame selection. P18D entity/block-entity fidelity remains.
+- Alpha 49's contiguous P17 upload is the accepted MoltenVK upload path after Alpha 48's split-copy regression.
+- Whole-mega-shader optimization is not the current strategy: shaderc Osize failed with SPIR-V ID overflow. Future performance work targets measured hot paths, reusable primary-hit/material data and smaller bounded passes.
+- Server gameplay lighting GL0 is complete; GL1/GL2 are implemented pending runtime validation; GL4 profiling/scale validation is the next server-side gate.
 
-Expected split startup sequence:
-
-```text
-Background Vulkan pipeline creation COMPLETE: shader=totem_lumen_p12_one_bounce_gi.comp
-Renderer state: READY_FOR_SCENE_EXTRACTION
-P5 stable GPU lookup READY: ...
-P17 enhanced pipeline creation START: shader=totem_lumen_p17_dynamic_entities.comp ...
-```
-
-P17 may become ready later:
-
-```text
-P17 enhanced pipeline creation COMPLETE: ...
-P17 dynamic entity tracing READY: enhanced base pipeline selected for frame dispatch
-```
-
-Alpha 41's renderer readiness state machine remains the startup baseline. Totem Lumen does not enter its base render path until Minecraft's Vulkan bridge and P12-P15 background shader/pipeline prewarm are genuinely ready; P17 and P16 are not allowed to block that base readiness.
-
-Alpha 40's P13 Overworld night sky remains fully included: procedural moon, Minecraft's resolved eight-step lunar phase, and a deterministic procedural star field remain present when Totem Lumen owns the GI Composite output.
-
-- the moon direction is the exact celestial opposite of the existing time-of-day sun direction;
-- `P13EnvironmentCapture` reads Minecraft 26.2's resolved `EnvironmentAttributes.MOON_PHASE`, preserving the vanilla full/waning/quarter/crescent/new/waxing phase order;
-- a procedural moon disk uses a curved terminator to render distinct full, gibbous, quarter, crescent and new-moon silhouettes without adding a texture or render pass;
-- moon halo and directional moonlight strength track the eight phase factors `1.0 / 0.75 / 0.5 / 0.25 / 0.0 / 0.25 / 0.5 / 0.75`;
-- the 32-bit frame environment word uses 2 dimension bits + 11 day-phase bits + 3 lunar-phase bits + the original 16-bit stochastic seed, so temporal/GI seed range is preserved;
-- `P13StarfieldPatch` adds sparse deterministic stars that fade in at night, fade near the horizon and rotate with the captured day phase without per-frame twinkle;
-- Overworld surfaces receive a separate weak cool moon directional term with the same ray-traced visibility semantics used by the sun, including P15 RGB glass transmission;
-- weather-dependent star suppression / Minecraft `STAR_BRIGHTNESS` integration remains a later environment-state follow-up.
-
-Alpha 39's P14D block-entity geometry capture remains the block-entity baseline. `BlockEntityRenderDispatcher` scopes renderer-resolved `Model` / `ModelPart` capture into Totem Lumen-owned block-local quads, stable mutable `MODEL_MESH` ids preserve animation without exhausting the 12-bit mesh space, and chunk/level lifecycle recycles dynamic mesh ids.
-
-Exact flowing/sloped water and lava surfaces remain required, but the planned order is now Dynamic Entities first because missing players/mobs are a larger scene-completeness gap. The next planned milestone after Alpha 42 is P14E Exact Fluid Geometry.
-
-Alpha 38's persistent Vulkan pipeline cache remains enabled. Apple M4 + MoltenVK 1.4.2 runtime cache-hit measurements reduced P12-P15 pipeline creation from about 475.7 seconds to 49 ms and P16 from about 71.5 seconds to 73 ms. Pipeline caching remains an optimization, not a correctness dependency. Dedicated-server runtime/TPS stress validation is still deferred while client renderer development continues.
+The authoritative milestone/status list lives in [docs/ROADMAP.md](docs/ROADMAP.md), with detailed design/status documents indexed by [docs/PLANNING_INDEX.md](docs/PLANNING_INDEX.md).
 
 ## Runtime requirements
 
@@ -89,32 +54,42 @@ On Apple Silicon, the client uses the Vulkan backend exposed by Minecraft. Minec
 
 ```text
 Server world/data packs
-  -> Totem Lumen authoritative RGB gameplay light field
-  -> spawning / future gameplay queries
+  -> authoritative RGB gameplay-light rules / packed gameplay-light field
+  -> hostile-spawn and future deterministic gameplay queries
 
 Minecraft client extraction / submission
-  -> static BlockStateModel quad extraction
-  -> block-entity renderer Model/ModelPart capture
-  -> dynamic living-entity Model capture
-  -> immutable/copy-owned scene
-  -> static model mesh pool + dynamic entity broad phase
+  -> static BlockStateModel geometry
+  -> block-entity Model/ModelPart geometry
+  -> exact P14E fluid faces
+  -> dynamic Player/LivingEntity geometry
+  -> P18 renderer-resolved texture/material data
+  -> immutable/copy-owned CPU scene
   -> Vulkan GPU scene
        -> static voxel/model regions
-       -> independently updated P17 entity tail
-  -> P12-P15 base compute pass (readiness gate)
-       -> P13 sun / sky / moon + lunar phase + procedural stars
-  -> optional P17 enhanced base program (dynamic entity shared nearest-hit)
+       -> fluid tail
+       -> P17 dynamic entity/material tail
+       -> P18 texture/material tail
+  -> unified full-lighting compute
+       -> primary visibility
+       -> P13 environment / sun / moon / stars
+       -> P15 transmission
+       -> local lights
+       -> one-bounce GI
+       -> P17 entity nearest-hit
+       -> P18 LabPBR shading
   -> optional P16 reflection compute pass
-  -> composition
+  -> direct world takeover presentation into Minecraft main render target
+  -> hand / HUD / GUI
 ```
 
-Current scene-quality sequence:
+Current execution direction:
 
 ```text
-Alpha 41 runtime readiness
-  -> Alpha 42 / P17 Dynamic Entities
-  -> Alpha 43 / P14E Exact Fluid Geometry
-  -> P18 Resource Pack / LabPBR integration
+Alpha 59 baseline
+  -> finish P14D/P14E/P17/P18 runtime and coverage gates
+  -> primary-hit/G-buffer + reflection/GI performance architecture
+  -> GL4 gameplay-light profiling / GL5 hardening
+  -> P19+ hardware RT / ReSTIR / adaptive sampling / dynamic resolution
 ```
 
 Development client runs request the Vulkan backend.
@@ -135,7 +110,10 @@ CI installs Gradle 9.5.1 explicitly.
 - [`docs/P13_OVERWORLD_MOON.md`](docs/P13_OVERWORLD_MOON.md) — Alpha 40 Overworld night sky: moon disk, eight-step lunar phase, procedural stars, transport and runtime validation.
 - [`docs/P14C_GENERIC_BLOCK_MODELS.md`](docs/P14C_GENERIC_BLOCK_MODELS.md) — generic static block-model extraction, generic mesh ABI/GPU layout, geometry-domain completeness matrix and future-proofing rules.
 - [`docs/P14D_BLOCK_ENTITY_GEOMETRY.md`](docs/P14D_BLOCK_ENTITY_GEOMETRY.md) — block-entity renderer geometry capture, stable mutable mesh slots, lifecycle, limitations and runtime validation.
-- [`docs/P17_DYNAMIC_ENTITIES.md`](docs/P17_DYNAMIC_ENTITIES.md) — Alpha 42 Player/LivingEntity capture, dynamic broad phase, Vulkan scene ABI/upload, trace-integration gates, MoltenVK readiness split and runtime validation.
+- [`docs/P14E_EXACT_FLUID_GEOMETRY.md`](docs/P14E_EXACT_FLUID_GEOMETRY.md) — exact renderer-resolved water/lava geometry, GPU ABI, optics and runtime validation.
+- [`docs/P17_DYNAMIC_ENTITIES.md`](docs/P17_DYNAMIC_ENTITIES.md) — Player/LivingEntity capture, dynamic broad phase, generic material ABI, upload/performance work and remaining entity renderer coverage.
+- [`docs/P18_RESOURCE_PACK_LABPBR.md`](docs/P18_RESOURCE_PACK_LABPBR.md) — LabPBR resource-pack integration, shared PBR shading, alpha coverage, animated textures and P18D follow-ups.
+- [`docs/RENDERER_SETTINGS.md`](docs/RENDERER_SETTINGS.md) — Alpha 59 render profiles, Quality & Performance UI, runtime quality ranges and scene-header controls.
 - [`docs/P16_REFLECTION_ROUGHNESS.md`](docs/P16_REFLECTION_ROUGHNESS.md) — surface fallback values, reflection model, performance scope and runtime validation.
 - [`docs/P16_MOLTENVK_PIPELINE_STALL.md`](docs/P16_MOLTENVK_PIPELINE_STALL.md) — Alpha 34/35 MoltenVK pipeline findings and the Alpha 36 multi-pass resolution.
 - [`docs/P16_MULTIPASS_SPLIT.md`](docs/P16_MULTIPASS_SPLIT.md) — Alpha 36 pass boundaries, synchronization, fallback semantics and runtime validation.
