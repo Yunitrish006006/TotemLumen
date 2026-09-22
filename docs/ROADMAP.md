@@ -1,5 +1,33 @@
 # Totem Lumen Roadmap
 
+## Current project state — Alpha 59
+
+Current validated/runtime baseline:
+
+- **Minecraft 26.2 / Fabric / Vulkan on Apple M4 + MoltenVK 1.4.2** is the primary validated platform.
+- **Alpha 51 world takeover is validated**: Totem Lumen presents directly into Minecraft's main render target and cancels vanilla level drawing once the Totem frame is ready. F1 hides HUD/GUI only and no longer reveals a second vanilla world underneath.
+- **Alpha 52 presentation orientation is validated** after correcting the final Vulkan-to-screen Y orientation.
+- **Alpha 53 fullscreen RT pixel budgets are validated**: fullscreen no longer multiplies internal ray-tracing workload with desktop framebuffer size.
+- Lowest-quality runtime on the validated takeover path reached roughly **96–120 FPS depending on window mode/scene**, versus the old ~17–26 FPS path before world takeover and upload fixes.
+- **Alpha 54/55 reflective-material fallback** keeps metallic/LabPBR surfaces visible when P16 reflections are disabled; Alpha 55 removes the O0 hot-path helper call.
+- **Alpha 56–59 settings UI work** moves renderer selection and Totem quality controls into Minecraft's Video Settings / Quality & Performance flow. Alpha 59 is CI-validated and awaits in-world UX validation.
+- **Alpha 57 quality tuning** uses GI 1/2/3 samples and a 32/64/96/128-block ray-distance ladder with 64 as the default.
+- **P17 dynamic-entity tracing and generic material ABI are implemented.** Player/LivingEntity geometry and spider-eye emissive material behavior have received runtime validation; remaining renderer families/material fidelity are listed below.
+- **P14E exact fluids are implemented / CI pass**; detailed in-world geometry/optics validation remains.
+- **P18A/P18B/P18C LabPBR integration is implemented / CI pass**, including textured surfaces, alpha coverage, normal/AO/roughness/metal/emission decode and animated PBR frame selection. P18D entity/block-entity fidelity remains.
+- **Server gameplay lighting GL0 is complete; GL1/GL2 are implemented pending runtime validation; GL4 profiling is the next server-side gate.**
+
+Current high-priority remaining work:
+
+1. Finish P17 coverage for dropped items, vehicles, projectiles, leashes/flames, display/text/custom renderers, armor/equipment, alpha silhouettes and first-person hand/held items.
+2. Complete P14D specialized block-entity command families and P14E fluid runtime validation.
+3. Complete P18D entity/block-entity texture/material fidelity and broader LabPBR runtime acceptance.
+4. Fix P17 temporal-history invalidation so moving entities do not invalidate the entire frame history globally.
+5. Continue GPU performance work: avoid repeated primary-hit/material resolution, introduce a reusable primary-hit/G-buffer path, reduce P16 full-frame primary retrace, and split the O0 mega-shader into smaller optimizable passes where measurements justify it.
+6. Run GL4 gameplay-light profiling/scale validation, then GL5 hardening.
+7. After the compute baseline is stable, evaluate P19+ hardware RT, ReSTIR/adaptive sampling and dynamic-resolution/upscaling work.
+
+
 ## P0 - Vulkan-only bootstrap
 Status: **Apple Silicon runtime verified on Apple M4 / MoltenVK 1.4.2**; native Windows/Linux Vulkan validation still pending.
 
@@ -228,8 +256,8 @@ Implemented baseline:
 
 Known geometry/material gaps after Alpha 41 include dynamic world entities, exact flowing/sloped fluid surfaces, texture-alpha silhouettes, specialized renderer command families and resource-pack/PBR material data.
 
-## P17 - Dynamic entities (`0.1.0-alpha.42`)
-Status: **IMPLEMENTED / CI PASS; Apple M4 runtime visual validation pending**
+## P17 - Dynamic entities (`0.1.0-alpha.42+`)
+Status: **IMPLEMENTED / CI PASS; core Player/LivingEntity path partially runtime-validated, coverage/fidelity follow-ups remain**
 
 P17A — capture + CPU broad phase: **IMPLEMENTED / CI PASS**
 - Player/general `LivingEntity` scopes capture renderer-resolved Minecraft `Model` geometry.
@@ -245,14 +273,15 @@ P17B — bounded Vulkan scene ABI + upload: **IMPLEMENTED / CI PASS**
 - Entity pose/movement/lifecycle revisions repack and copy only the P17 tail instead of re-uploading static section voxels.
 - Entity-scene changes conservatively disable temporal-history reads for that frame until P17 hit identity is integrated into history validation.
 
-P17C — shared nearest-hit integration: **IMPLEMENTED / CI PASS; runtime visual validation pending**
+P17C — shared nearest-hit integration: **IMPLEMENTED / CI PASS; runtime validation active**
 - Dynamic entity triangles compete with static voxel/model geometry for nearest ray distance.
 - The shared hit path is compiled into primary visibility and P16 reflection, and is reused by shadow/GI/environment consumers through the common trace entry.
 - Alpha 42 is not visually complete until this path is runtime-validated.
 
-P17D — entity material fidelity: **PENDING**
-- A conservative initial entity surface identity/color is acceptable for the first geometry gate.
-- Skin/texture alpha, armor/equipment, emissive entity layers and resource-pack/PBR semantics remain later material work.
+P17D — generic entity material ABI: **IMPLEMENTED / CI GATED; fidelity coverage remains**
+- Generic albedo/emissive texture sampling and optical scalars are data-driven through the entity material ABI.
+- Spider/cave-spider eye emission has been runtime-validated without spider-specific shader branches.
+- Remaining work includes skin/texture-alpha hit rejection, armor/equipment, render-layer-specific materials and non-Model renderer families.
 
 Canonical P17 design/runtime gate: [`P17_DYNAMIC_ENTITIES.md`](P17_DYNAMIC_ENTITIES.md).
 
@@ -272,18 +301,33 @@ Status: **IMPLEMENTED / CI PASS; Apple M4 runtime revalidation pending after fir
 Canonical P14E design/runtime log: [`P14E_EXACT_FLUID_GEOMETRY.md`](P14E_EXACT_FLUID_GEOMETRY.md).
 
 ## P18 - Resource pack / LabPBR integration
-Status: **PLANNED AFTER EXACT FLUID GEOMETRY RUNTIME GATE**
+Status: **P18A/P18B/P18C IMPLEMENTED / CI PASS; runtime visual acceptance and P18D fidelity follow-up remain**
 
-- Move surface source-of-truth from built-in fallback roughness/metallic values toward resource-pack/LabPBR data.
-- Integrate texture alpha/material semantics without splitting ray geometry consumers into separate implementations.
+Implemented baseline:
+- renderer-resolved sprite identity and sprite-local UV retention;
+- LabPBR 1.3 normal/AO/height and specular/roughness/F0/metal/emission decode contract;
+- bounded GPU PBR texture scene and full-cube surface table;
+- shared PBR shading in the full base and P16 reflection paths;
+- alpha-zero ray-visible holes and stochastic intermediate-alpha coverage for generic textured geometry;
+- animated albedo/normal/specular frame order/timing with game-tick selection and auxiliary-map timeline inheritance;
+- surface-emission separation so emissive textures/material rules do not force an entire block model to glow.
 
-## Current scene-quality execution order
+Remaining:
+- P18D block-entity and entity material fidelity;
+- armor/equipment/render-layer-specific material identity;
+- wider runtime visual acceptance across representative LabPBR packs;
+- sub-tick interpolation for `interpolate:true` and P18E height/POM/secondary channels remain deferred.
+
+Canonical document: [`P18_RESOURCE_PACK_LABPBR.md`](P18_RESOURCE_PACK_LABPBR.md).
+
+## Current execution order
 
 ```text
-Alpha 41 runtime readiness
-  -> Alpha 42 / P17 Dynamic Entities
-  -> Alpha 43 / P14E Exact Fluid Geometry
-  -> P18 Resource Pack / LabPBR integration
+Alpha 59 current baseline
+  -> remaining P14D/P14E/P17/P18 runtime + coverage gates
+  -> primary-hit/G-buffer and reflection/GI performance architecture
+  -> GL4 gameplay-light profiling / GL5 hardening
+  -> P19+ hardware RT / ReSTIR / adaptive sampling / dynamic resolution
 ```
 
 ## P19+ - Optional hardware RT and advanced sampling
@@ -307,6 +351,11 @@ Alpha 48 targets the CPU/upload side exposed by the Alpha 47 performance probe. 
 ## Alpha 49 P17 contiguous-upload regression fix
 
 Alpha 48's disjoint P17 metadata/texture/quad flush+copy path regressed runtime performance on Apple Silicon/MoltenVK. Alpha 49 restores one contiguous P17 GPU upload range, matching the proven Alpha 47 submission shape, while retaining the Alpha 48 CPU optimization that skips entity material texture re-sampling during pose-only updates. The performance probe continues to log P17 pack time and contiguous upload bytes.
+
+
+## Alpha 50 secondary-GI visibility experiment
+
+Alpha 50 tested collapsing secondary-GI sky/sun/moon visibility into one conservative transmission query. The build was CI-valid but did not become the accepted performance baseline because runtime performance regressed. The accepted optimization baseline therefore remained Alpha 49 until the Alpha 51 world-takeover change. The Alpha 50 experiment is retained as evidence that reducing secondary visibility rays alone was not the dominant bottleneck in the tested scene.
 
 
 ## Alpha 51 direct world takeover
