@@ -882,7 +882,7 @@ public final class P5StableLookupRenderer {
                 }
 
                 uint pixelBase = scene.data[3];
-                scene.data[pixelBase + pixel.y * width + pixel.x] = color;
+                scene.data[pixelBase + (height - 1u - pixel.y) * width + pixel.x] = color;
             }
             """;
 
