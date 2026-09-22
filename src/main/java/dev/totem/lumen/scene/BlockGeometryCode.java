@@ -27,6 +27,7 @@ public final class BlockGeometryCode {
     public static final int GLASS_CUBE = 0x8000;
     public static final int SURFACE_CUBE = 0x9000;
     public static final int MODEL_MESH = 0xA000;
+    public static final int TEXTURED_CUBE = 0xB000;
 
     public static final int NORTH = 0;
     public static final int EAST = 1;
@@ -128,6 +129,25 @@ public final class BlockGeometryCode {
                 | (quantizeNormalized(metallic, "metallic") << SURFACE_METALLIC_SHIFT);
     }
 
+    /** P18 textured full-cube AABB fast path using a six-face surface-set id. */
+    public static int texturedCube(int surfaceSetId) {
+        if (surfaceSetId <= 0 || surfaceSetId > PARAM_MASK) {
+            throw new IllegalArgumentException(
+                    "textured cube surface-set id must be in [1, 4095]: " + surfaceSetId
+            );
+        }
+        return TEXTURED_CUBE | surfaceSetId;
+    }
+
+    public static int texturedCubeSurfaceSetId(int geometryCode) {
+        if (family(geometryCode) != TEXTURED_CUBE) {
+            throw new IllegalArgumentException(
+                    "geometry code is not a P18 textured cube: " + geometryCode
+            );
+        }
+        return geometryCode & PARAM_MASK;
+    }
+
     /** P14C generic block-model mesh. Mesh id zero intentionally means no static model geometry. */
     public static int modelMesh(int meshId) {
         if (meshId < 0 || meshId > PARAM_MASK) {
@@ -194,7 +214,7 @@ public final class BlockGeometryCode {
         }
         return switch (family(geometryCode)) {
             case STAIRS, FENCE, WALL, PANE, DOOR, TRAPDOOR, FENCE_GATE,
-                    GLASS_CUBE, SURFACE_CUBE, MODEL_MESH -> true;
+                    GLASS_CUBE, SURFACE_CUBE, MODEL_MESH, TEXTURED_CUBE -> true;
             default -> false;
         };
     }

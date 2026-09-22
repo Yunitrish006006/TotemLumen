@@ -7,10 +7,12 @@ import dev.totem.lumen.material.MaterialDefinition;
 import dev.totem.lumen.material.MaterialFlags;
 import dev.totem.lumen.material.SurfaceProperties;
 import dev.totem.lumen.world.LightingWorldRule;
+import net.minecraft.client.Minecraft;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.world.level.block.TransparentBlock;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.Property;
 
 /**
  * Minecraft-facing adapter from BlockState to Totem Lumen-owned material metadata.
@@ -29,6 +31,9 @@ public final class MinecraftMaterialResolver {
         }
 
         String sourceId = BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
+        BlockMaterialRuleRegistry.ensureLoaded(Minecraft.getInstance().getResourceManager());
+        BlockMaterialRuleRegistry.Overrides runtimeRule =
+                BlockMaterialRuleRegistry.overridesFor(sourceId);
         int emission = state.getLightEmission();
         boolean fluid = state.getBlock() instanceof LiquidBlock;
         boolean translucent = fluid
@@ -57,9 +62,15 @@ public final class MinecraftMaterialResolver {
         }
 
         SurfaceProperties surface = BaselineSurfaceProperties.forBlock(sourceId);
+        float roughness = runtimeRule.roughness() == null
+                ? surface.roughness()
+                : runtimeRule.roughness();
+        float metallic = runtimeRule.metallic() == null
+                ? surface.metallic()
+                : runtimeRule.metallic();
+
         float opacity = 1.0f;
         float ior = 1.0f;
-
         if (translucent) {
             if (fluid) {
                 opacity = 0.08f;
@@ -70,8 +81,19 @@ public final class MinecraftMaterialResolver {
             }
             ior = sourceId.equals("minecraft:water") ? 1.333f : 1.5f;
         }
+        if (runtimeRule.opacity() != null) opacity = runtimeRule.opacity();
+        if (runtimeRule.ior() != null) ior = runtimeRule.ior();
 
         EmissionColor emissionColor = DefaultEmissionColors.forBlock(sourceId, emission);
+        if (runtimeRule.emissionR() != null
+                && runtimeRule.emissionG() != null
+                && runtimeRule.emissionB() != null) {
+            emissionColor = new EmissionColor(
+                    runtimeRule.emissionR(),
+                    runtimeRule.emissionG(),
+                    runtimeRule.emissionB()
+            );
+        }
         LightingWorldRule serverRule = emission > 0
                 ? ClientLightingWorldRules.ruleFor(sourceId)
                 : null;
@@ -86,6 +108,27 @@ public final class MinecraftMaterialResolver {
         float[] transmissionColor = transmissiveGlass
                 ? baselineTransmissionColor(sourceId)
                 : new float[]{1.0f, 1.0f, 1.0f};
+        if (runtimeRule.transmissionR() != null
+                && runtimeRule.transmissionG() != null
+                && runtimeRule.transmissionB() != null) {
+            transmissionColor = new float[]{
+                    runtimeRule.transmissionR(),
+                    runtimeRule.transmissionG(),
+                    runtimeRule.transmissionB()
+            };
+        }
+
+        float lightRadiusScale = runtimeRule.lightRadiusScale() == null
+                ? 1.0f
+                : runtimeRule.lightRadiusScale();
+        float lightIntensityScale = runtimeRule.lightIntensityScale() == null
+                ? 1.0f
+                : runtimeRule.lightIntensityScale();
+        float reflectionScale = runtimeRule.reflectionScale() == null
+                ? 1.0f
+                : runtimeRule.reflectionScale();
+        int lightEmitterAnchor = torchEmitterAnchor(state, sourceId);
+
         return new MaterialDefinition(
                 sourceId,
                 flags,
@@ -93,14 +136,63 @@ public final class MinecraftMaterialResolver {
                 emissionColor.red(),
                 emissionColor.green(),
                 emissionColor.blue(),
-                surface.roughness(),
-                surface.metallic(),
+                roughness,
+                metallic,
                 opacity,
                 ior,
                 transmissionColor[0],
                 transmissionColor[1],
-                transmissionColor[2]
+                transmissionColor[2],
+                lightRadiusScale,
+                lightIntensityScale,
+                reflectionScale,
+                lightEmitterAnchor
         );
+    }
+
+    private static int torchEmitterAnchor(BlockState state, String sourceId) {
+        if (!isTorchLike(sourceId)) {
+            return 0;
+        }
+
+        float x = 0.5f;
+        float y = 0.70f;
+        float z = 0.5f;
+
+        if (sourceId.contains("wall_torch")) {
+            switch (propertyValue(state, "facing")) {
+                case "north" -> z -= 0.27f;
+                case "south" -> z += 0.27f;
+                case "west" -> x -= 0.27f;
+                case "east" -> x += 0.27f;
+                default -> {
+                    // Unknown/custom wall-torch state keeps the centered flame anchor.
+                }
+            }
+        }
+
+        return MaterialDefinition.pointLightEmitterAnchor(x, y, z);
+    }
+
+    private static boolean isTorchLike(String sourceId) {
+        return sourceId.equals("minecraft:torch")
+                || sourceId.endsWith("_torch");
+    }
+
+    private static String propertyValue(BlockState state, String name) {
+        for (Property<?> property : state.getProperties()) {
+            if (property.getName().equals(name)) {
+                return propertyValue(state, property);
+            }
+        }
+        return "";
+    }
+
+    private static <T extends Comparable<T>> String propertyValue(
+            BlockState state,
+            Property<T> property
+    ) {
+        return property.getName(state.getValue(property));
     }
 
     private static boolean isTransmissiveGlass(String sourceId) {

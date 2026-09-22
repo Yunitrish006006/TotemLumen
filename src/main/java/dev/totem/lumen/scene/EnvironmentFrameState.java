@@ -8,9 +8,13 @@ package dev.totem.lumen.scene;
  * The GPU-visible low word uses:</p>
  * <ul>
  *     <li>bits 31..30: dimension family (overworld/nether/end/other)</li>
- *     <li>bits 29..16: normalized 0..23999 day phase</li>
+ *     <li>bits 29..19: normalized 0..23999 day phase</li>
+ *     <li>bits 18..16: Minecraft 8-step lunar phase</li>
  *     <li>bits 15..0: per-frame stochastic seed</li>
  * </ul>
+ *
+ * <p>Eleven day-phase bits still resolve the 24,000-tick cycle to about 11.7 ticks per step while
+ * preserving the full 16-bit stochastic seed used by temporal GI.</p>
  */
 public final class EnvironmentFrameState {
     public static final int DIMENSION_OVERWORLD = 0;
@@ -18,23 +22,33 @@ public final class EnvironmentFrameState {
     public static final int DIMENSION_END = 2;
     public static final int DIMENSION_OTHER = 3;
 
-    private static final int DAY_PHASE_MASK = 0x3FFF;
+    private static final int DAY_PHASE_MASK = 0x07FF;
+    private static final int MOON_PHASE_MASK = 0x7;
     private static final int FRAME_SEED_MASK = 0xFFFF;
+    private static final int DAY_PHASE_SHIFT = 19;
+    private static final int MOON_PHASE_SHIFT = 16;
 
-    private static volatile CapturedEnvironment latest = new CapturedEnvironment("", 0);
+    private static volatile CapturedEnvironment latest = new CapturedEnvironment("", 0, 0);
 
     private EnvironmentFrameState() {
     }
 
-    public static void capture(String dimensionId, long dayTime) {
-        latest = new CapturedEnvironment(dimensionId, dayPhase14(dayTime));
+    public static void capture(String dimensionId, long dayTime, int moonPhase) {
+        latest = new CapturedEnvironment(
+                dimensionId,
+                dayPhase11(dayTime),
+                moonPhase & MOON_PHASE_MASK
+        );
     }
 
     public static long packFrameIndex(long extractionSequence, String dimensionId) {
         CapturedEnvironment captured = latest;
-        int phase = captured.dimensionId().equals(dimensionId) ? captured.dayPhase14() : 0;
+        boolean sameDimension = captured.dimensionId().equals(dimensionId);
+        int phase = sameDimension ? captured.dayPhase11() : 0;
+        int moonPhase = sameDimension ? captured.moonPhase() : 0;
         int gpuWord = (dimensionCode(dimensionId) << 30)
-                | ((phase & DAY_PHASE_MASK) << 16)
+                | ((phase & DAY_PHASE_MASK) << DAY_PHASE_SHIFT)
+                | ((moonPhase & MOON_PHASE_MASK) << MOON_PHASE_SHIFT)
                 | ((int) extractionSequence & FRAME_SEED_MASK);
         return (extractionSequence << 32) | Integer.toUnsignedLong(gpuWord);
     }
@@ -48,9 +62,9 @@ public final class EnvironmentFrameState {
         };
     }
 
-    static int dayPhase14(long dayTime) {
+    static int dayPhase11(long dayTime) {
         long timeOfDay = Math.floorMod(dayTime, 24_000L);
-        return (int) ((timeOfDay * 16_384L) / 24_000L) & DAY_PHASE_MASK;
+        return (int) ((timeOfDay * 2_048L) / 24_000L) & DAY_PHASE_MASK;
     }
 
     static int gpuWord(long packedFrameIndex) {
@@ -61,14 +75,18 @@ public final class EnvironmentFrameState {
         return gpuWord(packedFrameIndex) >>> 30;
     }
 
-    static int gpuDayPhase14(long packedFrameIndex) {
-        return (gpuWord(packedFrameIndex) >>> 16) & DAY_PHASE_MASK;
+    static int gpuDayPhase11(long packedFrameIndex) {
+        return (gpuWord(packedFrameIndex) >>> DAY_PHASE_SHIFT) & DAY_PHASE_MASK;
+    }
+
+    static int gpuMoonPhase(long packedFrameIndex) {
+        return (gpuWord(packedFrameIndex) >>> MOON_PHASE_SHIFT) & MOON_PHASE_MASK;
     }
 
     static int gpuFrameSeed(long packedFrameIndex) {
         return gpuWord(packedFrameIndex) & FRAME_SEED_MASK;
     }
 
-    private record CapturedEnvironment(String dimensionId, int dayPhase14) {
+    private record CapturedEnvironment(String dimensionId, int dayPhase11, int moonPhase) {
     }
 }

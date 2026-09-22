@@ -1,33 +1,45 @@
 package dev.totem.lumen.vulkan;
 
+import dev.totem.lumen.gpu.GpuDynamicEntityScene;
+import dev.totem.lumen.gpu.GpuFluidScene;
+import dev.totem.lumen.gpu.GpuPbrTextureScene;
 import org.lwjgl.util.shaderc.Shaderc;
 
-import java.lang.reflect.Field;
-
-/** Build-time verifier for the production P12-P15 base pass and split P16 reflection pass. */
+/** Build-time verifier for bootstrap readiness and all staged production compute passes. */
 public final class P14ShaderCompileVerifier {
-    private static final String BASE_SHADER_NAME = "totem_lumen_p12_one_bounce_gi.comp";
+    private static final String BOOTSTRAP_SHADER_NAME = "totem_lumen_p12_one_bounce_gi.comp";
 
     private P14ShaderCompileVerifier() {
     }
 
-    public static void main(String[] args) throws Exception {
-        Field shaderField = P5StableLookupRenderer.class.getDeclaredField("SHADER");
-        shaderField.setAccessible(true);
-        String baseSource = (String) shaderField.get(null);
+    public static void main(String[] args) {
+        String bootstrapSource = P5BootstrapShader.source();
+        verifyBootstrapSource(bootstrapSource);
 
-        baseSource = P12GiShaderPatch.apply(baseSource);
-        baseSource = P13EndBrightnessPatch.apply(baseSource);
-        baseSource = P14GeometryShaderPatch.apply(baseSource);
-        baseSource = P14CommonGeometryPatch.apply(baseSource);
-        baseSource = P14GeometryCorrectionPatch.apply(baseSource);
-        baseSource = P13SkyOcclusionPatch.apply(baseSource);
-        baseSource = P16ReflectionRoughnessPatch.apply(baseSource);
+        String baseSource = P12FullBasePipeline.buildSourceForVerification();
+        verifyP13NightSkySource(baseSource);
+        verifyUnifiedFullLighting(baseSource);
+        verifyP14EFluidSource(baseSource, "full base pass");
+        verifyP14EFluidDebugView(baseSource, "full base pass");
+        verifyP14EFluidOptics(baseSource, "full base pass", false);
+        verifyRuntimeQualitySettings(baseSource);
+        verifyFixedCapacitySceneTails(baseSource, "full base pass");
+        verifyP18TexturedSurfaces(baseSource, "full base pass", false);
+        verifyP18LabPbrShading(baseSource, "full base pass", false);
 
-        verifyP13MoonSource(baseSource);
-        verifyP14EAlphaCutoutSource(baseSource, "P12-P15 base pass");
-        String reflectionSource = P16ReflectionPassShader.build();
-        verifyP14EAlphaCutoutSource(reflectionSource, "P16 reflection pass");
+        verifyP17DynamicEntitySource(baseSource, "unified full lighting pass");
+
+        String reflectionGeometry = P14EFluidShaderPatch.apply(P16ReflectionPassShader.build());
+        String reflectionEntity = P17ShaderIntegration.apply(reflectionGeometry);
+        String reflectionSource = P14EFluidOpticsPatch.apply(reflectionEntity);
+        verifyP13NightSkySource(reflectionSource);
+        verifyP14EFluidSource(reflectionSource, "P16 reflection pass");
+        verifyP14EFluidOptics(reflectionSource, "P16 reflection pass", true);
+        verifyP16RuntimeSettings(reflectionSource);
+        verifyP17DynamicEntitySource(reflectionSource, "P16 reflection pass");
+        verifyFixedCapacitySceneTails(reflectionSource, "P16 reflection pass");
+        verifyP18TexturedSurfaces(reflectionSource, "P16 reflection pass", true);
+        verifyP18LabPbrShading(reflectionSource, "P16 reflection pass", true);
 
         long compiler = Shaderc.shaderc_compiler_initialize();
         if (compiler == 0L) {
@@ -35,46 +47,674 @@ public final class P14ShaderCompileVerifier {
         }
 
         try {
-            compileAndVerify(compiler, BASE_SHADER_NAME, baseSource, "P12-P15 base pass");
+            compileAndVerify(compiler, BOOTSTRAP_SHADER_NAME, bootstrapSource, "Vulkan bootstrap readiness pass");
+            compileAndVerify(
+                    compiler,
+                    P12FullBasePipeline.SHADER_NAME,
+                    baseSource,
+                    "unified full lighting + dynamic entities pass"
+            );
             compileAndVerify(
                     compiler,
                     P16ReflectionPassShader.SHADER_NAME,
                     reflectionSource,
-                    "P16 split reflection pass"
+                    "P14E+P16+P17 split reflection pass"
             );
         } finally {
             Shaderc.shaderc_compiler_release(compiler);
         }
     }
 
-    private static void verifyP13MoonSource(String source) {
-        requireSourceMarker(source, "vec3 p13MoonDirection()", "moon direction");
-        requireSourceMarker(source, "float p13MoonStrength(vec3 moonDirection)", "moon horizon gating");
-        requireSourceMarker(source, "float p13MoonDisk(vec3 direction, vec3 moonDirection)", "moon disk");
-        requireSourceMarker(source, "vec3 moon = p13MoonColor()", "moon surface lighting");
-        requireSourceMarker(source, "vec3 moonTransmission = vec3(0.0);", "P15 moon transmission");
+    private static void verifyBootstrapSource(String source) {
+        requireSourceMarker(source, "uint materialAt(ivec3 voxel)", "bootstrap material lookup");
+        requireSourceMarker(source, "HitResult traceRayLimited(", "bootstrap voxel DDA");
+        requireSourceMarker(source, "vec3 bootstrapColor(", "bootstrap output");
+        if (source.contains("p13Moon")
+                || source.contains("P14E_FLUID_ABI_VERSION")
+                || source.contains("P17_ENTITY_MATERIAL_BASE")
+                || source.contains("p16ReflectionRgb")
+                || source.contains("temporalHistoryColor")
+                || source.contains("P18_TEXTURE_ABI_VERSION")) {
+            throw new IllegalStateException("Bootstrap shader accidentally contains staged renderer features");
+        }
+        if (source.length() > 16_000) {
+            throw new IllegalStateException(
+                    "Bootstrap shader exceeded cold-start size budget: " + source.length() + " chars"
+            );
+        }
         System.out.println(
-                "P13 moon shader verification PASS: disk=true, coldDirectionalLight=true, "
-                        + "oppositeSun=true, p15Transmission=true"
+                "Vulkan bootstrap readiness verification PASS: chars=" + source.length()
+                        + ", voxelDda=true, stagedGi=false, p14e=false, p17=false, reflection=false"
         );
     }
 
-    private static void verifyP14EAlphaCutoutSource(String source, String label) {
-        requireSourceMarker(source, "bool p14AlphaMaskOpaque(", label + " alpha-mask lookup");
-        requireSourceMarker(source, "vec2 p14ModelUv(", label + " mesh UV lookup");
+    private static void verifyP13NightSkySource(String source) {
+        requireSourceMarker(source, "uint p13MoonPhase()", "packed moon phase");
+        requireSourceMarker(source, "float p13MoonPhaseBrightness()", "phase-weighted moonlight");
+        requireSourceMarker(source, "float p13MoonPhaseMask(vec3 direction, vec3 moonDirection)", "phase silhouette");
+        requireSourceMarker(source, "vec3 p13MoonDirection()", "moon direction");
+        requireSourceMarker(source, "float p13MoonStrength(vec3 moonDirection)", "moon horizon/phase gating");
+        requireSourceMarker(source, "float p13MoonDisk(vec3 direction, vec3 moonDirection)", "moon disk");
+        requireSourceMarker(source, "vec3 moon = p13MoonColor()", "moon surface lighting");
+        requireSourceMarker(source, "vec3 moonTransmission = vec3(0.0);", "P15 moon transmission");
+        requireSourceMarker(source, "uint p13StarHash(uvec2 cell)", "procedural star hash");
+        requireSourceMarker(source, "vec2 p13StarSkyUv(vec3 direction)", "rotating star dome");
+        requireSourceMarker(source, "vec3 p13StarRadiance(vec3 direction, vec3 sunDirection)", "star radiance");
+        requireSourceMarker(source, "vec3 stars = p13StarRadiance(dir, sunDirection);", "star sky composition");
+        requireSourceMarker(source, "return scene.data[41] & 0xFFFFu;", "full stochastic frame seed");
+        System.out.println(
+                "P13 night-sky shader verification PASS: moon=true, phaseSteps=8, stars=true, "
+                        + "deterministicStars=true, rotatingStarDome=true, fullFrameSeed=true, p15Transmission=true"
+        );
+    }
+
+    private static void verifyUnifiedFullLighting(String source) {
         requireSourceMarker(
                 source,
-                "if (!p14AlphaMaskOpaque(alphaMaskId, alphaUv)) return;",
-                label + " transparent-texel rejection"
+                "const uint P17_ENTITY_MATERIAL_BASE = 0xFE00u;",
+                "unified dynamic-entity tracing"
+        );
+        requireSourceMarker(
+                source,
+                "scene.data[pixelBase + (height - 1u - pixel.y) * width + pixel.x] = color;",
+                "world-takeover presentation Y flip"
         );
         System.out.println(
-                label + " P14E verification PASS: barycentricUv=true, alphaMask=true"
+                "Unified full-lighting verification PASS: "
+                        + "staticWorld=true, fluids=true, pbr=true, dynamicEntities=true, "
+                        + "duplicateEntityPipeline=false"
+        );
+    }
+
+    private static void verifyP14EFluidSource(String source, String label) {
+        requireSourceMarker(
+                source,
+                "const uint P14E_FLUID_ABI_VERSION = " + GpuFluidScene.ABI_VERSION + "u;",
+                label + " fluid ABI"
+        );
+        requireSourceMarker(source, "uint p14eFindFluidCell(", label + " block-coordinate fluid lookup");
+        requireSourceMarker(source, "bool p14eIntersectFluidCell(", label + " exact fluid quad trace");
+        requireSourceMarker(
+                source,
+                "uint voxelWordAtSection(ivec3 voxel, ivec3 sectionCoord, int slot)",
+                label + " cached section voxel lookup"
+        );
+        requireSourceMarker(
+                source,
+                "int sectionSlot = findSectionSlot(sectionCoord);",
+                label + " section slot cache"
+        );
+        requireSourceMarker(
+                source,
+                "uint p14eFluidIndex = sectionSlot < 0",
+                label + " missing-section fluid lookup skip"
+        );
+        requireSourceMarker(source, "bool p14eFluidOnly = false;", label + " pure-fluid suppression state");
+        requireSourceMarker(source, "bool p14eStaticHit = false;", label + " waterlogged static coexistence");
+        requireSourceMarker(
+                source,
+                "p14eFluidDistance < p14eStaticDistance - 0.00001",
+                label + " in-cell nearest-hit competition"
+        );
+        requireSourceMarker(source, "P14E_WATER_MATERIAL_ID", label + " water surface identity");
+        requireSourceMarker(source, "P14E_LAVA_MATERIAL_ID", label + " lava surface identity");
+        System.out.println(
+                "P14E exact-fluid shader verification PASS (" + label + "): abi="
+                        + GpuFluidScene.ABI_VERSION
+                        + ", blockLookup=true, sectionSlotCache=true, missingSectionFluidSkip=true, resolvedQuads=true, waterloggedCoexistence=true, nearestHit=true"
+        );
+    }
+
+    private static void verifyP14EFluidDebugView(String source, String label) {
+        requireSourceMarker(source, "vec3 p14eFluidDebugColor(HitResult hit)", label + " fluid debug helper");
+        requireSourceMarker(source, "if (mode == 12u)", label + " P14E fluid debug mode");
+        requireSourceMarker(source, "vec3(0.18, 1.00, 0.25)", label + " waterlogged static coexistence color");
+        requireSourceMarker(source, "vec3(0.86, 0.18, 1.00)", label + " waterlogged fluid coexistence color");
+        System.out.println(
+                "P14E fluid debug-view verification PASS (" + label + "): "
+                        + "mode=12, water=true, lava=true, coexistence=true"
+        );
+    }
+
+    private static void verifyP14EFluidOptics(String source, String label, boolean reflectionPass) {
+        requireSourceMarker(source, "vec3 p14eResolvedFluidTint(HitResult hit)", label + " fluid tint helper");
+        requireSourceMarker(source, "uint argb = scene.data[descriptor + 8u];", label + " unlit fluid tint descriptor");
+        requireSourceMarker(source, "vec4 p14eWaterTransmission(HitResult hit)", label + " water transmission");
+        requireSourceMarker(
+                source,
+                "bool p14eWaterSurface = candidate.materialId == P14E_WATER_MATERIAL_ID;",
+                label + " P15 water interface"
+        );
+        requireSourceMarker(
+                source,
+                "advance = candidate.distance + exitEpsilon;",
+                label + " runtime exact-interface advance"
+        );
+        requireSourceMarker(
+                source,
+                "uintBitsToFloat(scene.data[64])",
+                label + " runtime water tint mix"
+        );
+        requireSourceMarker(
+                source,
+                "uintBitsToFloat(scene.data[65])",
+                label + " runtime water transmission"
+        );
+        requireSourceMarker(
+                source,
+                "uintBitsToFloat(scene.data[78])",
+                label + " runtime lava emission color"
+        );
+        requireSourceMarker(
+                source,
+                "uintBitsToFloat(scene.data[81])",
+                label + " runtime lava emission strength"
+        );
+        if (reflectionPass) {
+            requireSourceMarker(
+                    source,
+                    "clamp(uintBitsToFloat(scene.data[85]), 0.0, 1.0)",
+                    label + " runtime water reflection roughness"
+            );
+            requireSourceMarker(
+                    source,
+                    "max(uintBitsToFloat(scene.data[87]), 0.0)",
+                    label + " runtime water reflection scale"
+            );
+            requireSourceMarker(
+                    source,
+                    "bool p14eReflectWater = scene.data[47] != 0u",
+                    label + " raw exact-water reflection surface"
+            );
+        }
+        System.out.println(
+                "P14E fluid-optics verification PASS (" + label + "): "
+                        + "waterTransmission=runtime, unlitTint=true, lavaEmission=runtime, "
+                        + "exactWaterReflection=" + reflectionPass
+        );
+    }
+
+    private static void verifyP16RuntimeSettings(String source) {
+        requireSourceMarker(source, "uint maxBounces = min(scene.data[42], 2u);", "P16 runtime bounce count");
+        requireSourceMarker(source, "float configuredDistance = uintBitsToFloat(scene.data[43]);", "P16 runtime distance");
+        requireSourceMarker(source, "for (uint bounce = 0u; bounce < 2u; bounce++)", "P16 iterative bounce loop");
+        requireSourceMarker(source, "HitResult nextRawHit = traceRayLimited(", "P16 secondary raw surface trace");
+        requireSourceMarker(
+                source,
+                "max(uintBitsToFloat(scene.data[55]), 0.0)",
+                "P16 runtime rough-reflection spread"
+        );
+        requireSourceMarker(
+                source,
+                "clamp(uintBitsToFloat(scene.data[56]), 0.0, 1.0)",
+                "P16 runtime roughness energy"
+        );
+        requireSourceMarker(
+                source,
+                "max(uintBitsToFloat(scene.data[57]), 0.0)",
+                "P16 runtime dielectric energy"
+        );
+        requireSourceMarker(
+                source,
+                "max(uintBitsToFloat(scene.data[58]), 0.0)",
+                "P16 runtime metal energy"
+        );
+        requireSourceMarker(
+                source,
+                "max(uintBitsToFloat(scene.data[59]), 0.0)",
+                "P16 runtime normal bias"
+        );
+        requireSourceMarker(
+                source,
+                "max(uintBitsToFloat(scene.data[60]), 0.0)",
+                "P16 runtime direction bias"
+        );
+        requireSourceMarker(source, "* reflectionScale;", "P16 per-material reflection scale");
+        requireSourceMarker(
+                source,
+                "if (scene.data[46] == 0u || scene.data[42] == 0u) return;",
+                "P16 reflection master toggle"
+        );
+        requireSourceMarker(
+                source,
+                "&& scene.data[47] == 0u",
+                "P16 secondary water-reflection toggle"
+        );
+        System.out.println(
+                "P16 runtime-settings verification PASS: bounces=1..2, distance=runtime, "
+                        + "energy=runtime, spread=runtime, bias=runtime, materialScale=runtime, "
+                        + "masterToggle=true, waterToggle=true, iterative=true"
+        );
+    }
+
+    private static void verifyFixedCapacitySceneTails(String source, String label) {
+        requireSourceMarker(
+                source,
+                "uint pixelCount = scene.data[51] * scene.data[52];",
+                label + " fixed-capacity scene-tail base"
+        );
+        if (source.contains("uint pixelCount = scene.data[4] * scene.data[5];")) {
+            throw new IllegalStateException(
+                    label + " still derives a scene tail from active render extent"
+            );
+        }
+        System.out.println(
+                "Fixed-capacity scene-tail verification PASS (" + label
+                        + "): capacityWords=51/52, activeExtentTailBase=false"
+        );
+    }
+
+    private static void verifyP18TexturedSurfaces(
+            String source,
+            String label,
+            boolean reflectionPass
+    ) {
+        requireSourceMarker(
+                source,
+                "const uint P18_TEXTURE_ABI_VERSION = " + GpuPbrTextureScene.ABI_VERSION + "u;",
+                label + " P18 texture ABI"
+        );
+        requireSourceMarker(
+                source,
+                "uint p18TextureSceneBase()",
+                label + " P18 texture scene base"
+        );
+        requireSourceMarker(
+                source,
+                "const uint P18_TEXTURE_ANIMATION_POOL_BASE = "
+                        + GpuPbrTextureScene.ANIMATION_POOL_BASE_WORD + "u;",
+                label + " P18 animation timeline pool"
+        );
+        requireSourceMarker(
+                source,
+                "uint p18CurrentFrameTexelOffset(uint textureBase, uint descriptor)",
+                label + " animated frame selection"
+        );
+        requireSourceMarker(
+                source,
+                "uint timelineIndex = scene.data[53] % timelineLength;",
+                label + " game-tick animation clock"
+        );
+        requireSourceMarker(
+                source,
+                "uint textureHandle = scene.data[quadWord + 20u];",
+                label + " P14 quad texture handle"
+        );
+        requireSourceMarker(
+                source,
+                "if (!p18AlphaAccept(textureHandle, surfaceUv, alphaSalt)) return;",
+                label + " mesh alpha coverage rejection"
+        );
+        requireSourceMarker(
+                source,
+                "if ((geometryCode & 0xF000u) == 0xB000u)",
+                label + " textured-cube fast path"
+        );
+        requireSourceMarker(
+                source,
+                "if (alpha == 0u) return false;",
+                label + " exact zero-alpha hole"
+        );
+        requireSourceMarker(
+                source,
+                "return coverageSample < float(alpha) / 255.0;",
+                label + " stochastic partial-alpha coverage"
+        );
+        requireSourceMarker(
+                source,
+                "if (!p18AlphaAccept(textureHandle, uv, alphaSalt))",
+                label + " textured-cube alpha coverage rejection"
+        );
+        if (reflectionPass) {
+            requireSourceMarker(
+                    source,
+                    "vec2 p18CubeFallbackSurfaceProperties(uint surfaceSetId)",
+                    label + " textured-cube fallback optics helper"
+            );
+        }
+        System.out.println(
+                "P18 textured-surface verification PASS (" + label + "): "
+                        + "meshUv=true, cubeFastPath=true, alphaZeroReject=true, partialAlpha=stochastic, "
+                        + "animatedFrames=true, gameTickClock=true, reflectionFallback=" + reflectionPass
+        );
+    }
+
+    private static void verifyP18LabPbrShading(
+            String source,
+            String label,
+            boolean reflectionPass
+    ) {
+        requireSourceMarker(
+                source,
+                "struct P18SurfaceSample {",
+                label + " shared P18 surface sample"
+        );
+        requireSourceMarker(
+                source,
+                "P18SurfaceSample p18ResolveSurface(",
+                label + " P18 surface resolver"
+        );
+        requireSourceMarker(
+                source,
+                "surface.albedo = p18ArgbRgb(albedoArgb);",
+                label + " resource-pack albedo"
+        );
+        requireSourceMarker(
+                source,
+                "float normalZ = sqrt(max(",
+                label + " LabPBR normal Z reconstruction"
+        );
+        requireSourceMarker(
+                source,
+                "surface.ao = float(normalArgb & 255u) / 255.0;",
+                label + " LabPBR AO"
+        );
+        requireSourceMarker(
+                source,
+                "surface.roughness = (1.0 - smoothness) * (1.0 - smoothness);",
+                label + " LabPBR perceptual smoothness"
+        );
+        requireSourceMarker(
+                source,
+                "surface.f0 = vec3(float(reflectance) / 255.0);",
+                label + " LabPBR linear dielectric F0"
+        );
+        requireSourceMarker(
+                source,
+                "vec3 p18HardcodedMetalF0(uint metalCode, vec3 albedo)",
+                label + " LabPBR hardcoded metals"
+        );
+        requireSourceMarker(
+                source,
+                "float baselineEmissionScale = uintBitsToFloat(scene.data[descriptor + 11u]);",
+                label + " runtime baseline emission scale"
+        );
+        requireSourceMarker(
+                source,
+                "float labPbrEmissionScale = uintBitsToFloat(scene.data[descriptor + 12u]);",
+                label + " runtime LabPBR emission scale"
+        );
+        requireSourceMarker(
+                source,
+                "float roughnessScale = uintBitsToFloat(scene.data[descriptor + 13u]);",
+                label + " runtime roughness scale"
+        );
+        requireSourceMarker(
+                source,
+                "float normalStrength = uintBitsToFloat(scene.data[descriptor + 14u]);",
+                label + " runtime normal strength"
+        );
+        requireSourceMarker(
+                source,
+                "float alphaCutoff = uintBitsToFloat(scene.data[descriptor + 15u]);",
+                label + " runtime alpha cutoff"
+        );
+        requireSourceMarker(
+                source,
+                "float textureReflectionScale = uintBitsToFloat(scene.data[descriptor + 16u]);",
+                label + " runtime texture reflection scale"
+        );
+        requireSourceMarker(
+                source,
+                "surface.reflectionScale *= textureReflectionScale;",
+                label + " composed texture/block reflection scale"
+        );
+        requireSourceMarker(
+                source,
+                "uint lightEmitterAnchor = scene.data[materialBase + 15u];",
+                label + " point-emitter material anchor"
+        );
+        requireSourceMarker(
+                source,
+                "smoothstep(0.08, 0.18, emitterDistance)",
+                label + " flame-tip fallback emission mask"
+        );
+        requireSourceMarker(
+                source,
+                "surface.emission = surface.albedo",
+                label + " LabPBR per-texel emission"
+        );
+        requireSourceMarker(
+                source,
+                "(1.0 - p18Surface.metallic * float(scene.data[46]))",
+                label + " inline reflection-aware metallic fallback"
+        );
+        if (source.contains("p18DiffuseMetalWeight(")) {
+            throw new IllegalStateException(
+                    label + " still contains the O0 metallic fallback helper call"
+            );
+        }
+        if (!reflectionPass) {
+            requireSourceMarker(
+                    source,
+                    "vec3 p18Diffuse = p18Surface.albedo * (1.0 - p18Surface.metallic * float(scene.data[46]));",
+                    label + " local-light inline reflection-aware metal diffuse"
+            );
+        }
+        if (reflectionPass) {
+            requireSourceMarker(
+                    source,
+                    "P18SurfaceSample p18Surface = p18ResolveSurface(",
+                    label + " P16 shared PBR sample"
+            );
+            requireSourceMarker(
+                    source,
+                    "? p18Surface.f0",
+                    label + " P16 LabPBR F0"
+            );
+            requireSourceMarker(
+                    source,
+                    "? p18Surface.normal",
+                    label + " P16 normal-map reflection normal"
+            );
+        }
+        System.out.println(
+                "P18 LabPBR shading verification PASS (" + label + "): "
+                        + "albedo=true, normal=true, ao=true, roughness=true, f0=true, "
+                        + "metal=true, emission=true, stableMaterialAbi=true, reflectionShared="
+                        + reflectionPass
+        );
+    }
+
+    private static void verifyRuntimeQualitySettings(String source) {
+        requireSourceMarker(source, "uint giSamples = clamp(scene.data[44], 1u, 4u);", "runtime GI samples");
+        requireSourceMarker(source, "uint shadowSamples = clamp(scene.data[45], 1u, 4u);", "runtime shadow samples");
+        requireSourceMarker(source, "uint historyLimit = max(scene.data[48], 1u);", "runtime temporal history limit");
+        requireSourceMarker(
+                source,
+                "float temporalWeight = clamp(uintBitsToFloat(scene.data[49]), 0.0, 0.95);",
+                "runtime temporal weight"
+        );
+        requireSourceMarker(source, "int denoiseRadius = int(min(scene.data[50], 2u));", "runtime denoise radius");
+        requireSourceMarker(source, "for (int offsetY = -2; offsetY <= 2; offsetY++)", "5x5 denoise bound");
+        requireSourceMarker(source, "vec3 tlRuntimeDirectionalTransmission(", "production soft-shadow helper");
+        requireSourceMarker(source, "const uint LOOKUP_BASE = 96u;", "stable 96-word header ABI");
+        requireSourceMarker(
+                source,
+                "const uint MATERIAL_EMISSION_WORDS_PER_RECORD = 16u;",
+                "stable 16-word runtime material record"
+        );
+        requireSourceMarker(
+                source,
+                "uintBitsToFloat(scene.data[54]) * intensity",
+                "runtime local-light gain"
+        );
+        requireSourceMarker(
+                source,
+                "bool pointEmitter = encodedIntensity < 0.0;",
+                "anchored point-emitter flag"
+        );
+        requireSourceMarker(
+                source,
+                "uint lightSamples = pointEmitter ? 1u : areaSamples;",
+                "point emitter single-sample path"
+        );
+        requireSourceMarker(
+                source,
+                "samplePosition = lightPosition;",
+                "point emitter anchor position"
+        );
+        requireSourceMarker(
+                source,
+                "uintBitsToFloat(scene.data[83])",
+                "runtime surface-emission gain"
+        );
+        requireSourceMarker(
+                source,
+                "vec4 p15MaterialTransmission(uint materialId, uint geometryCode)",
+                "material-table transmission"
+        );
+        requireSourceMarker(
+                source,
+                "uint maxLayers = clamp(scene.data[61], 1u, 8u);",
+                "runtime transmission layer cap"
+        );
+        requireSourceMarker(
+                source,
+                "float exitEpsilon = max(uintBitsToFloat(scene.data[62]), 0.00001);",
+                "runtime transmission epsilon"
+        );
+        if (source.contains("vec3 p15TintRgb(")) {
+            throw new IllegalStateException("runtime shader still contains hard-coded stained-glass tint table");
+        }
+        System.out.println(
+                "Renderer quality-settings verification PASS: gi=1/2/4, shadows=1/2/4, "
+                        + "temporal=off/16/64, denoiseRadius=0/1/2, stableHeader=96, "
+                        + "materialRecord=16, transmission=data, localLight=data, pointEmitter=true"
+        );
+    }
+
+    private static void verifyP17DynamicEntitySource(String source, String label) {
+        requireSourceMarker(
+                source,
+                "const uint P17_ENTITY_MATERIAL_BASE = 0xFE00u;",
+                label + " generic entity material base"
+        );
+        requireSourceMarker(
+                source,
+                "const uint P17_ENTITY_ABI_VERSION = "
+                        + GpuDynamicEntityScene.ABI_VERSION + "u;",
+                label + " entity ABI v" + GpuDynamicEntityScene.ABI_VERSION
+        );
+        requireSourceMarker(
+                source,
+                "const uint P17_MAX_ENTITY_MATERIALS = "
+                        + GpuDynamicEntityScene.MAX_ENTITY_MATERIALS + "u;",
+                label + " generic material capacity"
+        );
+        requireSourceMarker(
+                source,
+                "const uint P17_ENTITY_MATERIAL_WORDS = "
+                        + GpuDynamicEntityScene.ENTITY_MATERIAL_WORDS_PER_RECORD + "u;",
+                label + " material descriptor stride"
+        );
+        requireSourceMarker(
+                source,
+                "const uint P17_ENTITY_MATERIAL_FLAG_HAS_ALBEDO = "
+                        + GpuDynamicEntityScene.ENTITY_MATERIAL_FLAG_HAS_ALBEDO + "u;",
+                label + " generic albedo flag"
+        );
+        requireSourceMarker(
+                source,
+                "const uint P17_ENTITY_MATERIAL_FLAG_HAS_EMISSIVE = "
+                        + GpuDynamicEntityScene.ENTITY_MATERIAL_FLAG_HAS_EMISSIVE + "u;",
+                label + " generic emissive flag"
+        );
+        requireSourceMarker(
+                source,
+                "const uint P17_ENTITY_TEXTURE_POOL_BASE = "
+                        + GpuDynamicEntityScene.ENTITY_TEXTURE_POOL_BASE_WORD + "u;",
+                label + " entity texture pool"
+        );
+        requireSourceMarker(source, "HitResult p17TraceStaticRayLimited(", label + " static trace preservation");
+        requireSourceMarker(source, "bool p17TrySectionEntities(", label + " section broad phase");
+        requireSourceMarker(source, "HitResult p17TraceEntityRayLimited(", label + " entity trace");
+        requireSourceMarker(
+                source,
+                "bool p17EntitySceneInterval(",
+                label + " global entity bounds culling"
+        );
+        requireSourceMarker(
+                source,
+                "float sectionSampleDistance = min(sceneEntry + 0.001, sceneExit);",
+                label + " entity DDA starts at bounds entry"
+        );
+        requireSourceMarker(source, "vec2 p17Uv(uint entityBase, uint wordBase)", label + " entity UV fetch");
+        requireSourceMarker(
+                source,
+                "bestUv = uvA * (1.0 - u - v) + uvB * u + uvC * v;",
+                label + " barycentric UV"
+        );
+        requireSourceMarker(
+                source,
+                "bool p17IsEntityMaterial(uint materialId)",
+                label + " generic material range"
+        );
+        requireSourceMarker(
+                source,
+                "uint p17EntityAlbedoArgb(uint entityBase, uint materialId, vec2 uv)",
+                label + " generic albedo texture sampling"
+        );
+        requireSourceMarker(
+                source,
+                "uint p17EntityEmissiveArgb(uint entityBase, uint materialId, vec2 uv)",
+                label + " generic emissive texture sampling"
+        );
+        requireSourceMarker(
+                source,
+                "float p17EntityEmissiveGain(uint entityBase, uint materialId)",
+                label + " per-material emissive gain"
+        );
+        requireSourceMarker(
+                source,
+                "float p17EntityAlphaCutoff(uint entityBase, uint materialId)",
+                label + " per-material alpha cutoff"
+        );
+        requireSourceMarker(
+                source,
+                "float p17EntityRoughness(uint entityBase, uint materialId)",
+                label + " per-material roughness"
+        );
+        requireSourceMarker(
+                source,
+                "float p17EntityMetallic(uint entityBase, uint materialId)",
+                label + " per-material metallic"
+        );
+        requireSourceMarker(
+                source,
+                "float p17EntityReflectionScale(uint entityBase, uint materialId)",
+                label + " per-material reflection scale"
+        );
+        requireSourceMarker(source, "p17UnpackUv(hit.steps)", label + " entity hit UV decode");
+        requireSourceMarker(source, "uintBitsToFloat(scene.data[89])", label + " global entity emissive gain");
+        requireSourceMarker(
+                source,
+                "HitResult traceRayLimited(vec3 origin, vec3 direction, float maxDistance) {",
+                label + " shared nearest-hit entry"
+        );
+        requireSourceMarker(
+                source,
+                "if (p17IsEntityMaterial(candidate.materialId))",
+                label + " P15 opaque entity baseline"
+        );
+        if (source.contains("SPIDER")
+                || source.contains("Spider")
+                || source.contains("spiderEye")) {
+            throw new IllegalStateException(
+                    "P17 production shader still contains entity-specific spider specialization"
+            );
+        }
+        System.out.println(
+                "P17 dynamic-entity shader verification PASS (" + label + "): "
+                        + "sectionBroadPhase=true, globalBounds=true, entrySkip=true, triangles=true, nearestHit=true, uv=true, "
+                        + "genericMaterials=true, albedo=data, optics=data, resourcePackEmission=true, "
+                        + "entitySpecificShaderBranches=false, p15OpaqueBaseline=true"
         );
     }
 
     private static void requireSourceMarker(String source, String marker, String label) {
         if (!source.contains(marker)) {
-            throw new IllegalStateException("P13 moon shader verification missing " + label + ": " + marker);
+            throw new IllegalStateException("Runtime shader verification missing " + label + ": " + marker);
         }
     }
 
@@ -103,7 +743,7 @@ public final class P14ShaderCompileVerifier {
             try {
                 int status = Shaderc.shaderc_result_get_compilation_status(result);
                 if (status != 0) {
-                    printLineRange(source, 1, Math.min(120, source.split("\\R", -1).length));
+                    printLineRange(source, 1, Math.min(160, source.split("\\R", -1).length));
                     throw new IllegalStateException(
                             label + " verification failed: " + Shaderc.shaderc_result_get_error_message(result)
                     );

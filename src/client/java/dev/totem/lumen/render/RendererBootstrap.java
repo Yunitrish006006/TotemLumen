@@ -3,6 +3,7 @@ package dev.totem.lumen.render;
 import dev.totem.lumen.TotemLumenClient;
 import dev.totem.lumen.platform.PlatformProfile;
 import dev.totem.lumen.vulkan.MinecraftVulkanBridge;
+import dev.totem.lumen.vulkan.P12FullBasePipeline;
 import dev.totem.lumen.vulkan.VulkanBackendInfo;
 import dev.totem.lumen.vulkan.VulkanCapabilities;
 import dev.totem.lumen.vulkan.VulkanCapabilityProbe;
@@ -13,6 +14,7 @@ public final class RendererBootstrap {
     private static PlatformProfile platformProfile;
     private static VulkanBackendInfo vulkanBackendInfo;
     private static VulkanCapabilities vulkanCapabilities;
+    private static boolean loggedInteropWait;
 
     private RendererBootstrap() {
     }
@@ -32,13 +34,20 @@ public final class RendererBootstrap {
         }
 
         state = RendererState.WAITING_FOR_DEVICE;
+        TotemLumenClient.LOGGER.info("Renderer state: WAITING_FOR_DEVICE");
     }
 
     public static void tick() {
-        if (state != RendererState.WAITING_FOR_DEVICE) {
-            return;
+        switch (state) {
+            case WAITING_FOR_DEVICE -> detectGraphicsBackend();
+            case WAITING_FOR_VULKAN_INTEROP -> tryInitializeVulkanInterop();
+            case WAITING_FOR_PIPELINE -> pollPipelinePrewarm();
+            default -> {
+            }
         }
+    }
 
+    private static void detectGraphicsBackend() {
         BackendStatus status = BackendProbe.detect();
         if (!status.deviceAvailable()) {
             return;
@@ -55,21 +64,30 @@ public final class RendererBootstrap {
         if (!status.vulkan()) {
             state = RendererState.DISABLED_NON_VULKAN;
             TotemLumenClient.LOGGER.error(
-                    "Totem Lumen requires Minecraft's Vulkan backend. Current backend: {}. No OpenGL fallback will be provided.",
+                    "Renderer state: DISABLED_NON_VULKAN. Totem Lumen requires Minecraft's Vulkan backend. Current backend: {}. No OpenGL fallback will be provided.",
                     status.backendName()
             );
             return;
         }
 
+        state = RendererState.WAITING_FOR_VULKAN_INTEROP;
+        TotemLumenClient.LOGGER.info("Renderer state: WAITING_FOR_VULKAN_INTEROP");
+        tryInitializeVulkanInterop();
+    }
+
+    private static void tryInitializeVulkanInterop() {
         var vulkanDevice = MinecraftVulkanBridge.currentDevice();
         vulkanBackendInfo = MinecraftVulkanBridge.inspect();
         if (vulkanDevice == null || vulkanBackendInfo == null) {
-            TotemLumenClient.LOGGER.error(
-                    "Minecraft reports Vulkan, but Totem Lumen could not access the Vulkan backend. GPU rendering will remain unavailable."
-            );
-            state = RendererState.READY_FOR_SCENE_EXTRACTION;
+            if (!loggedInteropWait) {
+                loggedInteropWait = true;
+                TotemLumenClient.LOGGER.warn(
+                        "Minecraft reports Vulkan, but its Vulkan backend is not accessible to Totem Lumen yet; staying in WAITING_FOR_VULKAN_INTEROP and retrying on later client ticks"
+                );
+            }
             return;
         }
+        loggedInteropWait = false;
 
         vulkanCapabilities = VulkanCapabilityProbe.probe(vulkanDevice, vulkanBackendInfo);
         TotemLumenClient.LOGGER.info(
@@ -91,22 +109,24 @@ public final class RendererBootstrap {
         );
 
         if (!vulkanCapabilities.baselineComputeUsable()) {
+            state = RendererState.DISABLED_UNSUPPORTED_VULKAN;
             TotemLumenClient.LOGGER.error(
-                    "The active Vulkan device does not meet Totem Lumen's minimum compute/storage limits; GPU RT will remain unavailable."
+                    "Renderer state: DISABLED_UNSUPPORTED_VULKAN. The active Vulkan device does not meet Totem Lumen's minimum compute/storage limits."
             );
-        } else if (vulkanCapabilities.canUseMinecraftFrameSubmissionForCompute()) {
-            TotemLumenClient.LOGGER.info(
-                    "Compute integration mode: Minecraft graphics submission (preferred portable path)"
-            );
-            // Pipeline compilation can be very expensive on MoltenVK because it translates SPIR-V
-            // to MSL and invokes the Metal compiler. Start it as soon as the Vulkan device is known,
-            // while resource loading is still in progress, and never make world rendering wait.
-            VulkanComputeProgram.prewarmMainGiPipeline(vulkanDevice);
-        } else {
-            TotemLumenClient.LOGGER.warn(
-                    "Graphics queue lacks compute support; a dedicated compute-queue synchronization path will be required on this device"
-            );
+            return;
         }
+
+        if (!vulkanCapabilities.canUseMinecraftFrameSubmissionForCompute()) {
+            state = RendererState.DISABLED_UNSUPPORTED_VULKAN;
+            TotemLumenClient.LOGGER.error(
+                    "Renderer state: DISABLED_UNSUPPORTED_VULKAN. Minecraft's graphics queue lacks compute support and the dedicated compute-queue synchronization path is not implemented yet."
+            );
+            return;
+        }
+
+        TotemLumenClient.LOGGER.info(
+                "Compute integration mode: Minecraft graphics submission (preferred portable path)"
+        );
 
         if (vulkanCapabilities.hardwareRayTracingExtensionsEnabled()) {
             TotemLumenClient.LOGGER.info("Optional Vulkan hardware RT extensions are already enabled on the Minecraft device");
@@ -114,8 +134,58 @@ public final class RendererBootstrap {
             TotemLumenClient.LOGGER.info("Hardware RT extensions are not required; Vulkan compute voxel RT remains the baseline path");
         }
 
+        // Pipeline compilation can be very expensive on MoltenVK because it translates SPIR-V
+        // to MSL and invokes the Metal compiler. Start it as soon as the Vulkan device is known,
+        // while resource loading is still in progress, and never make world rendering wait.
+        VulkanComputeProgram.prewarmMainGiPipeline(vulkanDevice);
+        state = RendererState.WAITING_FOR_PIPELINE;
+        TotemLumenClient.LOGGER.info(
+                "Renderer state: WAITING_FOR_PIPELINE. Minecraft presentation remains active through bootstrap and full-base compilation; Totem Lumen composites only after a complete full-base frame."
+        );
+        pollPipelinePrewarm();
+    }
+
+    private static void pollPipelinePrewarm() {
+        Throwable shaderFailure = VulkanComputeProgram.mainGiShaderPrewarmFailure();
+        if (shaderFailure != null) {
+            state = RendererState.PIPELINE_FAILED;
+            TotemLumenClient.LOGGER.error(
+                    "Renderer state: PIPELINE_FAILED. Totem Lumen shader prewarm failed; its renderer is disabled for this session while Minecraft continues.",
+                    shaderFailure
+            );
+            return;
+        }
+
+        Throwable pipelineFailure = VulkanComputeProgram.mainGiPipelinePrewarmFailure();
+        if (pipelineFailure != null) {
+            state = RendererState.PIPELINE_FAILED;
+            TotemLumenClient.LOGGER.error(
+                    "Renderer state: PIPELINE_FAILED. Totem Lumen Vulkan pipeline prewarm failed; its renderer is disabled for this session while Minecraft continues.",
+                    pipelineFailure
+            );
+            return;
+        }
+
+        if (!VulkanComputeProgram.mainGiShaderPrewarmReady()
+                || !VulkanComputeProgram.mainGiPipelinePrewarmReady()) {
+            return;
+        }
+
+        var device = MinecraftVulkanBridge.currentDevice();
+        if (device != null) {
+            // Start the expensive production renderer while the player may still be in menus.
+            // Scene storage is bound later after world resources exist.
+            P12FullBasePipeline.prewarm(device);
+        }
+
         state = RendererState.READY_FOR_SCENE_EXTRACTION;
-        TotemLumenClient.LOGGER.info("Vulkan backend accepted; CPU scene extraction and P3 Vulkan interop are ready");
+        TotemLumenClient.LOGGER.info(
+                "Renderer state: READY_FOR_SCENE_EXTRACTION. Bootstrap is ready and full lighting prewarm has been started."
+        );
+    }
+
+    public static boolean readyForRendering() {
+        return state == RendererState.READY_FOR_SCENE_EXTRACTION;
     }
 
     public static RendererState state() {

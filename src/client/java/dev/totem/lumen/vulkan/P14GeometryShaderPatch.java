@@ -28,6 +28,15 @@ final class P14GeometryShaderPatch {
         }
 
         String voxelHelpers = """
+                uint voxelWordAtSection(ivec3 voxel, ivec3 sectionCoord, int slot) {
+                    if (slot < 0) return 0u;
+
+                    ivec3 local = voxel - sectionCoord * 16;
+                    uint index = uint((local.y << 8) | (local.z << 4) | local.x);
+                    uint voxelBase = VOXEL_BASE + uint(slot) * VOXELS_PER_SECTION;
+                    return scene.data[voxelBase + index];
+                }
+
                 uint voxelWordAt(ivec3 voxel) {
                     ivec3 sectionCoord = ivec3(
                         floorDiv16(voxel.x),
@@ -35,12 +44,7 @@ final class P14GeometryShaderPatch {
                         floorDiv16(voxel.z)
                     );
                     int slot = findSectionSlot(sectionCoord);
-                    if (slot < 0) return 0u;
-
-                    ivec3 local = voxel - sectionCoord * 16;
-                    uint index = uint((local.y << 8) | (local.z << 4) | local.x);
-                    uint voxelBase = VOXEL_BASE + uint(slot) * VOXELS_PER_SECTION;
-                    return scene.data[voxelBase + index];
+                    return voxelWordAtSection(voxel, sectionCoord, slot);
                 }
 
                 uint materialAt(ivec3 voxel) {
@@ -198,8 +202,18 @@ final class P14GeometryShaderPatch {
                     float distance = 0.0;
                     uint maxSteps = scene.data[6];
 
+                    // Cache the static section lookup for the whole 16x16x16 section. The old
+                    // path recomputed floorDiv16 + sectionHash + open-address probing for every
+                    // voxel step of every primary/GI/shadow/transmission ray.
+                    ivec3 sectionCoord = ivec3(
+                        floorDiv16(voxel.x),
+                        floorDiv16(voxel.y),
+                        floorDiv16(voxel.z)
+                    );
+                    int sectionSlot = findSectionSlot(sectionCoord);
+
                     for (uint iteration = 0u; iteration < maxSteps; iteration++) {
-                        uint voxelWord = voxelWordAt(voxel);
+                        uint voxelWord = voxelWordAtSection(voxel, sectionCoord, sectionSlot);
                         uint materialId = voxelWord & 0xFFFFu;
                         if (materialId != 0u) {
                             uint geometryCode = voxelWord >> 16u;
@@ -242,18 +256,33 @@ final class P14GeometryShaderPatch {
                             voxel.x += step.x;
                             normal = ivec3(-step.x, 0, 0);
                             tMax.x += tDelta.x;
+                            if ((step.x > 0 && voxel.x == (sectionCoord.x + 1) * 16)
+                                    || (step.x < 0 && voxel.x == sectionCoord.x * 16 - 1)) {
+                                sectionCoord.x += step.x;
+                                sectionSlot = findSectionSlot(sectionCoord);
+                            }
                         } else if (tMax.y <= tMax.z) {
                             distance = tMax.y;
                             if (distance > maxDistance) break;
                             voxel.y += step.y;
                             normal = ivec3(0, -step.y, 0);
                             tMax.y += tDelta.y;
+                            if ((step.y > 0 && voxel.y == (sectionCoord.y + 1) * 16)
+                                    || (step.y < 0 && voxel.y == sectionCoord.y * 16 - 1)) {
+                                sectionCoord.y += step.y;
+                                sectionSlot = findSectionSlot(sectionCoord);
+                            }
                         } else {
                             distance = tMax.z;
                             if (distance > maxDistance) break;
                             voxel.z += step.z;
                             normal = ivec3(0, 0, -step.z);
                             tMax.z += tDelta.z;
+                            if ((step.z > 0 && voxel.z == (sectionCoord.z + 1) * 16)
+                                    || (step.z < 0 && voxel.z == sectionCoord.z * 16 - 1)) {
+                                sectionCoord.z += step.z;
+                                sectionSlot = findSectionSlot(sectionCoord);
+                            }
                         }
                     }
 
@@ -269,7 +298,7 @@ final class P14GeometryShaderPatch {
         source = source.substring(0, traceStart) + traceReplacement + source.substring(traceEnd);
 
         TotemLumenClient.LOGGER.info(
-                "P14 block-local geometry shader patch active: packedVoxelBits=material16+geometry16, fullCubeFastPath=true, slabBottom=true, slabTop=true"
+                "P14 block-local geometry shader patch active: packedVoxelBits=material16+geometry16, fullCubeFastPath=true, sectionSlotCache=true, slabBottom=true, slabTop=true"
         );
         return source;
     }

@@ -2,10 +2,12 @@ package dev.totem.lumen.vulkan;
 
 import dev.totem.lumen.TotemLumenClient;
 import dev.totem.lumen.geometry.BlockModelMeshRegistry;
+import dev.totem.lumen.geometry.QuadSurface;
+import dev.totem.lumen.material.PbrTextureHandleRegistry;
 
 import java.nio.ByteBuffer;
 
-/** Packs the shared P14C/P14D model registry plus P14E cutout masks into the scene-buffer tail. */
+/** Packs the shared P14C/P14D model registry into the scene-buffer tail after the pixel target. */
 public final class P14ModelMeshGpuUploader {
     private static volatile long lastBaseByteOffset = -1L;
     private static volatile long lastCopyBytes;
@@ -14,7 +16,6 @@ public final class P14ModelMeshGpuUploader {
     private static int lastLoggedMeshCount = -1;
     private static int lastLoggedDynamicMeshCount = -1;
     private static int lastLoggedQuadCount = -1;
-    private static int lastLoggedAlphaMaskCount = -1;
 
     private P14ModelMeshGpuUploader() {
     }
@@ -37,29 +38,18 @@ public final class P14ModelMeshGpuUploader {
 
     private static void packSnapshot(ByteBuffer buffer, BlockModelMeshRegistry.Snapshot snapshot) {
         int pixelBaseWord = buffer.getInt(3 * Integer.BYTES);
-        int width = buffer.getInt(4 * Integer.BYTES);
-        int height = buffer.getInt(5 * Integer.BYTES);
-        int pixelCount = Math.multiplyExact(width, height);
+        int capacityWidth = buffer.getInt(51 * Integer.BYTES);
+        int capacityHeight = buffer.getInt(52 * Integer.BYTES);
+        int pixelCount = Math.multiplyExact(capacityWidth, capacityHeight);
         int modelBaseWord = Math.addExact(pixelBaseWord, pixelCount);
         int descriptorBaseWord = modelBaseWord;
-        int quadBaseWord = Math.addExact(
-                descriptorBaseWord,
-                P14ModelMeshGpuLayout.MESH_DESCRIPTOR_WORDS
-        );
+        int quadBaseWord = Math.addExact(descriptorBaseWord, P14ModelMeshGpuLayout.MESH_DESCRIPTOR_WORDS);
 
         int usedQuadWords = Math.multiplyExact(
                 snapshot.totalQuads(),
                 P14ModelMeshGpuLayout.QUAD_WORDS_PER_RECORD
         );
-        int alphaMaskBaseWord = Math.addExact(quadBaseWord, usedQuadWords);
-        int usedMaskWords = Math.multiplyExact(
-                snapshot.alphaMasks().size(),
-                P14ModelMeshGpuLayout.ALPHA_MASK_WORDS_PER_RECORD
-        );
-        int usedWords = Math.addExact(
-                P14ModelMeshGpuLayout.MESH_DESCRIPTOR_WORDS,
-                Math.addExact(usedQuadWords, usedMaskWords)
-        );
+        int usedWords = Math.addExact(P14ModelMeshGpuLayout.MESH_DESCRIPTOR_WORDS, usedQuadWords);
         long endBytes = (long) (modelBaseWord + usedWords) * Integer.BYTES;
         if (endBytes > buffer.capacity()) {
             throw new IllegalStateException(
@@ -73,48 +63,51 @@ public final class P14ModelMeshGpuUploader {
             putWord(buffer, descriptorBaseWord + word, 0);
         }
 
-        // Mesh id zero is never traversed, so its descriptor stores scene-tail metadata instead:
-        // word 0 = absolute alpha-mask pool base; word 1 = number of live non-opaque masks.
-        putWord(buffer, descriptorBaseWord, alphaMaskBaseWord);
-        putWord(buffer, descriptorBaseWord + 1, snapshot.alphaMasks().size());
-
         for (BlockModelMeshRegistry.Mesh mesh : snapshot.meshes()) {
             int descriptor = descriptorBaseWord
                     + mesh.id() * P14ModelMeshGpuLayout.MESH_DESCRIPTOR_WORDS_PER_RECORD;
             putWord(buffer, descriptor, mesh.firstQuad());
             putWord(buffer, descriptor + 1, mesh.quadCount());
 
+            float[] positions = mesh.positions();
+            QuadSurface[] surfaces = mesh.surfaces();
             for (int quad = 0; quad < mesh.quadCount(); quad++) {
                 int quadWord = quadBaseWord
-                        + (mesh.firstQuad() + quad) * P14ModelMeshGpuLayout.QUAD_WORDS_PER_RECORD;
-
-                int positionBase = quad * BlockModelMeshRegistry.FLOATS_PER_QUAD;
-                for (int i = 0; i < BlockModelMeshRegistry.FLOATS_PER_QUAD; i++) {
+                        + (mesh.firstQuad() + quad)
+                        * P14ModelMeshGpuLayout.QUAD_WORDS_PER_RECORD;
+                int positionOffset = quad * BlockModelMeshRegistry.FLOATS_PER_QUAD;
+                for (int word = 0; word < P14ModelMeshGpuLayout.QUAD_POSITION_WORDS; word++) {
                     putWord(
                             buffer,
-                            quadWord++,
-                            Float.floatToRawIntBits(mesh.positions()[positionBase + i])
+                            quadWord + word,
+                            Float.floatToRawIntBits(positions[positionOffset + word])
                     );
                 }
 
-                int uvBase = quad * BlockModelMeshRegistry.UV_FLOATS_PER_QUAD;
-                for (int i = 0; i < BlockModelMeshRegistry.UV_FLOATS_PER_QUAD; i++) {
+                QuadSurface surface = surfaces[quad];
+                int uvWord = quadWord + P14ModelMeshGpuLayout.QUAD_UV_BASE_WORD;
+                for (int vertex = 0; vertex < 4; vertex++) {
                     putWord(
                             buffer,
-                            quadWord++,
-                            Float.floatToRawIntBits(mesh.uvs()[uvBase + i])
+                            uvWord + vertex * 2,
+                            Float.floatToRawIntBits(surface.u(vertex))
+                    );
+                    putWord(
+                            buffer,
+                            uvWord + vertex * 2 + 1,
+                            Float.floatToRawIntBits(surface.v(vertex))
                     );
                 }
 
-                putWord(buffer, quadWord, mesh.alphaMaskIds()[quad]);
-            }
-        }
-
-        for (BlockModelMeshRegistry.AlphaMask alphaMask : snapshot.alphaMasks()) {
-            int maskWord = alphaMaskBaseWord
-                    + (alphaMask.id() - 1) * P14ModelMeshGpuLayout.ALPHA_MASK_WORDS_PER_RECORD;
-            for (int word : alphaMask.words()) {
-                putWord(buffer, maskWord++, word);
+                int textureHandle = surface.textured()
+                        ? PbrTextureHandleRegistry.handleFor(surface.spriteId())
+                        : 0;
+                if (textureHandle < 0) textureHandle = 0;
+                putWord(
+                        buffer,
+                        quadWord + P14ModelMeshGpuLayout.QUAD_TEXTURE_HANDLE_WORD,
+                        textureHandle
+                );
             }
         }
 
@@ -124,21 +117,17 @@ public final class P14ModelMeshGpuUploader {
         copyPending = true;
 
         int dynamicMeshes = BlockModelMeshRegistry.dynamicMeshCount();
-        int alphaMasks = snapshot.alphaMasks().size();
         if (lastLoggedMeshCount != snapshot.meshes().size()
                 || lastLoggedDynamicMeshCount != dynamicMeshes
-                || lastLoggedQuadCount != snapshot.totalQuads()
-                || lastLoggedAlphaMaskCount != alphaMasks) {
+                || lastLoggedQuadCount != snapshot.totalQuads()) {
             lastLoggedMeshCount = snapshot.meshes().size();
             lastLoggedDynamicMeshCount = dynamicMeshes;
             lastLoggedQuadCount = snapshot.totalQuads();
-            lastLoggedAlphaMaskCount = alphaMasks;
             TotemLumenClient.LOGGER.info(
-                    "P14 model GPU registry: meshes={}, dynamicMeshes={}, quads={}, alphaMasks={}, bytes={}, maxBytes={}",
+                    "P14 model GPU registry: meshes={}, dynamicMeshes={}, quads={}, bytes={}, maxBytes={}",
                     snapshot.meshes().size(),
                     dynamicMeshes,
                     snapshot.totalQuads(),
-                    alphaMasks,
                     lastCopyBytes,
                     P14ModelMeshGpuLayout.MAX_STORAGE_BYTES
             );

@@ -2,8 +2,8 @@ package dev.totem.lumen.mixin;
 
 import com.mojang.blaze3d.vertex.PoseStack;
 import dev.totem.lumen.integration.BlockEntityRenderGeometryCapture;
+import dev.totem.lumen.integration.EntityRenderGeometryCapture;
 import net.minecraft.client.model.Model;
-import net.minecraft.client.model.geom.ModelPart;
 import net.minecraft.client.renderer.SubmitNodeStorage;
 import net.minecraft.client.renderer.feature.ModelFeatureRenderer;
 import net.minecraft.client.renderer.rendertype.RenderType;
@@ -13,15 +13,18 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
-/** Captures model/model-part commands only while a BlockEntityRenderDispatcher P14D scope is active. */
+/** Captures model commands for the active P14D block-entity or P17 entity scope. */
 @Mixin(SubmitNodeStorage.class)
 public abstract class SubmitNodeStorageBlockEntityMixin {
-    @Inject(
-            method = "submitModel(Lnet/minecraft/client/model/Model;Ljava/lang/Object;Lcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/rendertype/RenderType;IIILnet/minecraft/client/renderer/texture/TextureAtlasSprite;ILnet/minecraft/client/renderer/feature/ModelFeatureRenderer$CrumblingOverlay;)V",
-            at = @At("HEAD"),
-            require = 0
-    )
-    private <S> void totemLumen$captureModel(
+    private static final String SUBMIT_MODEL_26_2 =
+            "submitModel(Lnet/minecraft/client/model/Model;Ljava/lang/Object;"
+                    + "Lcom/mojang/blaze3d/vertex/PoseStack;"
+                    + "Lnet/minecraft/client/renderer/rendertype/RenderType;III"
+                    + "Lnet/minecraft/client/renderer/texture/TextureAtlasSprite;I"
+                    + "Lnet/minecraft/client/renderer/feature/ModelFeatureRenderer$CrumblingOverlay;)V";
+
+    @Inject(method = SUBMIT_MODEL_26_2, at = @At("HEAD"), require = 1)
+    private <S> void totemLumen$captureModelWithSprite(
             Model<? super S> model,
             S state,
             PoseStack poseStack,
@@ -35,25 +38,6 @@ public abstract class SubmitNodeStorageBlockEntityMixin {
             CallbackInfo ci
     ) {
         BlockEntityRenderGeometryCapture.captureModel(model, state, poseStack);
-    }
-
-    @Inject(
-            method = "submitModelPart(Lnet/minecraft/client/model/geom/ModelPart;Lcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/rendertype/RenderType;IILnet/minecraft/client/renderer/texture/TextureAtlasSprite;ILnet/minecraft/client/renderer/feature/ModelFeatureRenderer$CrumblingOverlay;I)V",
-            at = @At("HEAD"),
-            require = 0
-    )
-    private void totemLumen$captureModelPart(
-            ModelPart modelPart,
-            PoseStack poseStack,
-            RenderType renderType,
-            int light,
-            int overlay,
-            TextureAtlasSprite sprite,
-            int tintedColor,
-            ModelFeatureRenderer.CrumblingOverlay crumblingOverlay,
-            int outlineColor,
-            CallbackInfo ci
-    ) {
-        BlockEntityRenderGeometryCapture.captureModelPart(modelPart, poseStack);
+        EntityRenderGeometryCapture.captureModel(model, state, poseStack);
     }
 }

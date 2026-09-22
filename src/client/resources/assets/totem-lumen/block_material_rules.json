@@ -1,0 +1,169 @@
+{
+  "rules": [
+    {
+      "match": { "contains": "fire" },
+      "emission_color": [1.0, 0.55, 0.22]
+    },
+    {
+      "match": { "contains": "torch" },
+      "emission_color": [1.0, 0.55, 0.22]
+    },
+    {
+      "match": { "contains": "lantern" },
+      "emission_color": [1.0, 0.55, 0.22]
+    },
+    {
+      "match": { "contains": "campfire" },
+      "emission_color": [1.0, 0.55, 0.22],
+      "light_radius_scale": 1.0,
+      "light_intensity_scale": 1.0
+    },
+    {
+      "match": { "contains": "jack_o_lantern" },
+      "emission_color": [1.0, 0.55, 0.22]
+    },
+
+    {
+      "match": { "contains": "soul_" },
+      "emission_color": [0.28, 0.78, 1.0]
+    },
+    {
+      "match": { "contains": "redstone_torch" },
+      "emission_color": [1.0, 0.18, 0.06]
+    },
+    {
+      "match": { "contains": "lava" },
+      "emission_color": [1.0, 0.32, 0.08]
+    },
+    {
+      "match": { "contains": "magma" },
+      "emission_color": [1.0, 0.32, 0.08]
+    },
+    {
+      "match": { "contains": "ochre_froglight" },
+      "emission_color": [1.0, 0.76, 0.35]
+    },
+    {
+      "match": { "contains": "verdant_froglight" },
+      "emission_color": [0.58, 1.0, 0.62]
+    },
+    {
+      "match": { "contains": "pearlescent_froglight" },
+      "emission_color": [1.0, 0.62, 0.92]
+    },
+    {
+      "match": { "contains": "sea_lantern" },
+      "emission_color": [0.62, 0.90, 1.0]
+    },
+    {
+      "match": { "contains": "conduit" },
+      "emission_color": [0.62, 0.90, 1.0]
+    },
+    {
+      "match": { "contains": "end_rod" },
+      "emission_color": [0.88, 0.84, 1.0]
+    },
+    {
+      "match": { "contains": "glowstone" },
+      "emission_color": [1.0, 0.78, 0.42]
+    },
+    {
+      "match": { "contains": "shroomlight" },
+      "emission_color": [1.0, 0.48, 0.18]
+    },
+
+    {
+      "match": { "prefix": "minecraft:white_" },
+      "transmission_color": [1.00, 0.98, 0.95]
+    },
+    {
+      "match": { "prefix": "minecraft:orange_" },
+      "transmission_color": [1.00, 0.58, 0.28]
+    },
+    {
+      "match": { "prefix": "minecraft:magenta_" },
+      "transmission_color": [0.90, 0.42, 0.92]
+    },
+    {
+      "match": { "prefix": "minecraft:light_blue_" },
+      "transmission_color": [0.48, 0.76, 1.00]
+    },
+    {
+      "match": { "prefix": "minecraft:yellow_" },
+      "transmission_color": [1.00, 0.88, 0.32]
+    },
+    {
+      "match": { "prefix": "minecraft:lime_" },
+      "transmission_color": [0.58, 0.92, 0.34]
+    },
+    {
+      "match": { "prefix": "minecraft:pink_" },
+      "transmission_color": [1.00, 0.58, 0.74]
+    },
+    {
+      "match": { "prefix": "minecraft:gray_" },
+      "transmission_color": [0.48, 0.50, 0.52]
+    },
+    {
+      "match": { "prefix": "minecraft:light_gray_" },
+      "transmission_color": [0.76, 0.78, 0.80]
+    },
+    {
+      "match": { "prefix": "minecraft:cyan_" },
+      "transmission_color": [0.34, 0.78, 0.82]
+    },
+    {
+      "match": { "prefix": "minecraft:purple_" },
+      "transmission_color": [0.67, 0.42, 0.86]
+    },
+    {
+      "match": { "prefix": "minecraft:blue_" },
+      "transmission_color": [0.38, 0.48, 0.92]
+    },
+    {
+      "match": { "prefix": "minecraft:brown_" },
+      "transmission_color": [0.62, 0.44, 0.28]
+    },
+    {
+      "match": { "prefix": "minecraft:green_" },
+      "transmission_color": [0.40, 0.70, 0.34]
+    },
+    {
+      "match": { "prefix": "minecraft:red_" },
+      "transmission_color": [0.96, 0.34, 0.30]
+    },
+    {
+      "match": { "prefix": "minecraft:black_" },
+      "transmission_color": [0.24, 0.25, 0.29]
+    },
+
+    {
+      "match": { "exact": "minecraft:glass" },
+      "opacity": 0.05,
+      "ior": 1.5,
+      "roughness": 0.05,
+      "reflection_scale": 1.0
+    },
+    {
+      "match": { "exact": "minecraft:glass_pane" },
+      "opacity": 0.05,
+      "ior": 1.5,
+      "roughness": 0.07,
+      "reflection_scale": 1.0
+    },
+    {
+      "match": { "suffix": "_stained_glass" },
+      "opacity": 0.12,
+      "ior": 1.5,
+      "roughness": 0.05,
+      "reflection_scale": 1.0
+    },
+    {
+      "match": { "suffix": "_stained_glass_pane" },
+      "opacity": 0.12,
+      "ior": 1.5,
+      "roughness": 0.07,
+      "reflection_scale": 1.0
+    }
+  ]
+}

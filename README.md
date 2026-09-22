@@ -19,20 +19,22 @@ The server gameplay subsystem never initializes or depends on Vulkan. A dedicate
 
 ## Current milestone
 
-`0.1.0-alpha.42` is the Minecraft 26.2 startup hotfix for the Alpha 41 P14E validation build. It keeps the Alpha 41 renderer changes and updates P14D submit-node capture to the current concrete `submitModel` ABI.
+The current development baseline is **Alpha 59**.
 
-- P14D `SubmitNodeStorage` / `SubmitNodeCollection` mixins now target the exact Minecraft 26.2 `submitModel(Model, state, PoseStack, RenderType, light, overlay, color, TextureAtlasSprite, outlineColor, CrumblingOverlay)` descriptor instead of also registering the removed legacy overload;\n- static block-model extraction retains sprite-local UVs and compact 32x32 one-bit alpha masks;
-- transparent texture pixels reject triangle hits before they can occlude camera, shadow, GI, P13 environment, P15 transmission or P16 reflection rays;
-- canonical six-face models only keep the full-cube fast path when their emitted sprites are fully opaque, so leaf-like cutout cubes remain alpha-tested model meshes;
-- non-opaque masks are deduplicated and packed after the actually used model-quad records; the 32-bit per-voxel ABI is unchanged;
-- animated sprite masks use the union of unique frames to keep ray geometry stable;
-- texture lookup failures remain conservatively opaque instead of deleting geometry.
+Client renderer state:
 
-Alpha 40's procedural Overworld moon and weak ray-traced moonlight remain the current environment baseline. Lunar phases are still deferred because the packed environment state does not yet carry Minecraft's day/phase index.
+- Alpha 51+ uses direct world takeover: once a complete Totem frame is ready, Totem presents into Minecraft's main render target and vanilla level drawing is skipped. HUD/GUI remain independent.
+- Alpha 53 bounds internal ray-tracing pixel work per quality preset so fullscreen framebuffer size no longer multiplies RT cost without limit.
+- Alpha 57 retunes GI to 1/2/3 samples and ray distance to 32/64/96/128 blocks with 64 as the default.
+- Alpha 58/59 replace the old renderer on/off UI with a persistent **Minecraft / Totem Lumen render profile** directly inside Video Settings -> Quality & Performance.
+- P14E exact water/lava geometry is implemented and shares the nearest-hit path with static geometry, entities and reflection; detailed runtime geometry/optics validation remains.
+- P17 Player/LivingEntity dynamic geometry and the generic entity material ABI are implemented. Spider-eye emissive behavior is runtime-validated. Items, vehicles, projectiles, display/text/custom renderers, armor/equipment, alpha silhouettes and first-person view models remain follow-ups.
+- P18A/P18B/P18C LabPBR integration is implemented: renderer-resolved texture identity, bounded PBR texture data, shared normal/AO/roughness/metal/emission shading, alpha coverage and animated PBR frame selection. P18D entity/block-entity fidelity remains.
+- Alpha 49's contiguous P17 upload is the accepted MoltenVK upload path after Alpha 48's split-copy regression.
+- Whole-mega-shader optimization is not the current strategy: shaderc Osize failed with SPIR-V ID overflow. Future performance work targets measured hot paths, reusable primary-hit/material data and smaller bounded passes.
+- Server gameplay lighting GL0 is complete; GL1/GL2 are implemented pending runtime validation; GL4 profiling/scale validation is the next server-side gate.
 
-Alpha 39's P14D block-entity geometry capture remains the current geometry baseline. `BlockEntityRenderDispatcher` scopes renderer-resolved `Model` / `ModelPart` capture into Totem Lumen-owned block-local quads, stable mutable `MODEL_MESH` ids preserve animation without exhausting the 12-bit mesh space, and chunk/level lifecycle recycles dynamic mesh ids. Bell/chest/shulker animation correctness still requires in-game validation; exact flowing/sloped fluid surfaces remain the next pre-P17 geometry domain.
-
-Alpha 38's persistent Vulkan pipeline cache remains enabled. Apple M4 + MoltenVK 1.4.2 runtime cache-hit measurements reduced P12-P15 pipeline creation from about 475.7 seconds to 49 ms and P16 from about 71.5 seconds to 73 ms. Pipeline caching remains an optimization, not a correctness dependency. Dedicated-server runtime/TPS stress validation is still deferred while client renderer development continues.
+The authoritative milestone/status list lives in [docs/ROADMAP.md](docs/ROADMAP.md), with detailed design/status documents indexed by [docs/PLANNING_INDEX.md](docs/PLANNING_INDEX.md).
 
 ## Runtime requirements
 
@@ -42,6 +44,8 @@ Alpha 38's persistent Vulkan pipeline cache remains enabled. Apple M4 + MoltenVK
 - Java 25 (normally provided by the Minecraft launcher/server runtime)
 - A Minecraft-compatible Vulkan backend **only when using the client renderer**
 
+The client renderer must actually be launched with Minecraft's Vulkan backend. Totem Lumen intentionally has no OpenGL renderer or fallback. Development `runClient` already requests Vulkan; normal launcher profiles must also be configured to use Vulkan.
+
 A dedicated server does not need Vulkan, MoltenVK, a GPU renderer, or shader tooling.
 
 On Apple Silicon, the client uses the Vulkan backend exposed by Minecraft. Minecraft handles the MoltenVK-to-Metal translation; users should not install MoltenVK separately.
@@ -50,18 +54,42 @@ On Apple Silicon, the client uses the Vulkan backend exposed by Minecraft. Minec
 
 ```text
 Server world/data packs
-  -> Totem Lumen authoritative RGB gameplay light field
-  -> spawning / future gameplay queries
+  -> authoritative RGB gameplay-light rules / packed gameplay-light field
+  -> hostile-spawn and future deterministic gameplay queries
 
-Minecraft client extraction
-  -> static BlockStateModel quad extraction
-  -> block-entity renderer Model/ModelPart capture
-  -> immutable/copy-owned scene + shared mutable mesh slots
-  -> Vulkan GPU scene + shared generic model mesh pool
-  -> P12-P15 base compute pass
-       -> P13 sun / sky / moon environment
-  -> P16 reflection compute pass
-  -> composition
+Minecraft client extraction / submission
+  -> static BlockStateModel geometry
+  -> block-entity Model/ModelPart geometry
+  -> exact P14E fluid faces
+  -> dynamic Player/LivingEntity geometry
+  -> P18 renderer-resolved texture/material data
+  -> immutable/copy-owned CPU scene
+  -> Vulkan GPU scene
+       -> static voxel/model regions
+       -> fluid tail
+       -> P17 dynamic entity/material tail
+       -> P18 texture/material tail
+  -> unified full-lighting compute
+       -> primary visibility
+       -> P13 environment / sun / moon / stars
+       -> P15 transmission
+       -> local lights
+       -> one-bounce GI
+       -> P17 entity nearest-hit
+       -> P18 LabPBR shading
+  -> optional P16 reflection compute pass
+  -> direct world takeover presentation into Minecraft main render target
+  -> hand / HUD / GUI
+```
+
+Current execution direction:
+
+```text
+Alpha 59 baseline
+  -> finish P14D/P14E/P17/P18 runtime and coverage gates
+  -> primary-hit/G-buffer + reflection/GI performance architecture
+  -> GL4 gameplay-light profiling / GL5 hardening
+  -> P19+ hardware RT / ReSTIR / adaptive sampling / dynamic resolution
 ```
 
 Development client runs request the Vulkan backend.
@@ -79,13 +107,17 @@ CI installs Gradle 9.5.1 explicitly.
 
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — client/server layering and hard architectural boundaries.
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — renderer roadmap and completed milestones.
-- [`docs/P13_OVERWORLD_MOON.md`](docs/P13_OVERWORLD_MOON.md) — Overworld moon disk, moonlight transport, limitations and runtime validation.
-- [`docs/P14C_GENERIC_BLOCK_MODELS.md`](docs/P14C_GENERIC_BLOCK_MODELS.md) — generic static block-model extraction, GPU ABI, geometry-domain matrix, limits and validation plan.
-- [`docs/P14D_BLOCK_ENTITY_GEOMETRY.md`](docs/P14D_BLOCK_ENTITY_GEOMETRY.md) — block-entity renderer geometry capture, stable mutable mesh slots, lifecycle, limitations and runtime validation.\n- [`docs/P14E_ALPHA_CUTOUT.md`](docs/P14E_ALPHA_CUTOUT.md) — sprite UV capture, compact alpha masks, shared-ray cutout semantics and runtime validation.
-- [`docs/P16_REFLECTION_ROUGHNESS.md`](docs/P16_REFLECTION_ROUGHNESS.md) — reflection model, surface profiles, ABI choice, limitations and validation plan.
+- [`docs/P13_OVERWORLD_MOON.md`](docs/P13_OVERWORLD_MOON.md) — Alpha 40 Overworld night sky: moon disk, eight-step lunar phase, procedural stars, transport and runtime validation.
+- [`docs/P14C_GENERIC_BLOCK_MODELS.md`](docs/P14C_GENERIC_BLOCK_MODELS.md) — generic static block-model extraction, generic mesh ABI/GPU layout, geometry-domain completeness matrix and future-proofing rules.
+- [`docs/P14D_BLOCK_ENTITY_GEOMETRY.md`](docs/P14D_BLOCK_ENTITY_GEOMETRY.md) — block-entity renderer geometry capture, stable mutable mesh slots, lifecycle, limitations and runtime validation.
+- [`docs/P14E_EXACT_FLUID_GEOMETRY.md`](docs/P14E_EXACT_FLUID_GEOMETRY.md) — exact renderer-resolved water/lava geometry, GPU ABI, optics and runtime validation.
+- [`docs/P17_DYNAMIC_ENTITIES.md`](docs/P17_DYNAMIC_ENTITIES.md) — Player/LivingEntity capture, dynamic broad phase, generic material ABI, upload/performance work and remaining entity renderer coverage.
+- [`docs/P18_RESOURCE_PACK_LABPBR.md`](docs/P18_RESOURCE_PACK_LABPBR.md) — LabPBR resource-pack integration, shared PBR shading, alpha coverage, animated textures and P18D follow-ups.
+- [`docs/RENDERER_SETTINGS.md`](docs/RENDERER_SETTINGS.md) — Alpha 59 render profiles, Quality & Performance UI, runtime quality ranges and scene-header controls.
+- [`docs/P16_REFLECTION_ROUGHNESS.md`](docs/P16_REFLECTION_ROUGHNESS.md) — surface fallback values, reflection model, performance scope and runtime validation.
 - [`docs/P16_MOLTENVK_PIPELINE_STALL.md`](docs/P16_MOLTENVK_PIPELINE_STALL.md) — Alpha 34/35 MoltenVK pipeline findings and the Alpha 36 multi-pass resolution.
 - [`docs/P16_MULTIPASS_SPLIT.md`](docs/P16_MULTIPASS_SPLIT.md) — Alpha 36 pass boundaries, synchronization, fallback semantics and runtime validation.
-- [`docs/PERSISTENT_VULKAN_PIPELINE_CACHE.md`](docs/PERSISTENT_VULKAN_PIPELINE_CACHE.md) — Alpha 37 startup measurements, Alpha 38 cache persistence design, fallback semantics and validation gate.
+- [`docs/PERSISTENT_VULKAN_PIPELINE_CACHE.md`](docs/PERSISTENT_VULKAN_PIPELINE_CACHE.md) — Alpha 37 startup measurements, Alpha 38 VkPipelineCache persistence design, fallback semantics and validation gate.
 - [`docs/SERVER_GAMEPLAY_LIGHTING.md`](docs/SERVER_GAMEPLAY_LIGHTING.md) — authoritative RGB gameplay-lighting design, resource estimates, budgets and validation plan.
 - [`docs/GAMEPLAY_LIGHTING_ROADMAP.md`](docs/GAMEPLAY_LIGHTING_ROADMAP.md) — implementation phases and follow-up work for the server subsystem.
 - [`docs/LIGHTING_WORLD_RULES.md`](docs/LIGHTING_WORLD_RULES.md) — data-pack block lighting rule format.

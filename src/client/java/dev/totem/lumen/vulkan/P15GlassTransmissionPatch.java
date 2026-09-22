@@ -25,42 +25,32 @@ final class P15GlassTransmissionPatch {
                     vec3 transmission;
                 };
 
-                vec3 p15TintRgb(uint tint) {
-                    if (tint == 1u) return vec3(1.00, 0.98, 0.95);
-                    if (tint == 2u) return vec3(1.00, 0.58, 0.28);
-                    if (tint == 3u) return vec3(0.90, 0.42, 0.92);
-                    if (tint == 4u) return vec3(0.48, 0.76, 1.00);
-                    if (tint == 5u) return vec3(1.00, 0.88, 0.32);
-                    if (tint == 6u) return vec3(0.58, 0.92, 0.34);
-                    if (tint == 7u) return vec3(1.00, 0.58, 0.74);
-                    if (tint == 8u) return vec3(0.48, 0.50, 0.52);
-                    if (tint == 9u) return vec3(0.76, 0.78, 0.80);
-                    if (tint == 10u) return vec3(0.34, 0.78, 0.82);
-                    if (tint == 11u) return vec3(0.67, 0.42, 0.86);
-                    if (tint == 12u) return vec3(0.38, 0.48, 0.92);
-                    if (tint == 13u) return vec3(0.62, 0.44, 0.28);
-                    if (tint == 14u) return vec3(0.40, 0.70, 0.34);
-                    if (tint == 15u) return vec3(0.96, 0.34, 0.30);
-                    if (tint == 16u) return vec3(0.24, 0.25, 0.29);
-                    return vec3(1.0);
-                }
-
-                vec4 p15GeometryTransmission(uint geometryCode) {
+                bool p15GeometryIsTransmissive(uint geometryCode) {
                     uint family = geometryCode & 0xF000u;
-                    if (family == 0x8000u) {
-                        uint tint = geometryCode & 0x1Fu;
-                        float scalar = tint == 0u ? 0.95 : 0.88;
-                        return vec4(p15TintRgb(tint), scalar);
-                    }
+                    if (family == 0x8000u) return true;
                     if (family == 0x4000u) {
                         uint params = geometryCode & 0x0FFFu;
-                        if ((params & 0x10u) != 0u) {
-                            uint tint = (params >> 5u) & 0x1Fu;
-                            float scalar = tint == 0u ? 0.95 : 0.88;
-                            return vec4(p15TintRgb(tint), scalar);
-                        }
+                        return (params & 0x10u) != 0u;
                     }
-                    return vec4(0.0);
+                    return false;
+                }
+
+                vec4 p15MaterialTransmission(uint materialId, uint geometryCode) {
+                    if (!p15GeometryIsTransmissive(geometryCode)) return vec4(0.0);
+                    uint materialCount = scene.data[23];
+                    if (materialId >= materialCount) return vec4(0.0);
+                    uint base = MATERIAL_EMISSION_BASE
+                            + materialId * MATERIAL_EMISSION_WORDS_PER_RECORD;
+                    uint flags = scene.data[base + 11u];
+                    if ((flags & 0x40u) == 0u) return vec4(0.0);
+
+                    vec3 tint = vec3(
+                        uintBitsToFloat(scene.data[base + 4u]),
+                        uintBitsToFloat(scene.data[base + 5u]),
+                        uintBitsToFloat(scene.data[base + 6u])
+                    );
+                    float opacity = clamp(uintBitsToFloat(scene.data[base + 7u]), 0.0, 1.0);
+                    return vec4(clamp(tint, vec3(0.0), vec3(1.0)), 1.0 - opacity);
                 }
 
                 float p15VoxelExitDistance(vec3 point, vec3 direction, ivec3 voxel) {
@@ -98,7 +88,11 @@ final class P15GlassTransmissionPatch {
                     float remaining = maxDistance;
                     float traveled = 0.0;
 
+                    uint maxLayers = clamp(scene.data[61], 1u, 8u);
+                    float exitEpsilon = max(uintBitsToFloat(scene.data[62]), 0.00001);
+                    float minTransmission = clamp(uintBitsToFloat(scene.data[63]), 0.0, 1.0);
                     for (uint layer = 0u; layer < 8u; layer++) {
+                        if (layer >= maxLayers) break;
                         HitResult candidate = traceRayLimited(cursorOrigin, dir, remaining);
                         if (candidate.hit == 0u) {
                             result.hit = candidate;
@@ -107,8 +101,8 @@ final class P15GlassTransmissionPatch {
                         }
 
                         uint geometryCode = geometryAt(candidate.voxel);
-                        vec4 optical = p15GeometryTransmission(geometryCode);
-                        if (optical.a <= 0.0001) {
+                        vec4 optical = p15MaterialTransmission(candidate.materialId, geometryCode);
+                        if (optical.a <= minTransmission) {
                             candidate.distance += traveled;
                             result.hit = candidate;
                             return result;
@@ -121,7 +115,7 @@ final class P15GlassTransmissionPatch {
                             dir,
                             candidate.voxel
                         );
-                        float advance = candidate.distance + exitDistance + 0.002;
+                        float advance = candidate.distance + exitDistance + exitEpsilon;
                         if (isnan(advance) || isinf(advance) || advance >= remaining) {
                             result.hit.hit = 0u;
                             result.hit.distance = maxDistance;
@@ -289,14 +283,15 @@ final class P15GlassTransmissionPatch {
         );
         source = replaceRequiredOnce(
                 source,
-                "color = packRgba(unpackRgb(indirectColor) * 1.6, 255u);",
-                "color = packRgba(unpackRgb(indirectColor) * 1.6 * p15PrimaryTransmission, 255u);",
+                "color = packRgba(unpackRgb(indirectColor) * uintBitsToFloat(scene.data[84]), 255u);",
+                "color = packRgba(unpackRgb(indirectColor) * uintBitsToFloat(scene.data[84])"
+                        + " * p15PrimaryTransmission, 255u);",
                 "indirect debug transmission"
         );
         source = patchGiCompositeCall(source);
 
         TotemLumenClient.LOGGER.info(
-                "P15 glass transmission active: clearGlass=true, stainedGlassRgb=true, panes=true, maxTransparentLayers=8, sun+moon+sky+local+GI=true, refraction=false"
+                "P15 transmission active: materialTable=true, runtimeLayers=true, runtimeAttenuation=true, panes=true, sun+moon+sky+local+GI=true, refraction=false"
         );
         return source;
     }
@@ -313,27 +308,33 @@ final class P15GlassTransmissionPatch {
         String local = source.substring(localStart, localEnd);
         local = replaceRequiredOnce(
                 local,
+                "float sampleLighting = 0.0;",
+                "vec3 sampleLighting = vec3(0.0);",
+                "area light sample accumulator"
+        );
+        local = replaceRequiredOnce(
+                local,
                 "float visibility = 1.0;",
                 "vec3 lightTransmission = vec3(1.0);",
-                "local light visibility declaration"
+                "local area light visibility declaration"
         );
         local = replaceRequiredOnce(
                 local,
                 "HitResult blocker = traceRayLimited(shadowOrigin, lightDirection, shadowMaxDistance);",
                 "lightTransmission = p15RayTransmission(shadowOrigin, lightDirection, shadowMaxDistance);",
-                "local light blocker trace"
+                "local area light blocker trace"
         );
         local = replaceRequiredOnce(
                 local,
                 "visibility = blocker.hit == 0u ? 1.0 : 0.0;",
                 "// P15 RGB transmission already includes visibility and stained-glass tint.",
-                "local light blocker result"
+                "local area light blocker result"
         );
         local = replaceRequiredOnce(
                 local,
-                "lighting += lightColor * (2.4 * nDotL * attenuation * intensity * visibility);",
-                "lighting += lightColor * lightTransmission * (2.4 * nDotL * attenuation * intensity);",
-                "local light accumulation"
+                "sampleLighting += nDotL * emitterCosine * attenuation * visibility;",
+                "sampleLighting += lightTransmission * (nDotL * emitterCosine * attenuation);",
+                "local area light sample accumulation"
         );
         return source.substring(0, localStart) + local + source.substring(localEnd);
     }

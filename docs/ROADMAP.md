@@ -1,5 +1,33 @@
 # Totem Lumen Roadmap
 
+## Current project state — Alpha 59
+
+Current validated/runtime baseline:
+
+- **Minecraft 26.2 / Fabric / Vulkan on Apple M4 + MoltenVK 1.4.2** is the primary validated platform.
+- **Alpha 51 world takeover is validated**: Totem Lumen presents directly into Minecraft's main render target and cancels vanilla level drawing once the Totem frame is ready. F1 hides HUD/GUI only and no longer reveals a second vanilla world underneath.
+- **Alpha 52 presentation orientation is validated** after correcting the final Vulkan-to-screen Y orientation.
+- **Alpha 53 fullscreen RT pixel budgets are validated**: fullscreen no longer multiplies internal ray-tracing workload with desktop framebuffer size.
+- Lowest-quality runtime on the validated takeover path reached roughly **96–120 FPS depending on window mode/scene**, versus the old ~17–26 FPS path before world takeover and upload fixes.
+- **Alpha 54/55 reflective-material fallback** keeps metallic/LabPBR surfaces visible when P16 reflections are disabled; Alpha 55 removes the O0 hot-path helper call.
+- **Alpha 56–59 settings UI work** moves renderer selection and Totem quality controls into Minecraft's Video Settings / Quality & Performance flow. Alpha 59 is CI-validated and awaits in-world UX validation.
+- **Alpha 57 quality tuning** uses GI 1/2/3 samples and a 32/64/96/128-block ray-distance ladder with 64 as the default.
+- **P17 dynamic-entity tracing and generic material ABI are implemented.** Player/LivingEntity geometry and spider-eye emissive material behavior have received runtime validation; remaining renderer families/material fidelity are listed below.
+- **P14E exact fluids are implemented / CI pass**; detailed in-world geometry/optics validation remains.
+- **P18A/P18B/P18C LabPBR integration is implemented / CI pass**, including textured surfaces, alpha coverage, normal/AO/roughness/metal/emission decode and animated PBR frame selection. P18D entity/block-entity fidelity remains.
+- **Server gameplay lighting GL0 is complete; GL1/GL2 are implemented pending runtime validation; GL4 profiling is the next server-side gate.**
+
+Current high-priority remaining work:
+
+1. Finish P17 coverage for dropped items, vehicles, projectiles, leashes/flames, display/text/custom renderers, armor/equipment, alpha silhouettes and first-person hand/held items.
+2. Complete P14D specialized block-entity command families and P14E fluid runtime validation.
+3. Complete P18D entity/block-entity texture/material fidelity and broader LabPBR runtime acceptance.
+4. Fix P17 temporal-history invalidation so moving entities do not invalidate the entire frame history globally.
+5. Continue GPU performance work: avoid repeated primary-hit/material resolution, introduce a reusable primary-hit/G-buffer path, reduce P16 full-frame primary retrace, and split the O0 mega-shader into smaller optimizable passes where measurements justify it.
+6. Run GL4 gameplay-light profiling/scale validation, then GL5 hardening.
+7. After the compute baseline is stable, evaluate P19+ hardware RT, ReSTIR/adaptive sampling and dynamic-resolution/upscaling work.
+
+
 ## P0 - Vulkan-only bootstrap
 Status: **Apple Silicon runtime verified on Apple M4 / MoltenVK 1.4.2**; native Windows/Linux Vulkan validation still pending.
 
@@ -215,18 +243,161 @@ Runtime gate:
 
 Target for first meaningful public alpha.
 
-## P13-P18 - Scene quality
+## P13-P16 - Scene quality baseline
+Status: **implemented through Alpha 41; remaining runtime validation is milestone-specific**
 
-P14E alpha-cutout status: **IMPLEMENTED / CI gate; runtime visual validation pending**. Static model quads retain sprite-local UVs and compact alpha masks so transparent texels do not block shared camera/shadow/GI/transmission/reflection rays.
+Implemented baseline:
+- P13 sun/sky/dimension environment lighting, including Alpha 40's procedural moon, resolved eight-step lunar phase and deterministic star field.
+- P14 hybrid block geometry: compact primitives, generic `BlockStateModel` meshes and P14D block-entity `Model` / `ModelPart` capture.
+- P15 clear/stained glass transmission reused by sun/moon/sky/local/GI paths.
+- P16 bounded rough/metallic reflection in a split compute pass with independent failure semantics.
+- Alpha 38 persistent driver/device-keyed Vulkan pipeline cache.
+- Alpha 41 explicit Vulkan device/interop/pipeline readiness state machine; no false-ready renderer state.
 
-- Sun/sky/dimension environment lighting.
-- Reflection/roughness.
-- Glass/water transmission.
-- Hybrid geometry for slabs/stairs/cutouts.
-- Dynamic entities.
-- Resource pack / LabPBR integration.
+Known geometry/material gaps after Alpha 41 include dynamic world entities, exact flowing/sloped fluid surfaces, texture-alpha silhouettes, specialized renderer command families and resource-pack/PBR material data.
+
+## P17 - Dynamic entities (`0.1.0-alpha.42+`)
+Status: **IMPLEMENTED / CI PASS; core Player/LivingEntity path partially runtime-validated, coverage/fidelity follow-ups remain**
+
+P17A — capture + CPU broad phase: **IMPLEMENTED / CI PASS**
+- Player/general `LivingEntity` scopes capture renderer-resolved Minecraft `Model` geometry.
+- Temporary render states bind to stable `(dimension, Entity.getId())` identities.
+- Retained snapshots are immutable/Minecraft-object-free and preserve absolute CPU world coordinates at double precision.
+- Entity AABBs are binned into overlapping 16x16x16 sections with bounded candidate lists and explicit overflow diagnostics.
+- Minecraft 26.2 entity/mixin descriptors are verified against the actual client runtime classes in CI.
+
+P17B — bounded Vulkan scene ABI + upload: **IMPLEMENTED / CI PASS**
+- 256 dynamic entity descriptors, 65,536 entity quads, 512 section-candidate hash buckets and 32 candidates/section form the first measured-capacity baseline.
+- GPU descriptors use integer section origins plus section-local floats to preserve far-world precision.
+- Entity data occupies a separate scene tail after the existing pixel/P14 regions; the 32-bit voxel record is unchanged.
+- Entity pose/movement/lifecycle revisions repack and copy only the P17 tail instead of re-uploading static section voxels.
+- Entity-scene changes conservatively disable temporal-history reads for that frame until P17 hit identity is integrated into history validation.
+
+P17C — shared nearest-hit integration: **IMPLEMENTED / CI PASS; runtime validation active**
+- Dynamic entity triangles compete with static voxel/model geometry for nearest ray distance.
+- The shared hit path is compiled into primary visibility and P16 reflection, and is reused by shadow/GI/environment consumers through the common trace entry.
+- Alpha 42 is not visually complete until this path is runtime-validated.
+
+P17D — generic entity material ABI: **IMPLEMENTED / CI GATED; fidelity coverage remains**
+- Generic albedo/emissive texture sampling and optical scalars are data-driven through the entity material ABI.
+- Spider/cave-spider eye emission has been runtime-validated without spider-specific shader branches.
+- Remaining work includes skin/texture-alpha hit rejection, armor/equipment, render-layer-specific materials and non-Model renderer families.
+
+Canonical P17 design/runtime gate: [`P17_DYNAMIC_ENTITIES.md`](P17_DYNAMIC_ENTITIES.md).
+
+## P14E - Exact fluid geometry (`0.1.0-alpha.43`)
+Status: **IMPLEMENTED / CI PASS; Apple M4 runtime revalidation pending after first capacity fix**
+
+- Minecraft 26.2 `FluidRenderer` resolved faces are the source of truth for water/lava geometry.
+- P14E-A renderer capture is active on Apple M4 and has captured flowing lava in-world.
+- P14E-B uses Fluid ABI v2 with exact block-coordinate lookup and a separate bounded GPU tail.
+- First Apple M4 run exposed a dimension-wide cache packing bug at `17,216 / 16,384` cells; the fix now filters GPU packing through P5's ordered nearest/resident section window.
+- If a pathological resident window still exceeds the fixed budget, nearer fluid cells are retained and farther cells are dropped with a warning rather than disabling the renderer.
+- Nonresident fluid-cache revisions no longer trigger redundant fluid-tail uploads or temporal-history invalidation.
+- P14E-C exact triangles participate in the shared nearest-hit path used by full base/P17/P16 shader variants.
+- P14E-D water transmission uses unlit Minecraft fluid tint; water reflection uses the same exact surface/normal; lava is emissive/opaque.
+- Remaining gate is in-world geometry/optics validation: slopes, waterfalls/lavafalls, section boundaries, waterlogged coexistence, live updates, underwater transitions, transmission/reflection and bounded diagnostics.
+
+Canonical P14E design/runtime log: [`P14E_EXACT_FLUID_GEOMETRY.md`](P14E_EXACT_FLUID_GEOMETRY.md).
+
+## P18 - Resource pack / LabPBR integration
+Status: **P18A/P18B/P18C IMPLEMENTED / CI PASS; runtime visual acceptance and P18D fidelity follow-up remain**
+
+Implemented baseline:
+- renderer-resolved sprite identity and sprite-local UV retention;
+- LabPBR 1.3 normal/AO/height and specular/roughness/F0/metal/emission decode contract;
+- bounded GPU PBR texture scene and full-cube surface table;
+- shared PBR shading in the full base and P16 reflection paths;
+- alpha-zero ray-visible holes and stochastic intermediate-alpha coverage for generic textured geometry;
+- animated albedo/normal/specular frame order/timing with game-tick selection and auxiliary-map timeline inheritance;
+- surface-emission separation so emissive textures/material rules do not force an entire block model to glow.
+
+Remaining:
+- P18D block-entity and entity material fidelity;
+- armor/equipment/render-layer-specific material identity;
+- wider runtime visual acceptance across representative LabPBR packs;
+- sub-tick interpolation for `interpolate:true` and P18E height/POM/secondary channels remain deferred.
+
+Canonical document: [`P18_RESOURCE_PACK_LABPBR.md`](P18_RESOURCE_PACK_LABPBR.md).
+
+## Current execution order
+
+```text
+Alpha 59 current baseline
+  -> remaining P14D/P14E/P17/P18 runtime + coverage gates
+  -> primary-hit/G-buffer and reflection/GI performance architecture
+  -> GL4 gameplay-light profiling / GL5 hardening
+  -> P19+ hardware RT / ReSTIR / adaptive sampling / dynamic resolution
+```
 
 ## P19+ - Optional hardware RT and advanced sampling
 - Feature-detected Vulkan acceleration structures and RT pipeline.
 - Compute backend remains available and supported.
 - ReSTIR/adaptive sampling/dynamic resolution/upscaling considered only after the baseline renderer is stable.
+
+
+## Alpha 47 performance probe
+
+Alpha 47 adds an F9 pass-isolation probe for the persistent ~17 FPS issue observed even at 50% internal resolution, GI Low, Shadow Low and reflections disabled. F9 cycles Normal -> Hard Shadow -> Local Lights -> Indirect GI -> GI Composite. Each mode discards 10 warmup completions, averages 30 submit-to-complete samples, then logs average milliseconds and effective Totem FPS. This intentionally measures the one-frame-in-flight fence completion interval that currently gates new Totem dispatches.
+
+An Osize experiment for the 132k-character unified full-base shader was rejected before runtime because shaderc failed optimization with SPIR-V ID overflow. The next architecture decision therefore depends on pass-isolation measurements rather than assuming optimizer codegen can rescue the mega-shader.
+
+
+## Alpha 48 P17 split upload
+
+Alpha 48 targets the CPU/upload side exposed by the Alpha 47 performance probe. Dynamic-entity pose changes no longer repack stable entity material textures. P17 upload is split into metadata, actual used texture texels, and actual used quad ranges instead of copying one contiguous span across the fixed 262,144-texel reserved texture pool. Geometry-only updates preserve the material descriptor and texture payload and copy only metadata plus active quads. Performance-probe logs also include the most recent P17 CPU pack time and upload byte count.
+
+
+## Alpha 49 P17 contiguous-upload regression fix
+
+Alpha 48's disjoint P17 metadata/texture/quad flush+copy path regressed runtime performance on Apple Silicon/MoltenVK. Alpha 49 restores one contiguous P17 GPU upload range, matching the proven Alpha 47 submission shape, while retaining the Alpha 48 CPU optimization that skips entity material texture re-sampling during pose-only updates. The performance probe continues to log P17 pack time and contiguous upload bytes.
+
+
+## Alpha 50 secondary-GI visibility experiment
+
+Alpha 50 tested collapsing secondary-GI sky/sun/moon visibility into one conservative transmission query. The build was CI-valid but did not become the accepted performance baseline because runtime performance regressed. The accepted optimization baseline therefore remained Alpha 49 until the Alpha 51 world-takeover change. The Alpha 50 experiment is retained as evidence that reducing secondary visibility rays alone was not the dominant bottleneck in the tested scene.
+
+
+## Alpha 51 direct world takeover
+
+Alpha 51 removes the temporary HUD-overlay presentation path. Minecraft 26.2 level extraction continues every frame and Totem compute is submitted from END_EXTRACTION, but once a complete Totem frame is available the LevelRenderer drawing phase is cancelled. The latest Totem output is blitted directly into GameRenderer.mainRenderTarget before later hand/HUD/GUI stages. F1 therefore hides only HUD/GUI and must not reveal the vanilla world underneath. Startup, recompilation and renderer-failure states keep vanilla level drawing as a fallback until takeover is ready. Output/history resources now match the active internal resolution instead of allocating a HIGH-resolution padded presentation texture.
+
+
+## Alpha 52 world-takeover presentation orientation
+
+Alpha 52 keeps the Alpha 51 direct LevelRenderer takeover and fixes Vulkan/world-target vertical orientation by flipping only the final presentation row. Ray generation, temporal history and reprojection stay in the original logical pixel coordinates; the split P16 reflection pass uses the same flipped presentation index before adding reflected radiance.
+
+
+## Alpha 53 fullscreen RT pixel budgets
+
+Alpha 53 fixes fullscreen performance scaling after direct world takeover. Internal resolution presets are no longer unbounded percentages of the desktop framebuffer: LOW remains 50% up to a 512x288-equivalent pixel budget, BALANCED remains 67% up to 768x432, and HIGH remains native up to 1280x720. Smaller/windowed viewports keep the percentage behavior; larger fullscreen viewports upscale the bounded Totem output instead of multiplying ray-tracing dispatch cost with desktop resolution.
+
+
+## Alpha 54 reflective-material fallback
+
+Alpha 54 fixes reflective/metallic materials turning black when the P16 reflection pass is disabled or temporarily unavailable after a render-target resize. P18 now suppresses metallic diffuse energy only while the reflection pass is actually active. Header word 46 now represents effective reflection-pass availability (user setting enabled and P16 bound/ready), so reflection-off and reflection-binding states keep a visible diffuse fallback instead of zeroing metallic surfaces.
+
+
+## Alpha 55 inline metallic fallback
+
+Alpha 55 preserves the Alpha 54 reflection-off metallic fallback but removes the helper-function call from full-base shader hot paths. The production full-base shader is compiled at shaderc O0, so the helper was not guaranteed to inline. Environment, GI, local-light and composite paths now use the direct uniform expression `1.0 - metallic * float(scene.data[46])`, keeping reflection-off metals visible without adding a function-call boundary per shaded surface.
+
+
+## Alpha 56 integrated Video Settings
+
+Alpha 56 moves Totem Lumen's runtime renderer controls directly into Minecraft's Video Settings list. The Totem master toggle remains available there at all times. While Totem Lumen is enabled, vanilla controls that only affect the replaced world renderer are locked: graphics preset, smooth lighting/ambient occlusion, entity shadows, cloud mode/range, weather radius, cutout leaves, improved transparency, chunk-section fade, and vanilla texture filtering. Render distance, simulation distance, entity distance and display/interface controls remain adjustable because they still affect scene availability or non-world presentation. Disabling Totem immediately unlocks the vanilla renderer controls again.
+
+
+## Alpha 57 GI quality and ray-distance tuning
+
+Alpha 57 separates GI sampling from the shared shadow-quality enum so GI tiers can be tuned independently: LOW=1 sample, BALANCED=2, HIGH=3. Shadow quality remains 1/2/4 samples. Ray distance is retuned from 64/128/256 to 32/64/96/128 blocks, with 64 blocks as the default. Existing configurations above 128 are clamped to 128 on load.
+
+
+## Alpha 58 render profiles
+
+Alpha 58 replaces the Totem renderer on/off control with a persistent render profile selector: Minecraft or Totem Lumen. Video Settings is rebuilt when the profile changes. Minecraft profile shows the normal vanilla renderer controls and omits Totem-specific quality controls. Totem Lumen profile filters vanilla world-render-only options from the native Video Settings option arrays and inserts Totem GI, shadow, ray-distance, internal-resolution, reflection, temporal and denoise controls. Shared display/interface controls plus render/simulation/entity distance remain available in both profiles. Legacy rendererEnabled config is migrated automatically when renderProfile is absent.
+
+
+## Alpha 59 native Quality & Performance integration
+
+Alpha 59 removes the extra Rendering and Totem Lumen section headers from Video Settings. The render-profile selector and all Totem-specific quality controls are injected directly beneath Minecraft's native Quality & Performance header. Minecraft profile shows the normal vanilla quality controls; Totem Lumen profile filters only the world-render controls Totem replaces and inserts GI, shadow, ray-distance, internal-resolution, reflection, temporal and denoise controls in the same native section. A Minecraft 26.2 verifier now gates the VideoSettingsScreen quality/display/preference option methods and the addOptions injection descriptor.

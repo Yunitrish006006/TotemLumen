@@ -12,12 +12,14 @@ import java.util.function.IntUnaryOperator;
 import java.util.function.ToIntFunction;
 
 /**
- * Builds a compact set of emissive voxel lights plus fixed per-section local light lists.
+ * Builds a compact set of emissive voxel-light descriptors plus fixed per-section local light lists.
  *
  * <p>The input is Minecraft-independent: section snapshots, stable GPU slot lookup and material
  * emission metadata. Each resident GPU section slot receives at most
  * {@link #MAX_LIGHTS_PER_SECTION} nearby light indices, so shaders never scan every light in the
- * scene.</p>
+ * scene. Area emitters keep the voxel-center position and are expanded to sampled emitting faces in
+ * the shader. Point emitters carry an explicit block-local anchor so thin sources such as torches
+ * illuminate from the flame instead of the voxel center.</p>
  */
 public final class GpuSectionLightLists {
     public static final int MAX_GLOBAL_LIGHTS = 256;
@@ -39,7 +41,18 @@ public final class GpuSectionLightLists {
                 slotResolver,
                 (EmissionResolver) materialId -> {
                     int level = emissionForMaterialId.applyAsInt(materialId);
-                    return new Emission(level, 1.0f, 1.0f, 1.0f);
+                    return new Emission(
+                            level,
+                            1.0f,
+                            1.0f,
+                            1.0f,
+                            1.0f,
+                            1.0f,
+                            false,
+                            0.5f,
+                            0.5f,
+                            0.5f
+                    );
                 }
         );
     }
@@ -126,19 +139,23 @@ public final class GpuSectionLightLists {
                         int blockX = section.key().x() * SectionVoxelData.SIZE + localX;
                         int blockY = section.key().y() * SectionVoxelData.SIZE + localY;
                         int blockZ = section.key().z() * SectionVoxelData.SIZE + localZ;
-                        float radius = Math.max(2.0f, emission.level() + 0.5f);
+                        float radius = Math.max(
+                                0.5f,
+                                Math.max(2.0f, emission.level() + 0.5f) * emission.radiusScale()
+                        );
                         lights.add(new PointLight(
-                                blockX + 0.5f,
-                                blockY + 0.5f,
-                                blockZ + 0.5f,
+                                blockX + emission.anchorX(),
+                                blockY + emission.anchorY(),
+                                blockZ + emission.anchorZ(),
                                 radius,
-                                emission.level() / 15.0f,
+                                emission.level() / 15.0f * emission.intensityScale(),
                                 emission.r(),
                                 emission.g(),
                                 emission.b(),
                                 blockX,
                                 blockY,
-                                blockZ
+                                blockZ,
+                                emission.pointEmitter()
                         ));
                         if (lights.size() >= MAX_GLOBAL_LIGHTS) {
                             break outer;
@@ -175,11 +192,61 @@ public final class GpuSectionLightLists {
         Emission resolve(int materialId);
     }
 
-    public record Emission(int level, float r, float g, float b) {
+    public record Emission(
+            int level,
+            float r,
+            float g,
+            float b,
+            float radiusScale,
+            float intensityScale,
+            boolean pointEmitter,
+            float anchorX,
+            float anchorY,
+            float anchorZ
+    ) {
+        public Emission(int level, float r, float g, float b) {
+            this(level, r, g, b, 1.0f, 1.0f, false, 0.5f, 0.5f, 0.5f);
+        }
+
+        public Emission(
+                int level,
+                float r,
+                float g,
+                float b,
+                float radiusScale,
+                float intensityScale
+        ) {
+            this(
+                    level,
+                    r,
+                    g,
+                    b,
+                    radiusScale,
+                    intensityScale,
+                    false,
+                    0.5f,
+                    0.5f,
+                    0.5f
+            );
+        }
+
         public Emission {
             if (level < 0 || level > 15) {
                 throw new IllegalArgumentException("emission level must be in [0, 15]");
             }
+            if (!Float.isFinite(radiusScale) || radiusScale < 0.0f || radiusScale > 8.0f) {
+                throw new IllegalArgumentException("radiusScale must be finite and in [0, 8]");
+            }
+            if (!Float.isFinite(intensityScale) || intensityScale < 0.0f || intensityScale > 8.0f) {
+                throw new IllegalArgumentException("intensityScale must be finite and in [0, 8]");
+            }
+            if (!normalized(anchorX) || !normalized(anchorY) || !normalized(anchorZ)) {
+                throw new IllegalArgumentException("light anchor components must be in [0, 1]");
+            }
+        }
+
+        private static boolean normalized(float value) {
+            return Float.isFinite(value) && value >= 0.0f && value <= 1.0f;
         }
     }
 
@@ -197,7 +264,8 @@ public final class GpuSectionLightLists {
             float b,
             int blockX,
             int blockY,
-            int blockZ
+            int blockZ,
+            boolean pointEmitter
     ) {
     }
 

@@ -1,6 +1,7 @@
 package dev.totem.lumen.geometry;
 
 import dev.totem.lumen.TotemLumenClient;
+import dev.totem.lumen.geometry.QuadSurface;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -16,94 +17,51 @@ import java.util.function.Predicate;
  * models.
  *
  * <p>Mesh id zero is reserved for an intentionally empty model. Static meshes are deduplicated by
- * immutable geometry plus cutout data. Block-entity meshes instead own stable mutable ids:
- * animation updates replace the geometry behind an existing id rather than consuming a new 12-bit
- * id every frame.</p>
+ * immutable vertex positions. Block-entity meshes instead own stable mutable ids: animation updates
+ * replace the geometry behind an existing id rather than consuming a new 12-bit id every frame.</p>
  */
 public final class BlockModelMeshRegistry {
     public static final int MAX_MESH_ID = 0x0FFF;
     public static final int MAX_QUADS = 65_536;
     public static final int MAX_QUADS_PER_MESH = 512;
     public static final int FLOATS_PER_QUAD = 12;
-    public static final int UV_FLOATS_PER_QUAD = 8;
-
-    public static final int ALPHA_MASK_RESOLUTION = 32;
-    public static final int ALPHA_MASK_WORDS_PER_QUAD =
-            (ALPHA_MASK_RESOLUTION * ALPHA_MASK_RESOLUTION) / Integer.SIZE;
-    public static final int MAX_ALPHA_MASK_ID = 0x0FFF;
 
     private static final Map<MeshKey, Integer> STATIC_IDS = new HashMap<>();
     private static final Map<DynamicMeshKey, Integer> DYNAMIC_IDS = new HashMap<>();
     private static final Map<Integer, StoredMesh> MESHES = new HashMap<>();
     private static final NavigableSet<Integer> REUSABLE_IDS = new TreeSet<>();
 
-    private static final Map<AlphaMaskKey, Integer> ALPHA_MASK_IDS = new HashMap<>();
-    private static final Map<Integer, int[]> ALPHA_MASKS = new HashMap<>();
-
     private static int nextId = 1;
-    private static int nextAlphaMaskId = 1;
     private static int totalQuads;
     private static long revision;
     private static boolean capacityWarningLogged;
     private static boolean perMeshWarningLogged;
-    private static boolean alphaMaskCapacityWarningLogged;
 
     private BlockModelMeshRegistry() {
     }
 
-    /**
-     * Registers an opaque geometry-only mesh. P14D and conservative outline fallbacks use this
-     * overload; UVs and cutout masks are intentionally absent.
-     */
     public static synchronized int register(float[] quadPositions) {
         int quadCount = validatePositions(quadPositions);
-        float[] quadUvs = new float[quadCount * UV_FLOATS_PER_QUAD];
-        int[] alphaMaskWords = new int[quadCount * ALPHA_MASK_WORDS_PER_QUAD];
-        Arrays.fill(alphaMaskWords, -1);
-        return register(quadPositions, quadUvs, alphaMaskWords);
+        return register(quadPositions, untexturedSurfaces(quadCount));
     }
 
-    /**
-     * Registers a static P14C mesh with sprite-local UVs and one 32x32 binary alpha mask per quad.
-     * A mask made entirely of one bits is encoded as mask id zero and has no shader alpha-test cost.
-     */
     public static synchronized int register(
             float[] quadPositions,
-            float[] quadUvs,
-            int[] alphaMaskWords
+            QuadSurface[] quadSurfaces
     ) {
         int quadCount = validatePositions(quadPositions);
-        validateTexturePayload(quadCount, quadUvs, alphaMaskWords);
+        validateSurfaces(quadSurfaces, quadCount);
         if (quadCount == 0) return 0;
         if (quadCount > MAX_QUADS_PER_MESH) {
             logPerMeshCapacity(quadCount);
             return -1;
         }
 
-        float[] canonicalUvs = quadUvs.clone();
-        for (int quad = 0; quad < quadCount; quad++) {
-            int maskBase = quad * ALPHA_MASK_WORDS_PER_QUAD;
-            if (isOpaqueMask(alphaMaskWords, maskBase)) {
-                Arrays.fill(
-                        canonicalUvs,
-                        quad * UV_FLOATS_PER_QUAD,
-                        (quad + 1) * UV_FLOATS_PER_QUAD,
-                        0.0f
-                );
-            }
-        }
-
-        MeshKey key = MeshKey.of(quadPositions, canonicalUvs, alphaMaskWords);
+        MeshKey key = MeshKey.of(quadPositions, quadSurfaces);
         Integer existing = STATIC_IDS.get(key);
         if (existing != null) return existing;
-        if (!hasQuadCapacity(0, quadCount) || !canAllocateId()) {
+        if (!hasQuadCapacity(0, quadCount)) {
             logGlobalCapacity();
-            return -1;
-        }
-
-        int[] alphaMaskIds = resolveAlphaMaskIds(quadCount, alphaMaskWords);
-        if (alphaMaskIds == null) {
-            logAlphaMaskCapacity();
             return -1;
         }
 
@@ -113,16 +71,12 @@ public final class BlockModelMeshRegistry {
             return -1;
         }
 
-        MESHES.put(
+        MESHES.put(id, new StoredMesh(
                 id,
-                new StoredMesh(
-                        id,
-                        quadPositions.clone(),
-                        canonicalUvs,
-                        alphaMaskIds,
-                        false
-                )
-        );
+                quadPositions.clone(),
+                quadSurfaces.clone(),
+                false
+        ));
         STATIC_IDS.put(key, id);
         totalQuads += quadCount;
         revision++;
@@ -147,7 +101,9 @@ public final class BlockModelMeshRegistry {
             if (existing == null || !existing.dynamic) {
                 throw new IllegalStateException("dynamic mesh id is not backed by a dynamic entry: " + existingId);
             }
-            if (MeshKey.of(existing.positions).equals(MeshKey.of(quadPositions))) {
+            QuadSurface[] surfaces = untexturedSurfaces(quadCount);
+            if (MeshKey.of(existing.positions, existing.surfaces)
+                    .equals(MeshKey.of(quadPositions, surfaces))) {
                 return new DynamicUpsertResult(existingId, false, false, true);
             }
             int oldQuadCount = existing.positions.length / FLOATS_PER_QUAD;
@@ -155,7 +111,12 @@ public final class BlockModelMeshRegistry {
                 logGlobalCapacity();
                 return new DynamicUpsertResult(existingId, false, false, false);
             }
-            MESHES.put(existingId, opaqueDynamicMesh(existingId, quadPositions));
+            MESHES.put(existingId, new StoredMesh(
+                    existingId,
+                    quadPositions.clone(),
+                    surfaces,
+                    true
+            ));
             totalQuads += quadCount - oldQuadCount;
             revision++;
             return new DynamicUpsertResult(existingId, false, true, true);
@@ -172,7 +133,12 @@ public final class BlockModelMeshRegistry {
         }
 
         DYNAMIC_IDS.put(key, id);
-        MESHES.put(id, opaqueDynamicMesh(id, quadPositions));
+        MESHES.put(id, new StoredMesh(
+                id,
+                quadPositions.clone(),
+                untexturedSurfaces(quadCount),
+                true
+        ));
         totalQuads += quadCount;
         revision++;
         return new DynamicUpsertResult(id, true, true, true);
@@ -208,22 +174,18 @@ public final class BlockModelMeshRegistry {
         int firstQuad = 0;
         for (int id : ids) {
             StoredMesh stored = MESHES.get(id);
-            float[] positions = stored.positions.clone();
-            float[] uvs = stored.uvs.clone();
-            int[] alphaMaskIds = stored.alphaMaskIds.clone();
-            int quadCount = positions.length / FLOATS_PER_QUAD;
-            meshes.add(new Mesh(id, firstQuad, quadCount, positions, uvs, alphaMaskIds));
+            float[] owned = stored.positions.clone();
+            int quadCount = owned.length / FLOATS_PER_QUAD;
+            meshes.add(new Mesh(
+                    id,
+                    firstQuad,
+                    quadCount,
+                    owned,
+                    stored.surfaces.clone()
+            ));
             firstQuad += quadCount;
         }
-
-        List<Integer> alphaIds = new ArrayList<>(ALPHA_MASKS.keySet());
-        alphaIds.sort(Integer::compareTo);
-        List<AlphaMask> alphaMasks = new ArrayList<>(alphaIds.size());
-        for (int id : alphaIds) {
-            alphaMasks.add(new AlphaMask(id, ALPHA_MASKS.get(id).clone()));
-        }
-
-        return new Snapshot(List.copyOf(meshes), List.copyOf(alphaMasks), firstQuad, revision);
+        return new Snapshot(List.copyOf(meshes), firstQuad, revision);
     }
 
     /** Returns a defensive copy of one currently-live mesh payload, or an empty array for id zero. */
@@ -245,23 +207,8 @@ public final class BlockModelMeshRegistry {
         return totalQuads;
     }
 
-    public static synchronized int alphaMaskCount() {
-        return ALPHA_MASKS.size();
-    }
-
     public static synchronized long revision() {
         return revision;
-    }
-
-    private static StoredMesh opaqueDynamicMesh(int id, float[] positions) {
-        int quadCount = positions.length / FLOATS_PER_QUAD;
-        return new StoredMesh(
-                id,
-                positions.clone(),
-                new float[quadCount * UV_FLOATS_PER_QUAD],
-                new int[quadCount],
-                true
-        );
     }
 
     private static int validatePositions(float[] positions) {
@@ -277,75 +224,31 @@ public final class BlockModelMeshRegistry {
         return positions.length / FLOATS_PER_QUAD;
     }
 
-    private static void validateTexturePayload(
-            int quadCount,
-            float[] uvs,
-            int[] alphaMaskWords
-    ) {
-        if (uvs == null || uvs.length != quadCount * UV_FLOATS_PER_QUAD) {
-            throw new IllegalArgumentException("Quad UV array must contain 8 floats per quad");
+    private static void validateSurfaces(QuadSurface[] surfaces, int quadCount) {
+        if (surfaces == null) {
+            throw new IllegalArgumentException("quad surfaces cannot be null");
         }
-        for (float value : uvs) {
-            if (!Float.isFinite(value)) {
-                throw new IllegalArgumentException("model UV coordinate must be finite");
-            }
-        }
-        if (alphaMaskWords == null
-                || alphaMaskWords.length != quadCount * ALPHA_MASK_WORDS_PER_QUAD) {
+        if (surfaces.length != quadCount) {
             throw new IllegalArgumentException(
-                    "Alpha mask payload must contain "
-                            + ALPHA_MASK_WORDS_PER_QUAD
-                            + " words per quad"
+                    "quad surface count must match geometry: surfaces="
+                            + surfaces.length + ", quads=" + quadCount
             );
         }
-    }
-
-    private static int[] resolveAlphaMaskIds(int quadCount, int[] rawWords) {
-        Map<AlphaMaskKey, Integer> pending = new HashMap<>();
-        int proposedNext = nextAlphaMaskId;
-
-        for (int quad = 0; quad < quadCount; quad++) {
-            int base = quad * ALPHA_MASK_WORDS_PER_QUAD;
-            if (isOpaqueMask(rawWords, base)) continue;
-            AlphaMaskKey key = AlphaMaskKey.of(rawWords, base);
-            if (ALPHA_MASK_IDS.containsKey(key) || pending.containsKey(key)) continue;
-            if (proposedNext > MAX_ALPHA_MASK_ID) return null;
-            pending.put(key, proposedNext++);
-        }
-
-        for (Map.Entry<AlphaMaskKey, Integer> entry : pending.entrySet()) {
-            ALPHA_MASK_IDS.put(entry.getKey(), entry.getValue());
-            ALPHA_MASKS.put(entry.getValue(), entry.getKey().copyWords());
-        }
-        nextAlphaMaskId = proposedNext;
-
-        int[] ids = new int[quadCount];
-        for (int quad = 0; quad < quadCount; quad++) {
-            int base = quad * ALPHA_MASK_WORDS_PER_QUAD;
-            if (isOpaqueMask(rawWords, base)) {
-                ids[quad] = 0;
-            } else {
-                Integer id = ALPHA_MASK_IDS.get(AlphaMaskKey.of(rawWords, base));
-                if (id == null) throw new IllegalStateException("alpha mask registration lost");
-                ids[quad] = id;
+        for (QuadSurface surface : surfaces) {
+            if (surface == null) {
+                throw new IllegalArgumentException("quad surface cannot be null");
             }
         }
-        return ids;
     }
 
-    private static boolean isOpaqueMask(int[] words, int base) {
-        for (int i = 0; i < ALPHA_MASK_WORDS_PER_QUAD; i++) {
-            if (words[base + i] != -1) return false;
-        }
-        return true;
+    private static QuadSurface[] untexturedSurfaces(int quadCount) {
+        QuadSurface[] surfaces = new QuadSurface[quadCount];
+        Arrays.fill(surfaces, QuadSurface.UNTEXTURED);
+        return surfaces;
     }
 
     private static boolean hasQuadCapacity(int replacingQuads, int replacementQuads) {
         return totalQuads - replacingQuads + replacementQuads <= MAX_QUADS;
-    }
-
-    private static boolean canAllocateId() {
-        return !REUSABLE_IDS.isEmpty() || nextId <= MAX_MESH_ID;
     }
 
     private static int allocateId() {
@@ -376,17 +279,6 @@ public final class BlockModelMeshRegistry {
         }
     }
 
-    private static void logAlphaMaskCapacity() {
-        if (!alphaMaskCapacityWarningLogged) {
-            alphaMaskCapacityWarningLogged = true;
-            TotemLumenClient.LOGGER.warn(
-                    "P14 alpha-cutout mask capacity reached: masks={}/{}; affected meshes use conservative fallback",
-                    ALPHA_MASKS.size(),
-                    MAX_ALPHA_MASK_ID
-            );
-        }
-    }
-
     public record DynamicMeshKey(String dimensionId, int x, int y, int z) {
         public DynamicMeshKey {
             if (dimensionId == null || dimensionId.isBlank()) {
@@ -403,40 +295,22 @@ public final class BlockModelMeshRegistry {
             int firstQuad,
             int quadCount,
             float[] positions,
-            float[] uvs,
-            int[] alphaMaskIds
+            QuadSurface[] surfaces
     ) {
         public Mesh {
             if (id <= 0 || id > MAX_MESH_ID) {
                 throw new IllegalArgumentException("mesh id out of range: " + id);
             }
-            if (firstQuad < 0 || quadCount < 0
-                    || positions.length != quadCount * FLOATS_PER_QUAD
-                    || uvs.length != quadCount * UV_FLOATS_PER_QUAD
-                    || alphaMaskIds.length != quadCount) {
+            if (firstQuad < 0 || quadCount < 0 || positions.length != quadCount * FLOATS_PER_QUAD) {
                 throw new IllegalArgumentException("invalid mesh payload");
             }
+            validateSurfaces(surfaces, quadCount);
         }
     }
 
-    public record AlphaMask(int id, int[] words) {
-        public AlphaMask {
-            if (id <= 0 || id > MAX_ALPHA_MASK_ID
-                    || words.length != ALPHA_MASK_WORDS_PER_QUAD) {
-                throw new IllegalArgumentException("invalid alpha mask payload");
-            }
-        }
-    }
-
-    public record Snapshot(
-            List<Mesh> meshes,
-            List<AlphaMask> alphaMasks,
-            int totalQuads,
-            long revision
-    ) {
+    public record Snapshot(List<Mesh> meshes, int totalQuads, long revision) {
         public Snapshot {
             meshes = List.copyOf(meshes);
-            alphaMasks = List.copyOf(alphaMasks);
             if (totalQuads < 0 || totalQuads > MAX_QUADS) {
                 throw new IllegalArgumentException("invalid total quad count: " + totalQuads);
             }
@@ -446,79 +320,39 @@ public final class BlockModelMeshRegistry {
     private record StoredMesh(
             int id,
             float[] positions,
-            float[] uvs,
-            int[] alphaMaskIds,
+            QuadSurface[] surfaces,
             boolean dynamic
     ) {
     }
 
     private static final class MeshKey {
         private final int[] bits;
+        private final QuadSurface[] surfaces;
         private final int hash;
 
-        private MeshKey(int[] bits) {
+        private MeshKey(int[] bits, QuadSurface[] surfaces) {
             this.bits = bits;
-            this.hash = Arrays.hashCode(bits);
+            this.surfaces = surfaces;
+            this.hash = 31 * Arrays.hashCode(bits) + Arrays.hashCode(surfaces);
         }
 
-        static MeshKey of(float[] positions) {
-            return of(positions, new float[0], new int[0]);
-        }
-
-        static MeshKey of(float[] positions, float[] uvs, int[] alphaMaskWords) {
-            int[] bits = new int[positions.length + uvs.length + alphaMaskWords.length];
-            int cursor = 0;
-            for (float value : positions) {
-                float normalized = value == 0.0f ? 0.0f : value;
-                if (!Float.isFinite(normalized)) {
+        static MeshKey of(float[] positions, QuadSurface[] surfaces) {
+            int[] bits = new int[positions.length];
+            for (int index = 0; index < positions.length; index++) {
+                float value = positions[index] == 0.0f ? 0.0f : positions[index];
+                if (!Float.isFinite(value)) {
                     throw new IllegalArgumentException("model vertex coordinate must be finite");
                 }
-                bits[cursor++] = Float.floatToIntBits(normalized);
+                bits[index] = Float.floatToIntBits(value);
             }
-            for (float value : uvs) {
-                float normalized = value == 0.0f ? 0.0f : value;
-                if (!Float.isFinite(normalized)) {
-                    throw new IllegalArgumentException("model UV coordinate must be finite");
-                }
-                bits[cursor++] = Float.floatToIntBits(normalized);
-            }
-            for (int word : alphaMaskWords) bits[cursor++] = word;
-            return new MeshKey(bits);
+            return new MeshKey(bits, surfaces.clone());
         }
 
         @Override
         public boolean equals(Object other) {
-            return other instanceof MeshKey key && Arrays.equals(bits, key.bits);
-        }
-
-        @Override
-        public int hashCode() {
-            return hash;
-        }
-    }
-
-    private static final class AlphaMaskKey {
-        private final int[] words;
-        private final int hash;
-
-        private AlphaMaskKey(int[] words) {
-            this.words = words;
-            this.hash = Arrays.hashCode(words);
-        }
-
-        static AlphaMaskKey of(int[] source, int base) {
-            return new AlphaMaskKey(
-                    Arrays.copyOfRange(source, base, base + ALPHA_MASK_WORDS_PER_QUAD)
-            );
-        }
-
-        int[] copyWords() {
-            return words.clone();
-        }
-
-        @Override
-        public boolean equals(Object other) {
-            return other instanceof AlphaMaskKey key && Arrays.equals(words, key.words);
+            return other instanceof MeshKey key
+                    && Arrays.equals(bits, key.bits)
+                    && Arrays.equals(surfaces, key.surfaces);
         }
 
         @Override

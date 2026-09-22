@@ -1,6 +1,8 @@
 package dev.totem.lumen.vulkan;
 
 import com.mojang.blaze3d.GpuFormat;
+import com.mojang.blaze3d.pipeline.RenderTarget;
+import com.mojang.blaze3d.systems.RenderPass;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.textures.FilterMode;
 import com.mojang.blaze3d.textures.GpuTexture;
@@ -11,7 +13,10 @@ import dev.totem.lumen.TotemLumenClient;
 import dev.totem.lumen.gpu.GpuSectionLightLists;
 import dev.totem.lumen.gpu.GpuSectionLookupTable;
 import dev.totem.lumen.gpu.GpuSectionSlotAllocator;
+import dev.totem.lumen.integration.LabPbrTextureRegistry;
+import dev.totem.lumen.integration.RendererRuntimeTuningRegistry;
 import dev.totem.lumen.integration.SceneExtractionBridge;
+import dev.totem.lumen.render.RendererSettings;
 import dev.totem.lumen.scene.FrameSnapshot;
 import dev.totem.lumen.scene.SectionKey;
 import dev.totem.lumen.scene.SectionSnapshot;
@@ -19,6 +24,7 @@ import dev.totem.lumen.scene.SectionVoxelData;
 import dev.totem.lumen.vulkan.resource.VulkanOwnedBuffer;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.renderer.RenderPipelines;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.vulkan.VK10;
 import org.lwjgl.vulkan.VkBufferCopy;
@@ -32,6 +38,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -41,7 +48,7 @@ import java.util.Set;
 public final class P5StableLookupRenderer {
     private static final int MAX_SECTIONS = 64;
     private static final int MIN_SECTIONS = 16;
-    private static final int HEADER_WORDS = 64;
+    private static final int HEADER_WORDS = 96;
     private static final int LOOKUP_CAPACITY = 128;
     private static final int LOOKUP_BASE_WORD = HEADER_WORDS;
     private static final int LOOKUP_WORDS = LOOKUP_CAPACITY * GpuSectionLookupTable.WORDS_PER_BUCKET;
@@ -52,16 +59,15 @@ public final class P5StableLookupRenderer {
             + MAX_SECTIONS * GpuSectionLightLists.MAX_LIGHTS_PER_SECTION;
     private static final int LIGHT_WORDS_PER_RECORD = 8;
     private static final int MAX_MATERIALS = 4096;
-    private static final int MATERIAL_EMISSION_WORDS_PER_RECORD = 4;
+    private static final int MATERIAL_EMISSION_WORDS_PER_RECORD = 16;
     private static final int MATERIAL_EMISSION_BASE_WORD = LIGHT_DATA_BASE_WORD
             + GpuSectionLightLists.MAX_GLOBAL_LIGHTS * LIGHT_WORDS_PER_RECORD;
     private static final int STATIC_DATA_END_WORD = MATERIAL_EMISSION_BASE_WORD
             + MAX_MATERIALS * MATERIAL_EMISSION_WORDS_PER_RECORD;
     private static final int HISTORY_RECORD_WORDS = 8;
-    private static final int TARGET_WIDTH = 160;
     private static final int MAX_STEPS = 512;
     private static final float MAX_DISTANCE = 256.0f;
-    private static final int CAMERA_UPLOAD_WORDS = 42;
+    private static final int CAMERA_UPLOAD_WORDS = HEADER_WORDS;
     private static final int SOFT_SHADOW_SAMPLES = 4;
     private static final float SOFT_SHADOW_ANGULAR_RADIUS = 0.055f;
     private static final float TEMPORAL_HISTORY_WEIGHT = 0.80f;
@@ -80,19 +86,19 @@ public final class P5StableLookupRenderer {
                 uint data[];
             } scene;
 
-            const uint LOOKUP_BASE = 64u;
+            const uint LOOKUP_BASE = 96u;
             const uint LOOKUP_CAPACITY = 128u;
             const uint LOOKUP_MASK = 127u;
             const uint LOOKUP_WORDS_PER_BUCKET = 4u;
-            const uint VOXEL_BASE = 576u;
+            const uint VOXEL_BASE = 608u;
             const uint VOXELS_PER_SECTION = 4096u;
-            const uint SECTION_LIGHT_COUNT_BASE = 262720u;
-            const uint SECTION_LIGHT_INDEX_BASE = 262784u;
-            const uint LIGHT_DATA_BASE = 263296u;
+            const uint SECTION_LIGHT_COUNT_BASE = 262752u;
+            const uint SECTION_LIGHT_INDEX_BASE = 262816u;
+            const uint LIGHT_DATA_BASE = 263328u;
             const uint MAX_LIGHTS_PER_SECTION = 8u;
             const uint LIGHT_WORDS_PER_RECORD = 8u;
-            const uint MATERIAL_EMISSION_BASE = 265344u;
-            const uint MATERIAL_EMISSION_WORDS_PER_RECORD = 4u;
+            const uint MATERIAL_EMISSION_BASE = 265376u;
+            const uint MATERIAL_EMISSION_WORDS_PER_RECORD = 16u;
             const uint HISTORY_RECORD_WORDS = 8u;
             const float TEMPORAL_HISTORY_WEIGHT = 0.80;
             const uint GI_HISTORY_MAX_SAMPLES = 64u;
@@ -364,8 +370,10 @@ public final class P5StableLookupRenderer {
             float softDirectionalVisibility(vec3 hitPoint, vec3 surfaceNormal) {
                 float visibleSamples = 0.0;
                 float validSamples = 0.0;
+                uint shadowSamples = clamp(scene.data[45], 1u, 4u);
 
                 for (uint sampleIndex = 0u; sampleIndex < 4u; sampleIndex++) {
+                    if (sampleIndex >= shadowSamples) break;
                     vec3 sampleDirection = directionalSampleDirection(sampleIndex);
                     if (dot(surfaceNormal, sampleDirection) <= 0.0) continue;
 
@@ -388,7 +396,7 @@ public final class P5StableLookupRenderer {
                 }
 
                 vec4 surfaceEmission = materialEmission(hit.materialId);
-                vec3 emitted = surfaceEmission.rgb * surfaceEmission.a * 1.6;
+                vec3 emitted = surfaceEmission.rgb * surfaceEmission.a * uintBitsToFloat(scene.data[83]);
                 float lighting = 0.12 + 0.88 * nDotL * visibility;
                 return packRgba(materialColor(hit.materialId) * lighting + emitted, 255u);
             }
@@ -406,7 +414,7 @@ public final class P5StableLookupRenderer {
                 }
 
                 vec4 surfaceEmission = materialEmission(hit.materialId);
-                vec3 emitted = surfaceEmission.rgb * surfaceEmission.a * 1.6;
+                vec3 emitted = surfaceEmission.rgb * surfaceEmission.a * uintBitsToFloat(scene.data[83]);
                 float lighting = 0.12 + 0.88 * nDotL * visibility;
                 return packRgba(materialColor(hit.materialId) * lighting + emitted, 255u);
             }
@@ -423,7 +431,7 @@ public final class P5StableLookupRenderer {
                 }
 
                 vec4 emission = materialEmission(hit.materialId);
-                vec3 emitted = emission.rgb * emission.a * 1.6;
+                vec3 emitted = emission.rgb * emission.a * uintBitsToFloat(scene.data[83]);
                 float lighting = 0.04 + 0.96 * nDotL * visibility;
                 return materialColor(hit.materialId) * lighting + emitted;
             }
@@ -446,18 +454,57 @@ public final class P5StableLookupRenderer {
                 return materialColor(primaryHit.materialId) * incomingRadiance * GI_STRENGTH;
             }
 
+            vec3 tlLocalEmitterSample(
+                    vec3 lightCenter,
+                    vec3 receiverPoint,
+                    uint sampleIndex,
+                    out vec3 emitterNormal
+            ) {
+                vec3 fromLight = receiverPoint - lightCenter;
+                vec3 axisMagnitude = abs(fromLight);
+                vec3 axisU;
+                vec3 axisV;
+
+                if (axisMagnitude.x >= axisMagnitude.y && axisMagnitude.x >= axisMagnitude.z) {
+                    emitterNormal = vec3(fromLight.x >= 0.0 ? 1.0 : -1.0, 0.0, 0.0);
+                    axisU = vec3(0.0, 1.0, 0.0);
+                    axisV = vec3(0.0, 0.0, 1.0);
+                } else if (axisMagnitude.y >= axisMagnitude.z) {
+                    emitterNormal = vec3(0.0, fromLight.y >= 0.0 ? 1.0 : -1.0, 0.0);
+                    axisU = vec3(1.0, 0.0, 0.0);
+                    axisV = vec3(0.0, 0.0, 1.0);
+                } else {
+                    emitterNormal = vec3(0.0, 0.0, fromLight.z >= 0.0 ? 1.0 : -1.0);
+                    axisU = vec3(1.0, 0.0, 0.0);
+                    axisV = vec3(0.0, 1.0, 0.0);
+                }
+
+                const vec2 LOCAL_AREA_OFFSETS[4] = vec2[4](
+                    vec2(0.00, 0.00),
+                    vec2(0.28, 0.20),
+                    vec2(-0.26, 0.22),
+                    vec2(0.04, -0.30)
+                );
+                vec2 offset = LOCAL_AREA_OFFSETS[int(sampleIndex & 3u)];
+                return lightCenter
+                        + emitterNormal * 0.495
+                        + axisU * offset.x
+                        + axisV * offset.y;
+            }
+
             uint localLightColor(HitResult hit, vec3 primaryOrigin, vec3 primaryDirection, bool emissiveMode) {
                 int slot = sectionSlotForVoxel(hit.voxel);
                 vec4 surfaceEmission = emissiveMode ? materialEmission(hit.materialId) : vec4(0.0);
-                vec3 emitted = surfaceEmission.rgb * surfaceEmission.a * 1.6;
+                vec3 emitted = surfaceEmission.rgb * surfaceEmission.a * uintBitsToFloat(scene.data[83]);
                 if (slot < 0) {
-                    return packRgba(materialColor(hit.materialId) * 0.05 + emitted, 255u);
+                    return packRgba(materialColor(hit.materialId) * uintBitsToFloat(scene.data[82]) + emitted, 255u);
                 }
 
                 vec3 surfaceNormal = resolvedSurfaceNormal(hit, primaryDirection);
                 vec3 hitPoint = primaryOrigin + primaryDirection * hit.distance;
-                vec3 lighting = vec3(0.045);
+                vec3 lighting = vec3(uintBitsToFloat(scene.data[82]));
                 uint lightCount = min(scene.data[SECTION_LIGHT_COUNT_BASE + uint(slot)], MAX_LIGHTS_PER_SECTION);
+                uint areaSamples = clamp(scene.data[45], 1u, 4u);
 
                 for (uint localIndex = 0u; localIndex < lightCount; localIndex++) {
                     uint listWord = SECTION_LIGHT_INDEX_BASE + uint(slot) * MAX_LIGHTS_PER_SECTION + localIndex;
@@ -474,28 +521,59 @@ public final class P5StableLookupRenderer {
                         uintBitsToFloat(scene.data[lightBase + 5u]),
                         uintBitsToFloat(scene.data[lightBase + 6u])
                     ) : vec3(1.0, 0.82, 0.58);
+                    float encodedIntensity = uintBitsToFloat(scene.data[lightBase + 7u]);
+                    bool pointEmitter = encodedIntensity < 0.0;
                     float intensity = emissiveMode
-                            ? uintBitsToFloat(scene.data[lightBase + 7u])
+                            ? abs(encodedIntensity)
                             : clamp((radius - 0.5) / 15.0, 0.0, 1.0);
-                    vec3 toLight = lightPosition - hitPoint;
-                    float distanceToLight = length(toLight);
-                    if (distanceToLight <= 0.0001 || distanceToLight >= radius) continue;
 
-                    vec3 lightDirection = toLight / distanceToLight;
-                    float nDotL = max(dot(surfaceNormal, lightDirection), 0.0);
-                    if (nDotL <= 0.0) continue;
+                    uint lightSamples = pointEmitter ? 1u : areaSamples;
+                    float sampleLighting = 0.0;
+                    for (uint areaIndex = 0u; areaIndex < 4u; areaIndex++) {
+                        if (areaIndex >= lightSamples) break;
 
-                    float visibility = 1.0;
-                    float shadowMaxDistance = max(distanceToLight - 0.55, 0.0);
-                    if (shadowMaxDistance > 0.02) {
-                        vec3 shadowOrigin = hitPoint + surfaceNormal * 0.025 + lightDirection * 0.01;
-                        HitResult blocker = traceRayLimited(shadowOrigin, lightDirection, shadowMaxDistance);
-                        visibility = blocker.hit == 0u ? 1.0 : 0.0;
+                        vec3 emitterNormal;
+                        vec3 samplePosition;
+                        if (pointEmitter) {
+                            samplePosition = lightPosition;
+                            emitterNormal = vec3(0.0);
+                        } else {
+                            samplePosition = tlLocalEmitterSample(
+                                lightPosition,
+                                hitPoint,
+                                areaIndex,
+                                emitterNormal
+                            );
+                        }
+                        vec3 toLight = samplePosition - hitPoint;
+                        float distanceToLight = length(toLight);
+                        if (distanceToLight <= 0.0001 || distanceToLight >= radius) continue;
+
+                        vec3 lightDirection = toLight / distanceToLight;
+                        float nDotL = max(dot(surfaceNormal, lightDirection), 0.0);
+                        if (nDotL <= 0.0) continue;
+
+                        float emitterCosine = pointEmitter
+                                ? 1.0
+                                : max(dot(emitterNormal, -lightDirection), 0.0);
+                        if (emitterCosine <= 0.0) continue;
+
+                        float visibility = 1.0;
+                        float shadowMaxDistance = max(distanceToLight - 0.06, 0.0);
+                        if (shadowMaxDistance > 0.02) {
+                            vec3 shadowOrigin = hitPoint + surfaceNormal * 0.025 + lightDirection * 0.01;
+                            HitResult blocker = traceRayLimited(shadowOrigin, lightDirection, shadowMaxDistance);
+                            visibility = blocker.hit == 0u ? 1.0 : 0.0;
+                        }
+
+                        float range = clamp(1.0 - distanceToLight / radius, 0.0, 1.0);
+                        float attenuation = range * range;
+                        sampleLighting += nDotL * emitterCosine * attenuation * visibility;
                     }
 
-                    float range = clamp(1.0 - distanceToLight / radius, 0.0, 1.0);
-                    float attenuation = range * range;
-                    lighting += lightColor * (2.4 * nDotL * attenuation * intensity * visibility);
+                    lighting += lightColor * (
+                        uintBitsToFloat(scene.data[54]) * intensity * sampleLighting / float(lightSamples)
+                    );
                 }
 
                 return packRgba(materialColor(hit.materialId) * lighting + emitted, 255u);
@@ -511,14 +589,14 @@ public final class P5StableLookupRenderer {
             ) {
                 vec3 indirect = oneBounceIndirectRgb(hit, primaryOrigin, primaryDirection, pixel, sampleIndex);
                 if (indirectOnly) {
-                    return packRgba(indirect * 1.35, 255u);
+                    return packRgba(indirect * uintBitsToFloat(scene.data[84]), 255u);
                 }
 
                 vec3 direct = unpackRgb(temporalCurrentColor(hit, primaryOrigin, primaryDirection, sampleIndex));
                 vec3 localWithBase = unpackRgb(localLightColor(hit, primaryOrigin, primaryDirection, true));
                 vec4 emission = materialEmission(hit.materialId);
-                vec3 emitted = emission.rgb * emission.a * 1.6;
-                vec3 localBase = materialColor(hit.materialId) * 0.045 + emitted;
+                vec3 emitted = emission.rgb * emission.a * uintBitsToFloat(scene.data[83]);
+                vec3 localBase = materialColor(hit.materialId) * uintBitsToFloat(scene.data[82]) + emitted;
                 vec3 localContribution = max(localWithBase - localBase, vec3(0.0));
                 return packRgba(direct + localContribution + indirect, 255u);
             }
@@ -603,8 +681,10 @@ public final class P5StableLookupRenderer {
                 float totalWeight = 0.0;
                 ivec2 center = ivec2(centerPixel);
 
-                for (int offsetY = -1; offsetY <= 1; offsetY++) {
-                    for (int offsetX = -1; offsetX <= 1; offsetX++) {
+                int denoiseRadius = int(min(scene.data[50], 2u));
+                for (int offsetY = -2; offsetY <= 2; offsetY++) {
+                    for (int offsetX = -2; offsetX <= 2; offsetX++) {
+                        if (abs(offsetX) > denoiseRadius || abs(offsetY) > denoiseRadius) continue;
                         ivec2 samplePixel = center + ivec2(offsetX, offsetY);
                         if (samplePixel.x < 0 || samplePixel.y < 0
                                 || samplePixel.x >= int(width) || samplePixel.y >= int(height)) {
@@ -698,7 +778,8 @@ public final class P5StableLookupRenderer {
                     float historyWeight = float(previousSamples) / float(previousSamples + 1u);
                     return packRgba(mix(currentRgb, historyRgb, historyWeight), 255u);
                 }
-                return packRgba(mix(currentRgb, historyRgb, TEMPORAL_HISTORY_WEIGHT), 255u);
+                float temporalWeight = clamp(uintBitsToFloat(scene.data[49]), 0.0, 0.95);
+                return packRgba(mix(currentRgb, historyRgb, temporalWeight), 255u);
             }
 
             void writeHistory(uvec2 pixel, uint width, HitResult hit, uint color, uint sampleCount) {
@@ -801,7 +882,7 @@ public final class P5StableLookupRenderer {
                 }
 
                 uint pixelBase = scene.data[3];
-                scene.data[pixelBase + pixel.y * width + pixel.x] = color;
+                scene.data[pixelBase + (height - 1u - pixel.y) * width + pixel.x] = color;
             }
             """;
 
@@ -816,6 +897,7 @@ public final class P5StableLookupRenderer {
         SPATIAL_DENOISE(9, "Spatial Denoise"),
         INDIRECT_GI(10, "Indirect GI"),
         GI_COMPOSITE(11, "GI Composite"),
+        FLUID_GEOMETRY(12, "P14E Fluid Geometry"),
         LOCAL_LIGHTS(5, "Local Lights"),
         EMISSIVE_MATERIALS(6, "Emissive Materials");
 
@@ -831,6 +913,16 @@ public final class P5StableLookupRenderer {
             return label;
         }
     }
+
+    private static final DebugMode[] PERFORMANCE_PROBE_MODES = {
+            DebugMode.NORMAL,
+            DebugMode.HARD_SHADOW,
+            DebugMode.LOCAL_LIGHTS,
+            DebugMode.INDIRECT_GI,
+            DebugMode.GI_COMPOSITE
+    };
+    private static final int PERFORMANCE_PROBE_WARMUP_FRAMES = 10;
+    private static final int PERFORMANCE_PROBE_SAMPLE_FRAMES = 30;
 
     private static Resources resources;
     private static DebugMode mode = DebugMode.GI_COMPOSITE;
@@ -857,11 +949,22 @@ public final class P5StableLookupRenderer {
     private static FrameSnapshot lastCompletedFrame;
     private static DebugMode lastCompletedMode;
     private static String dimensionId;
+    private static long lastSettingsRevision = Long.MIN_VALUE;
+    private static long lastRuntimeTuningRevision = Long.MIN_VALUE;
+    private static long lastAnimationSignature = Long.MIN_VALUE;
+    private static int activeRenderWidth;
+    private static int activeRenderHeight;
+    private static DebugMode performanceProbeMode;
+    private static int performanceProbeWarmup;
+    private static int performanceProbeSamples;
+    private static long performanceProbeAccumulatedNanos;
+    private static boolean worldTakeoverLogged;
 
     private P5StableLookupRenderer() {
     }
 
     private static boolean usesTemporalHistory(DebugMode debugMode) {
+        if (RendererSettings.temporalQuality() == RendererSettings.TemporalQuality.OFF) return false;
         return debugMode == DebugMode.TEMPORAL_HISTORY
                 || debugMode == DebugMode.SPATIAL_DENOISE
                 || debugMode == DebugMode.INDIRECT_GI
@@ -877,6 +980,10 @@ public final class P5StableLookupRenderer {
     }
 
     public static void runOnRenderThread() {
+        if (!RendererSettings.rendererEnabled()) {
+            historyValid = false;
+            return;
+        }
         if (!P5WorldDebugComposite.ready() || inFlight || resetRequested) return;
 
         FrameSnapshot frame = SceneExtractionBridge.latestFrame();
@@ -891,16 +998,84 @@ public final class P5StableLookupRenderer {
         List<SectionSnapshot> sections = nearestSections(frame);
         if (sections.size() < MIN_SECTIONS) return;
 
+        long settingsRevision = RendererSettings.revision();
+        boolean settingsChanged = settingsRevision != lastSettingsRevision;
+        if (settingsChanged) {
+            historyValid = false;
+            lastSettingsRevision = settingsRevision;
+        }
+
+        RendererRuntimeTuningRegistry.ensureLoaded(Minecraft.getInstance().getResourceManager());
+        long runtimeTuningRevision = RendererRuntimeTuningRegistry.revision();
+        if (runtimeTuningRevision != lastRuntimeTuningRevision) {
+            historyValid = false;
+            lastRuntimeTuningRevision = runtimeTuningRevision;
+        }
+
+        long animationTick = currentAnimationTick(frame);
+        long animationSignature = LabPbrTextureRegistry.loadedAnimatedCount() == 0
+                ? Long.MIN_VALUE
+                : LabPbrTextureRegistry.animationSignature(animationTick);
+        if (animationSignature != lastAnimationSignature) {
+            historyValid = false;
+            lastAnimationSignature = animationSignature;
+        }
+
         int windowWidth = Math.max(1, Minecraft.getInstance().getWindow().getWidth());
         int windowHeight = Math.max(1, Minecraft.getInstance().getWindow().getHeight());
-        int targetHeight = Math.max(1, Math.round(TARGET_WIDTH * (windowHeight / (float) windowWidth)));
+        int targetWidth = RendererSettings.internalResolution().targetWidth(
+                windowWidth,
+                windowHeight
+        );
+        int targetHeight = Math.max(1, Math.round(targetWidth * (windowHeight / (float) windowWidth)));
+        // The world-takeover blit samples the whole output texture. Keep the resource extent
+        // equal to the active internal resolution so there is no unused HIGH-resolution padding
+        // and no HUD-only UV crop dependency.
+        int capacityWidth = targetWidth;
+        int capacityHeight = targetHeight;
 
-        if (resources == null || resources.height != targetHeight) {
+        if (settingsChanged) {
+            TotemLumenClient.LOGGER.info(
+                    "Renderer settings ACTIVE: window={}x{}, render={}x{}, internalResolution={}, pixelBudget={}, giSamples={}, shadowSamples={}, rayDistance={}, reflections={}, reflectionPassReady={}, reflectionBounces={}, reflectionDistance={}, temporal={}, denoiseRadius={}",
+                    windowWidth,
+                    windowHeight,
+                    targetWidth,
+                    targetHeight,
+                    RendererSettings.internalResolution(),
+                    RendererSettings.internalResolution().maxPixels(),
+                    RendererSettings.giQuality().samples(),
+                    RendererSettings.shadowQuality().samples(),
+                    RendererSettings.rayDistance(),
+                    RendererSettings.reflectionsEnabled(),
+                    P16MultipassReflection.ready(),
+                    RendererSettings.reflectionBounces(),
+                    RendererSettings.reflectionDistance(),
+                    RendererSettings.temporalQuality(),
+                    RendererSettings.denoiseQuality().radius()
+            );
+        }
+
+        if (resources == null || resources.width != capacityWidth || resources.height != capacityHeight) {
             destroyResourcesIfSafe();
-            resources = Resources.create(device, TARGET_WIDTH, targetHeight);
+            resources = Resources.create(device, capacityWidth, capacityHeight);
             sceneUploadRequired = true;
             sceneSignature = Long.MIN_VALUE;
             ready = false;
+        }
+        activeRenderWidth = targetWidth;
+        activeRenderHeight = targetHeight;
+
+        // Resources/bootstrap exist only to give the full P12-P18 pipeline a live Vulkan scene
+        // to compile against. Do not expose the simplified bootstrap renderer to the player.
+        // Minecraft's own renderer (and the player's currently selected resource pack) stays
+        // visible until the complete material-aware base pipeline is ready.
+        if (!P12FullBasePipeline.ready()) {
+            ready = false;
+            historyValid = false;
+            historyReadIndex = -1;
+            lastCompletedFrame = null;
+            lastCompletedMode = null;
+            return;
         }
 
         if (!frame.dimensionId().equals(dimensionId)) {
@@ -938,7 +1113,9 @@ public final class P5StableLookupRenderer {
                 submittedMode,
                 canReuseHistory ? lastCompletedFrame : null,
                 canReuseHistory ? historyReadIndex : -1,
-                historyWriteIndex
+                historyWriteIndex,
+                activeRenderWidth,
+                activeRenderHeight
         );
 
         int uploadBytes;
@@ -955,13 +1132,21 @@ public final class P5StableLookupRenderer {
         lastSubmittedFrame = frame.frameIndex();
 
         try {
+            long submitStartedNanos = System.nanoTime();
             VulkanFrameComputeBatch batch = VulkanFrameComputeBatch.begin(device, capabilities, r.commandPool);
-            recordCommands(batch.commandBuffer(), r, uploadBytes);
+            recordCommands(
+                    batch.commandBuffer(),
+                    r,
+                    uploadBytes,
+                    activeRenderWidth,
+                    activeRenderHeight
+            );
             batch.finishAndEnqueue(() -> onFrameComplete(
                     fullSceneUpload,
                     frame,
                     submittedMode,
-                    historyWriteIndex
+                    historyWriteIndex,
+                    submitStartedNanos
             ));
         } catch (Throwable failure) {
             inFlight = false;
@@ -984,12 +1169,41 @@ public final class P5StableLookupRenderer {
     }
 
     public static DebugMode cycleMode() {
-        DebugMode previous = mode;
         DebugMode[] values = DebugMode.values();
-        mode = values[(mode.ordinal() + 1) % values.length];
+        return setMode(values[(mode.ordinal() + 1) % values.length]);
+    }
+
+    public static DebugMode cyclePerformanceProbeMode() {
+        int current = -1;
+        for (int i = 0; i < PERFORMANCE_PROBE_MODES.length; i++) {
+            if (PERFORMANCE_PROBE_MODES[i] == mode) {
+                current = i;
+                break;
+            }
+        }
+        return setMode(PERFORMANCE_PROBE_MODES[(current + 1) % PERFORMANCE_PROBE_MODES.length]);
+    }
+
+    public static DebugMode setMode(DebugMode nextMode) {
+        if (nextMode == null) throw new IllegalArgumentException("nextMode is required");
+        DebugMode previous = mode;
+        mode = nextMode;
         if (!historyCompatible(mode, previous)) {
             historyValid = false;
         }
+        performanceProbeMode = mode;
+        performanceProbeWarmup = 0;
+        performanceProbeSamples = 0;
+        performanceProbeAccumulatedNanos = 0L;
+        TotemLumenClient.LOGGER.info(
+                "Performance probe RESET: mode={}, render={}x{}, giSamples={}, shadowSamples={}, reflections={}",
+                mode.label(),
+                activeRenderWidth,
+                activeRenderHeight,
+                RendererSettings.giQuality().samples(),
+                RendererSettings.shadowQuality().samples(),
+                RendererSettings.reflectionsEnabled()
+        );
         return mode;
     }
 
@@ -997,9 +1211,59 @@ public final class P5StableLookupRenderer {
         return mode;
     }
 
-    public static void drawHud(GuiGraphicsExtractor graphics) {
+    public static boolean readyForWorldTakeover() {
         Resources r = resources;
-        if (!ready || r == null || r.view.isClosed()) {
+        return RendererSettings.rendererEnabled()
+                && P12FullBasePipeline.ready()
+                && ready
+                && r != null
+                && !r.view.isClosed();
+    }
+
+    /**
+     * Presents the latest completed Totem Lumen frame directly into Minecraft's main world target.
+     * This is intentionally independent of HUD visibility; F1 must hide only HUD/GUI, never the
+     * ray-traced world itself.
+     */
+    public static void presentToWorldTarget() {
+        if (!readyForWorldTakeover()) return;
+
+        Resources r = resources;
+        RenderTarget target = Minecraft.getInstance().gameRenderer.mainRenderTarget();
+        if (target == null || target.getColorTextureView() == null) return;
+
+        try (RenderPass pass = RenderSystem.getDevice()
+                .createCommandEncoder()
+                .createRenderPass(
+                        () -> "Totem Lumen world takeover",
+                        target.getColorTextureView(),
+                        Optional.empty()
+                )) {
+            pass.setPipeline(RenderPipelines.TRACY_BLIT);
+            pass.bindTexture(
+                    "InSampler",
+                    r.view,
+                    RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST)
+            );
+            pass.draw(3, 1, 0, 0);
+        }
+
+        if (!worldTakeoverLogged) {
+            worldTakeoverLogged = true;
+            TotemLumenClient.LOGGER.info(
+                    "Totem Lumen WORLD TAKEOVER active: vanilla level drawing skipped, output={}x{}, HUD remains independent",
+                    activeRenderWidth,
+                    activeRenderHeight
+            );
+        }
+    }
+
+    public static void drawHud(GuiGraphicsExtractor graphics) {
+        if (!RendererSettings.rendererEnabled()) return;
+        Resources r = resources;
+        if (!P12FullBasePipeline.ready() || !ready || r == null || r.view.isClosed()) {
+            // No Totem composite here: leaving the HUD untouched exposes Minecraft's normal
+            // world render as the intentional startup/recompile fallback.
             P5WorldDebugComposite.drawHud(graphics);
             return;
         }
@@ -1012,9 +1276,9 @@ public final class P5StableLookupRenderer {
                 graphics.guiWidth(),
                 graphics.guiHeight(),
                 0.0f,
-                1.0f,
+                activeRenderWidth / (float) r.width,
                 0.0f,
-                1.0f
+                activeRenderHeight / (float) r.height
         );
     }
 
@@ -1031,7 +1295,8 @@ public final class P5StableLookupRenderer {
             boolean fullSceneUpload,
             FrameSnapshot submittedFrame,
             DebugMode submittedMode,
-            int historyWriteIndex
+            int historyWriteIndex,
+            long submitStartedNanos
     ) {
         inFlight = false;
         ready = true;
@@ -1043,6 +1308,8 @@ public final class P5StableLookupRenderer {
         } else {
             historyValid = false;
         }
+
+        recordPerformanceProbe(submittedMode, submitStartedNanos);
 
         if (!firstFrameLogged) {
             firstFrameLogged = true;
@@ -1121,6 +1388,49 @@ public final class P5StableLookupRenderer {
         }
     }
 
+    private static void recordPerformanceProbe(DebugMode submittedMode, long submitStartedNanos) {
+        if (submittedMode != performanceProbeMode) {
+            performanceProbeMode = submittedMode;
+            performanceProbeWarmup = 0;
+            performanceProbeSamples = 0;
+            performanceProbeAccumulatedNanos = 0L;
+        }
+
+        long elapsedNanos = Math.max(0L, System.nanoTime() - submitStartedNanos);
+        if (performanceProbeWarmup < PERFORMANCE_PROBE_WARMUP_FRAMES) {
+            performanceProbeWarmup++;
+            return;
+        }
+
+        performanceProbeAccumulatedNanos += elapsedNanos;
+        performanceProbeSamples++;
+        if (performanceProbeSamples < PERFORMANCE_PROBE_SAMPLE_FRAMES) return;
+
+        double averageMs = performanceProbeAccumulatedNanos
+                / (double) performanceProbeSamples
+                / 1_000_000.0;
+        double effectiveFps = averageMs <= 0.0 ? 0.0 : 1000.0 / averageMs;
+        TotemLumenClient.LOGGER.info(
+                "Performance probe RESULT: mode={}, render={}x{}, avgSubmitToCompleteMs={}, effectiveTotemFps={}, giSamples={}, shadowSamples={}, reflections={}, p17PackMs={}, p17UploadBytes={}",
+                submittedMode.label(),
+                activeRenderWidth,
+                activeRenderHeight,
+                String.format(java.util.Locale.ROOT, "%.3f", averageMs),
+                String.format(java.util.Locale.ROOT, "%.1f", effectiveFps),
+                RendererSettings.giQuality().samples(),
+                RendererSettings.shadowQuality().samples(),
+                RendererSettings.reflectionsEnabled(),
+                String.format(
+                        java.util.Locale.ROOT,
+                        "%.3f",
+                        P17DynamicEntityGpuUploader.lastPackNanos() / 1_000_000.0
+                ),
+                P17DynamicEntityGpuUploader.lastUploadBytes()
+        );
+        performanceProbeSamples = 0;
+        performanceProbeAccumulatedNanos = 0L;
+    }
+
     private static List<SectionSnapshot> nearestSections(FrameSnapshot frame) {
         List<SectionSnapshot> snapshots = new ArrayList<>(SceneExtractionBridge.scene().sectionSnapshots());
         snapshots.removeIf(snapshot -> !snapshot.key().dimensionId().equals(frame.dimensionId()));
@@ -1181,6 +1491,8 @@ public final class P5StableLookupRenderer {
         lastMaxLightsPerSection = 0;
         lastPopulatedLightLists = 0;
         lastEmissiveMaterialCount = 0;
+        lastRuntimeTuningRevision = Long.MIN_VALUE;
+        lastAnimationSignature = Long.MIN_VALUE;
         p7Logged = false;
         p8Logged = false;
         p9Logged = false;
@@ -1197,15 +1509,17 @@ public final class P5StableLookupRenderer {
             DebugMode debugMode,
             FrameSnapshot previousFrame,
             int historyReadIndex,
-            int historyWriteIndex
+            int historyWriteIndex,
+            int renderWidth,
+            int renderHeight
     ) {
         putWord(buffer, 1, sectionCount);
         putWord(buffer, 2, LOOKUP_CAPACITY);
         putWord(buffer, 3, resources.pixelBaseWord);
-        putWord(buffer, 4, resources.width);
-        putWord(buffer, 5, resources.height);
+        putWord(buffer, 4, renderWidth);
+        putWord(buffer, 5, renderHeight);
         putWord(buffer, 6, MAX_STEPS);
-        putWord(buffer, 7, Float.floatToRawIntBits(MAX_DISTANCE));
+        putWord(buffer, 7, Float.floatToRawIntBits((float) RendererSettings.rayDistance()));
         putWord(buffer, 8, Float.floatToRawIntBits((float) frame.cameraX()));
         putWord(buffer, 9, Float.floatToRawIntBits((float) frame.cameraY()));
         putWord(buffer, 10, Float.floatToRawIntBits((float) frame.cameraZ()));
@@ -1215,7 +1529,7 @@ public final class P5StableLookupRenderer {
         putVec3(buffer, 14, basis[1]);
         putVec3(buffer, 17, basis[2]);
         putWord(buffer, 20, Float.floatToRawIntBits((float) Math.tan(Math.toRadians(frame.fovDegrees()) * 0.5)));
-        putWord(buffer, 21, Float.floatToRawIntBits(resources.width / (float) resources.height));
+        putWord(buffer, 21, Float.floatToRawIntBits(renderWidth / (float) renderHeight));
         putWord(buffer, 22, debugMode.shaderValue);
         putWord(buffer, 24, historyReadIndex < 0 ? 0 : resources.historyBaseWord(historyReadIndex));
         putWord(buffer, 25, resources.historyBaseWord(historyWriteIndex));
@@ -1236,9 +1550,69 @@ public final class P5StableLookupRenderer {
                     39,
                     Float.floatToRawIntBits((float) Math.tan(Math.toRadians(previousFrame.fovDegrees()) * 0.5))
             );
-            putWord(buffer, 40, Float.floatToRawIntBits(resources.width / (float) resources.height));
+            putWord(buffer, 40, Float.floatToRawIntBits(renderWidth / (float) renderHeight));
         }
         putWord(buffer, 41, (int) frame.frameIndex());
+        putWord(buffer, 42, RendererSettings.reflectionBounces());
+        putWord(buffer, 43, Float.floatToRawIntBits((float) RendererSettings.reflectionDistance()));
+        putWord(buffer, 44, RendererSettings.giQuality().samples());
+        putWord(buffer, 45, RendererSettings.shadowQuality().samples());
+        boolean reflectionPassActive = RendererSettings.reflectionsEnabled()
+                && P16MultipassReflection.ready();
+        putWord(buffer, 46, reflectionPassActive ? 1 : 0);
+        putWord(buffer, 47, RendererSettings.waterReflections() ? 1 : 0);
+        putWord(buffer, 48, RendererSettings.temporalQuality().historySamples());
+        putWord(buffer, 49, Float.floatToRawIntBits(RendererSettings.temporalQuality().directHistoryWeight()));
+        putWord(buffer, 50, RendererSettings.denoiseQuality().radius());
+        putWord(buffer, 51, resources.width);
+        putWord(buffer, 52, resources.height);
+        putWord(buffer, 53, (int) currentAnimationTick(frame));
+
+        RendererRuntimeTuningRegistry.ensureLoaded(Minecraft.getInstance().getResourceManager());
+        var tuning = RendererRuntimeTuningRegistry.current();
+        putWord(buffer, 54, Float.floatToRawIntBits(tuning.localLightGain()));
+        putWord(buffer, 55, Float.floatToRawIntBits(tuning.reflectionSpreadScale()));
+        putWord(buffer, 56, Float.floatToRawIntBits(tuning.reflectionRoughnessEnergy()));
+        putWord(buffer, 57, Float.floatToRawIntBits(tuning.reflectionDielectricEnergy()));
+        putWord(buffer, 58, Float.floatToRawIntBits(tuning.reflectionMetalEnergy()));
+        putWord(buffer, 59, Float.floatToRawIntBits(tuning.reflectionNormalBias()));
+        putWord(buffer, 60, Float.floatToRawIntBits(tuning.reflectionDirectionBias()));
+        putWord(buffer, 61, tuning.transmissionMaxLayers());
+        putWord(buffer, 62, Float.floatToRawIntBits(tuning.transmissionExitEpsilon()));
+        putWord(buffer, 63, Float.floatToRawIntBits(tuning.transmissionMinScalar()));
+        putWord(buffer, 64, Float.floatToRawIntBits(tuning.waterTintMix()));
+        putWord(buffer, 65, Float.floatToRawIntBits(tuning.waterTransmissionScalar()));
+        putWord(buffer, 66, Float.floatToRawIntBits(tuning.waterFallbackR()));
+        putWord(buffer, 67, Float.floatToRawIntBits(tuning.waterFallbackG()));
+        putWord(buffer, 68, Float.floatToRawIntBits(tuning.waterFallbackB()));
+        putWord(buffer, 69, Float.floatToRawIntBits(tuning.waterMaterialR()));
+        putWord(buffer, 70, Float.floatToRawIntBits(tuning.waterMaterialG()));
+        putWord(buffer, 71, Float.floatToRawIntBits(tuning.waterMaterialB()));
+        putWord(buffer, 72, Float.floatToRawIntBits(tuning.lavaMaterialR()));
+        putWord(buffer, 73, Float.floatToRawIntBits(tuning.lavaMaterialG()));
+        putWord(buffer, 74, Float.floatToRawIntBits(tuning.lavaMaterialB()));
+        putWord(buffer, 75, Float.floatToRawIntBits(tuning.otherFluidR()));
+        putWord(buffer, 76, Float.floatToRawIntBits(tuning.otherFluidG()));
+        putWord(buffer, 77, Float.floatToRawIntBits(tuning.otherFluidB()));
+        putWord(buffer, 78, Float.floatToRawIntBits(tuning.lavaEmissionR()));
+        putWord(buffer, 79, Float.floatToRawIntBits(tuning.lavaEmissionG()));
+        putWord(buffer, 80, Float.floatToRawIntBits(tuning.lavaEmissionB()));
+        putWord(buffer, 81, Float.floatToRawIntBits(tuning.lavaEmissionStrength()));
+        putWord(buffer, 82, Float.floatToRawIntBits(tuning.localAmbient()));
+        putWord(buffer, 83, Float.floatToRawIntBits(tuning.surfaceEmissionGain()));
+        putWord(buffer, 84, Float.floatToRawIntBits(tuning.giDisplayGain()));
+        putWord(buffer, 85, Float.floatToRawIntBits(tuning.waterReflectionRoughness()));
+        putWord(buffer, 86, Float.floatToRawIntBits(tuning.lavaReflectionRoughness()));
+        putWord(buffer, 87, Float.floatToRawIntBits(tuning.waterReflectionScale()));
+        putWord(buffer, 88, Float.floatToRawIntBits(tuning.lavaReflectionScale()));
+        putWord(buffer, 89, Float.floatToRawIntBits(tuning.entityEmissiveGain()));
+        for (int word = 90; word < HEADER_WORDS; word++) putWord(buffer, word, 0);
+    }
+
+    private static long currentAnimationTick(FrameSnapshot frame) {
+        return Minecraft.getInstance().level == null
+                ? frame.frameIndex()
+                : Minecraft.getInstance().level.getGameTime();
     }
 
     private static void packLookupSectionsAndLights(ByteBuffer buffer, List<SectionSnapshot> sections) {
@@ -1277,6 +1651,18 @@ public final class P5StableLookupRenderer {
             putWord(buffer, base + 1, Float.floatToRawIntBits(material.emissionG()));
             putWord(buffer, base + 2, Float.floatToRawIntBits(material.emissionB()));
             putWord(buffer, base + 3, Float.floatToRawIntBits(material.emissionLevel() / 15.0f));
+            putWord(buffer, base + 4, Float.floatToRawIntBits(material.transmissionR()));
+            putWord(buffer, base + 5, Float.floatToRawIntBits(material.transmissionG()));
+            putWord(buffer, base + 6, Float.floatToRawIntBits(material.transmissionB()));
+            putWord(buffer, base + 7, Float.floatToRawIntBits(material.opacity()));
+            putWord(buffer, base + 8, Float.floatToRawIntBits(material.indexOfRefraction()));
+            putWord(buffer, base + 9, Float.floatToRawIntBits(material.roughness()));
+            putWord(buffer, base + 10, Float.floatToRawIntBits(material.metallic()));
+            putWord(buffer, base + 11, material.flags());
+            putWord(buffer, base + 12, Float.floatToRawIntBits(material.lightRadiusScale()));
+            putWord(buffer, base + 13, Float.floatToRawIntBits(material.lightIntensityScale()));
+            putWord(buffer, base + 14, Float.floatToRawIntBits(material.reflectionScale()));
+            putWord(buffer, base + 15, material.lightEmitterAnchor());
             if (material.emissionLevel() > 0) {
                 lastEmissiveMaterialCount++;
             }
@@ -1295,7 +1681,13 @@ public final class P5StableLookupRenderer {
                             material.emissionLevel(),
                             material.emissionR(),
                             material.emissionG(),
-                            material.emissionB()
+                            material.emissionB(),
+                            material.lightRadiusScale(),
+                            material.lightIntensityScale(),
+                            material.pointLightEmitter(),
+                            material.lightEmitterX(),
+                            material.lightEmitterY(),
+                            material.lightEmitterZ()
                     );
                 }
         );
@@ -1324,7 +1716,10 @@ public final class P5StableLookupRenderer {
             putWord(buffer, base + 4, Float.floatToRawIntBits(light.r()));
             putWord(buffer, base + 5, Float.floatToRawIntBits(light.g()));
             putWord(buffer, base + 6, Float.floatToRawIntBits(light.b()));
-            putWord(buffer, base + 7, Float.floatToRawIntBits(light.intensity()));
+            float encodedIntensity = light.pointEmitter()
+                    ? -Math.max(light.intensity(), Float.MIN_NORMAL)
+                    : light.intensity();
+            putWord(buffer, base + 7, Float.floatToRawIntBits(encodedIntensity));
         }
 
         lastLightCount = lights.size();
@@ -1366,7 +1761,13 @@ public final class P5StableLookupRenderer {
         buffer.putInt(wordIndex * Integer.BYTES, value);
     }
 
-    private static void recordCommands(VkCommandBuffer commandBuffer, Resources r, int uploadBytes) {
+    private static void recordCommands(
+            VkCommandBuffer commandBuffer,
+            Resources r,
+            int uploadBytes,
+            int renderWidth,
+            int renderHeight
+    ) {
         try (MemoryStack stack = MemoryStack.stackPush()) {
             VkBufferCopy.Buffer uploadCopy = VkBufferCopy.calloc(1, stack);
             uploadCopy.get(0).srcOffset(0).dstOffset(0).size(uploadBytes);
@@ -1398,7 +1799,7 @@ public final class P5StableLookupRenderer {
                     stack.longs(r.program.descriptorSet()),
                     null
             );
-            VK10.vkCmdDispatch(commandBuffer, (r.width + 7) / 8, (r.height + 7) / 8, 1);
+            VK10.vkCmdDispatch(commandBuffer, (renderWidth + 7) / 8, (renderHeight + 7) / 8, 1);
 
             long pixelOffset = (long) r.pixelBaseWord * Integer.BYTES;
             VkBufferMemoryBarrier.Buffer computeToCopy = VkBufferMemoryBarrier.calloc(1, stack);
@@ -1410,7 +1811,7 @@ public final class P5StableLookupRenderer {
                     .dstQueueFamilyIndex(VK10.VK_QUEUE_FAMILY_IGNORED)
                     .buffer(r.scene.vkBuffer())
                     .offset(pixelOffset)
-                    .size(r.pixelBytes);
+                    .size((long) renderWidth * renderHeight * Integer.BYTES);
             VK10.vkCmdPipelineBarrier(
                     commandBuffer,
                     VK10.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
@@ -1439,12 +1840,15 @@ public final class P5StableLookupRenderer {
             );
 
             VkBufferImageCopy.Buffer copy = VkBufferImageCopy.calloc(1, stack);
-            copy.get(0).bufferOffset(pixelOffset).bufferRowLength(r.width).bufferImageHeight(r.height);
+            copy.get(0)
+                    .bufferOffset(pixelOffset)
+                    .bufferRowLength(renderWidth)
+                    .bufferImageHeight(renderHeight);
             copy.get(0).imageSubresource()
                     .aspectMask(VK10.VK_IMAGE_ASPECT_COLOR_BIT)
                     .mipLevel(0).baseArrayLayer(0).layerCount(1);
             copy.get(0).imageOffset().set(0, 0, 0);
-            copy.get(0).imageExtent().set(r.width, r.height, 1);
+            copy.get(0).imageExtent().set(renderWidth, renderHeight, 1);
             VK10.vkCmdCopyBufferToImage(
                     commandBuffer, r.scene.vkBuffer(), r.vkImage,
                     VK10.VK_IMAGE_LAYOUT_GENERAL, copy
@@ -1488,6 +1892,10 @@ public final class P5StableLookupRenderer {
         sceneSignature = Long.MIN_VALUE;
         lastSubmittedFrame = -1;
         dimensionId = null;
+        lastSettingsRevision = Long.MIN_VALUE;
+        activeRenderWidth = 0;
+        activeRenderHeight = 0;
+        worldTakeoverLogged = false;
     }
 
     private static void closeQuietly(AutoCloseable closeable) {

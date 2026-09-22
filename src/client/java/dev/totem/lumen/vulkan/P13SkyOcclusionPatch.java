@@ -7,7 +7,8 @@ import dev.totem.lumen.TotemLumenClient;
  *
  * <p>P14C is chained immediately before this stage so every later P13/P15/P16 visibility path sees
  * the same generic block-model geometry. P15 is deliberately chained after the sky transform so
- * the same visibility path can become RGB-transmissive through glass.</p>
+ * the same visibility path can become RGB-transmissive through glass. The deterministic P13
+ * starfield is then layered onto the already-transformed shared sky radiance path.</p>
  */
 final class P13SkyOcclusionPatch {
     private P13SkyOcclusionPatch() {
@@ -15,6 +16,7 @@ final class P13SkyOcclusionPatch {
 
     static String apply(String source) {
         source = P14GenericModelMeshPatch.apply(source);
+        source = P18TexturedSurfaceShaderPatch.apply(source);
 
         String functionMarker = "vec3 p13EnvironmentSurfaceRadiance(\n";
         if (!source.contains(functionMarker)) {
@@ -57,6 +59,7 @@ final class P13SkyOcclusionPatch {
         TotemLumenClient.LOGGER.info(
                 "P13 skylight occlusion active: overworldSkyVisibilityRay=world-up, sealedRoomTimeLeakFix=true"
         );
-        return P15GlassTransmissionPatch.apply(source);
+        source = P15GlassTransmissionPatch.apply(source);
+        return P13StarfieldPatch.apply(source);
     }
 }
