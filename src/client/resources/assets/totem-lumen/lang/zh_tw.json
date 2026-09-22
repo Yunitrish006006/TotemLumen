@@ -91,5 +91,7 @@
   "screen.totem-lumen.compile_hud.backend": "Vulkan 後端",
   "screen.totem-lumen.compile_hud.bootstrap": "建立基礎渲染",
   "screen.totem-lumen.compile_hud.full": "光照 / 材質 / 玩家與生物",
-  "screen.totem-lumen.compile_hud.advanced": "反射"
+  "screen.totem-lumen.compile_hud.advanced": "反射",
+  "screen.totem-lumen.video_section": "Totem Lumen",
+  "screen.totem-lumen.video_section_hint": "啟用 Totem Lumen 時，由 Totem 接管的原版世界渲染選項會鎖定。"
 }
