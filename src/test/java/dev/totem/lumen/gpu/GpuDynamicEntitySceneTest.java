@@ -217,7 +217,7 @@ class GpuDynamicEntitySceneTest {
         DynamicEntitySnapshot moved = snapshot(
                 21L,
                 "minecraft:overworld",
-                16.25,
+                32.25,
                 1.0,
                 0.25
         );
@@ -236,7 +236,7 @@ class GpuDynamicEntitySceneTest {
         assertEquals(lastTexel, word(buffer, GpuDynamicEntityScene.ENTITY_TEXTURE_POOL_BASE_WORD + 3));
         assertEquals(
                 0,
-                GpuDynamicEntityScene.packedSectionCandidate(buffer, 0, 1, 0, 0, 0)
+                GpuDynamicEntityScene.packedSectionCandidate(buffer, 0, 2, 0, 0, 0)
         );
         assertEquals(
                 -1,
