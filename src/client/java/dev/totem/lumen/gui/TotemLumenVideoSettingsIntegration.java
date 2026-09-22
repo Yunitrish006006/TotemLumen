@@ -4,22 +4,17 @@ import dev.totem.lumen.render.RendererSettings;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
 import net.fabricmc.fabric.api.client.screen.v1.Screens;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.Options;
-import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.OptionsList;
 import net.minecraft.client.gui.screens.options.VideoSettingsScreen;
 import net.minecraft.network.chat.Component;
 
-import java.util.ArrayList;
-import java.util.List;
-
 /**
- * Integrates Totem Lumen directly into Minecraft's Video Settings screen.
+ * Integrates the active rendering profile directly into Minecraft's Video Settings screen.
  *
- * <p>When Totem Lumen owns world presentation, vanilla controls that only affect Minecraft's
- * replaced world renderer are locked in place. Display/interface controls and settings that still
- * affect scene extraction remain available.</p>
+ * <p>The profile selector is always visible. Minecraft profile uses vanilla world-render controls.
+ * Totem Lumen profile replaces those controls with Totem-specific RT controls while shared display
+ * and scene-availability options remain supplied by Minecraft.</p>
  */
 public final class TotemLumenVideoSettingsIntegration {
     private static boolean initialized;
@@ -41,164 +36,149 @@ public final class TotemLumenVideoSettingsIntegration {
                     .orElse(null);
             if (optionsList == null) return;
 
-            new IntegratedControls(client, videoSettings, optionsList).install();
+            installProfileControls(client, videoSettings, optionsList);
         });
     }
 
-    private static final class IntegratedControls {
-        private final Minecraft client;
-        private final VideoSettingsScreen screen;
-        private final OptionsList list;
-        private final List<AbstractWidget> vanillaRendererWidgets = new ArrayList<>();
+    private static void installProfileControls(
+            Minecraft client,
+            VideoSettingsScreen screen,
+            OptionsList list
+    ) {
+        list.addHeader(Component.translatable("screen.totem-lumen.profile_section"));
 
-        private Button rendererEnabledButton;
-        private Button giQualityButton;
-        private Button shadowQualityButton;
-        private Button rayDistanceButton;
-        private Button internalResolutionButton;
-        private Button reflectionsEnabledButton;
-        private Button waterReflectionsButton;
-        private Button reflectionBouncesButton;
-        private Button reflectionDistanceButton;
-        private Button temporalQualityButton;
-        private Button denoiseQualityButton;
+        Button profileButton = Button.builder(
+                TotemLumenVideoSettingsScreen.renderProfileLabel(),
+                ignored -> {
+                    RendererSettings.cycleRenderProfile();
+                    // Rebuild the native Video Settings screen so its profile-dependent option
+                    // arrays are reconstructed instead of leaving disabled/blank stale rows.
+                    screen.rebuildWidgets();
+                }
+        ).bounds(0, 0, 150, 20).build();
 
-        private IntegratedControls(
-                Minecraft client,
-                VideoSettingsScreen screen,
-                OptionsList list
-        ) {
-            this.client = client;
-            this.screen = screen;
-            this.list = list;
+        Button diagnosticsButton = Button.builder(
+                Component.translatable("screen.totem-lumen.diagnostics"),
+                ignored -> client.gui.setScreen(new TotemLumenDiagnosticsScreen(screen))
+        ).bounds(0, 0, 150, 20).build();
+
+        list.addSmall(profileButton, diagnosticsButton);
+
+        if (!RendererSettings.rendererEnabled()) {
+            return;
         }
 
-        private void install() {
-            collectVanillaRendererWidgets(client.options);
+        list.addHeader(Component.translatable("screen.totem-lumen.video_section"));
 
-            list.addHeader(Component.translatable("screen.totem-lumen.video_section"));
+        Button giQualityButton = settingButton(
+                TotemLumenVideoSettingsScreen.giQualityLabel(),
+                RendererSettings::cycleGiQuality
+        );
+        Button shadowQualityButton = settingButton(
+                TotemLumenVideoSettingsScreen.shadowQualityLabel(),
+                RendererSettings::cycleShadowQuality
+        );
+        list.addSmall(giQualityButton, shadowQualityButton);
 
-            rendererEnabledButton = button(
-                    TotemLumenVideoSettingsScreen.rendererEnabledLabel(),
-                    RendererSettings::toggleRendererEnabled
-            );
-            Button diagnosticsButton = Button.builder(
-                    Component.translatable("screen.totem-lumen.diagnostics"),
-                    ignored -> client.gui.setScreen(new TotemLumenDiagnosticsScreen(screen))
-            ).bounds(0, 0, 150, 20).build();
-            list.addSmall(rendererEnabledButton, diagnosticsButton);
+        Button rayDistanceButton = settingButton(
+                TotemLumenVideoSettingsScreen.rayDistanceLabel(),
+                RendererSettings::cycleRayDistance
+        );
+        Button internalResolutionButton = settingButton(
+                TotemLumenVideoSettingsScreen.internalResolutionLabel(),
+                RendererSettings::cycleInternalResolution
+        );
+        list.addSmall(rayDistanceButton, internalResolutionButton);
 
-            giQualityButton = button(
-                    TotemLumenVideoSettingsScreen.giQualityLabel(),
-                    RendererSettings::cycleGiQuality
-            );
-            shadowQualityButton = button(
-                    TotemLumenVideoSettingsScreen.shadowQualityLabel(),
-                    RendererSettings::cycleShadowQuality
-            );
-            list.addSmall(giQualityButton, shadowQualityButton);
+        Button reflectionsEnabledButton = settingButton(
+                TotemLumenVideoSettingsScreen.reflectionsEnabledLabel(),
+                RendererSettings::toggleReflectionsEnabled
+        );
+        Button waterReflectionsButton = settingButton(
+                TotemLumenVideoSettingsScreen.waterReflectionsLabel(),
+                RendererSettings::toggleWaterReflections
+        );
+        list.addSmall(reflectionsEnabledButton, waterReflectionsButton);
 
-            rayDistanceButton = button(
-                    TotemLumenVideoSettingsScreen.rayDistanceLabel(),
-                    RendererSettings::cycleRayDistance
-            );
-            internalResolutionButton = button(
-                    TotemLumenVideoSettingsScreen.internalResolutionLabel(),
-                    RendererSettings::cycleInternalResolution
-            );
-            list.addSmall(rayDistanceButton, internalResolutionButton);
+        Button reflectionBouncesButton = settingButton(
+                TotemLumenVideoSettingsScreen.reflectionBouncesLabel(),
+                RendererSettings::cycleReflectionBounces
+        );
+        Button reflectionDistanceButton = settingButton(
+                TotemLumenVideoSettingsScreen.reflectionDistanceLabel(),
+                RendererSettings::cycleReflectionDistance
+        );
+        list.addSmall(reflectionBouncesButton, reflectionDistanceButton);
 
-            reflectionsEnabledButton = button(
-                    TotemLumenVideoSettingsScreen.reflectionsEnabledLabel(),
-                    RendererSettings::toggleReflectionsEnabled
-            );
-            waterReflectionsButton = button(
-                    TotemLumenVideoSettingsScreen.waterReflectionsLabel(),
-                    RendererSettings::toggleWaterReflections
-            );
-            list.addSmall(reflectionsEnabledButton, waterReflectionsButton);
+        Button temporalQualityButton = settingButton(
+                TotemLumenVideoSettingsScreen.temporalQualityLabel(),
+                RendererSettings::cycleTemporalQuality
+        );
+        Button denoiseQualityButton = settingButton(
+                TotemLumenVideoSettingsScreen.denoiseQualityLabel(),
+                RendererSettings::cycleDenoiseQuality
+        );
+        list.addSmall(temporalQualityButton, denoiseQualityButton);
 
-            reflectionBouncesButton = button(
-                    TotemLumenVideoSettingsScreen.reflectionBouncesLabel(),
-                    RendererSettings::cycleReflectionBounces
-            );
-            reflectionDistanceButton = button(
-                    TotemLumenVideoSettingsScreen.reflectionDistanceLabel(),
-                    RendererSettings::cycleReflectionDistance
-            );
-            list.addSmall(reflectionBouncesButton, reflectionDistanceButton);
+        refreshTotemControls(
+                giQualityButton,
+                shadowQualityButton,
+                rayDistanceButton,
+                internalResolutionButton,
+                reflectionsEnabledButton,
+                waterReflectionsButton,
+                reflectionBouncesButton,
+                reflectionDistanceButton,
+                temporalQualityButton,
+                denoiseQualityButton
+        );
+    }
 
-            temporalQualityButton = button(
-                    TotemLumenVideoSettingsScreen.temporalQualityLabel(),
-                    RendererSettings::cycleTemporalQuality
-            );
-            denoiseQualityButton = button(
-                    TotemLumenVideoSettingsScreen.denoiseQualityLabel(),
-                    RendererSettings::cycleDenoiseQuality
-            );
-            list.addSmall(temporalQualityButton, denoiseQualityButton);
-
-            refresh();
-        }
-
-        private Button button(Component label, Runnable action) {
-            return Button.builder(label, ignored -> {
-                action.run();
-                refresh();
-            }).bounds(0, 0, 150, 20).build();
-        }
-
-        private void collectVanillaRendererWidgets(Options options) {
-            addVanillaWidget(options.graphicsPreset());
-            addVanillaWidget(options.ambientOcclusion());
-            addVanillaWidget(options.entityShadows());
-            addVanillaWidget(options.cloudStatus());
-            addVanillaWidget(options.cloudRange());
-            addVanillaWidget(options.weatherRadius());
-            addVanillaWidget(options.cutoutLeaves());
-            addVanillaWidget(options.improvedTransparency());
-            addVanillaWidget(options.chunkSectionFadeInTime());
-            addVanillaWidget(options.textureFiltering());
-        }
-
-        private void addVanillaWidget(net.minecraft.client.OptionInstance<?> option) {
-            AbstractWidget widget = list.findOption(option);
-            if (widget != null) {
-                vanillaRendererWidgets.add(widget);
+    private static Button settingButton(Component label, Runnable action) {
+        final Button[] self = new Button[1];
+        Button button = Button.builder(label, ignored -> {
+            action.run();
+            Button current = self[0];
+            if (current != null) {
+                // Individual labels are refreshed by a lightweight screen rebuild. This also keeps
+                // dependent reflection controls in sync without duplicating per-button state logic.
+                Minecraft client = Minecraft.getInstance();
+                if (client.screen instanceof VideoSettingsScreen videoSettings) {
+                    videoSettings.rebuildWidgets();
+                }
             }
-        }
+        }).bounds(0, 0, 150, 20).build();
+        self[0] = button;
+        return button;
+    }
 
-        private void refresh() {
-            boolean rendererEnabled = RendererSettings.rendererEnabled();
-            boolean reflectionsEnabled = rendererEnabled && RendererSettings.reflectionsEnabled();
+    private static void refreshTotemControls(
+            Button giQualityButton,
+            Button shadowQualityButton,
+            Button rayDistanceButton,
+            Button internalResolutionButton,
+            Button reflectionsEnabledButton,
+            Button waterReflectionsButton,
+            Button reflectionBouncesButton,
+            Button reflectionDistanceButton,
+            Button temporalQualityButton,
+            Button denoiseQualityButton
+    ) {
+        boolean reflectionsEnabled = RendererSettings.reflectionsEnabled();
 
-            rendererEnabledButton.setMessage(TotemLumenVideoSettingsScreen.rendererEnabledLabel());
-            giQualityButton.setMessage(TotemLumenVideoSettingsScreen.giQualityLabel());
-            shadowQualityButton.setMessage(TotemLumenVideoSettingsScreen.shadowQualityLabel());
-            rayDistanceButton.setMessage(TotemLumenVideoSettingsScreen.rayDistanceLabel());
-            internalResolutionButton.setMessage(TotemLumenVideoSettingsScreen.internalResolutionLabel());
-            reflectionsEnabledButton.setMessage(TotemLumenVideoSettingsScreen.reflectionsEnabledLabel());
-            waterReflectionsButton.setMessage(TotemLumenVideoSettingsScreen.waterReflectionsLabel());
-            reflectionBouncesButton.setMessage(TotemLumenVideoSettingsScreen.reflectionBouncesLabel());
-            reflectionDistanceButton.setMessage(TotemLumenVideoSettingsScreen.reflectionDistanceLabel());
-            temporalQualityButton.setMessage(TotemLumenVideoSettingsScreen.temporalQualityLabel());
-            denoiseQualityButton.setMessage(TotemLumenVideoSettingsScreen.denoiseQualityLabel());
+        giQualityButton.setMessage(TotemLumenVideoSettingsScreen.giQualityLabel());
+        shadowQualityButton.setMessage(TotemLumenVideoSettingsScreen.shadowQualityLabel());
+        rayDistanceButton.setMessage(TotemLumenVideoSettingsScreen.rayDistanceLabel());
+        internalResolutionButton.setMessage(TotemLumenVideoSettingsScreen.internalResolutionLabel());
+        reflectionsEnabledButton.setMessage(TotemLumenVideoSettingsScreen.reflectionsEnabledLabel());
+        waterReflectionsButton.setMessage(TotemLumenVideoSettingsScreen.waterReflectionsLabel());
+        reflectionBouncesButton.setMessage(TotemLumenVideoSettingsScreen.reflectionBouncesLabel());
+        reflectionDistanceButton.setMessage(TotemLumenVideoSettingsScreen.reflectionDistanceLabel());
+        temporalQualityButton.setMessage(TotemLumenVideoSettingsScreen.temporalQualityLabel());
+        denoiseQualityButton.setMessage(TotemLumenVideoSettingsScreen.denoiseQualityLabel());
 
-            giQualityButton.active = rendererEnabled;
-            shadowQualityButton.active = rendererEnabled;
-            rayDistanceButton.active = rendererEnabled;
-            internalResolutionButton.active = rendererEnabled;
-            reflectionsEnabledButton.active = rendererEnabled;
-            temporalQualityButton.active = rendererEnabled;
-            denoiseQualityButton.active = rendererEnabled;
-
-            waterReflectionsButton.active = reflectionsEnabled;
-            reflectionBouncesButton.active = reflectionsEnabled;
-            reflectionDistanceButton.active = reflectionsEnabled;
-
-            for (AbstractWidget widget : vanillaRendererWidgets) {
-                widget.active = !rendererEnabled;
-            }
-        }
+        waterReflectionsButton.active = reflectionsEnabled;
+        reflectionBouncesButton.active = reflectionsEnabled;
+        reflectionDistanceButton.active = reflectionsEnabled;
     }
 }
