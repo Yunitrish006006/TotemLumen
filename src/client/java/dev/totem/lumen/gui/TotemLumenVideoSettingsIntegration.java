@@ -2,8 +2,6 @@ package dev.totem.lumen.gui;
 
 import dev.totem.lumen.mixin.OptionsSubScreenAccessor;
 import dev.totem.lumen.render.RendererSettings;
-import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
-import net.fabricmc.fabric.api.client.screen.v1.Screens;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.OptionsList;
@@ -11,42 +9,26 @@ import net.minecraft.client.gui.screens.options.VideoSettingsScreen;
 import net.minecraft.network.chat.Component;
 
 /**
- * Integrates the active rendering profile directly into Minecraft's Video Settings screen.
+ * Injects Totem Lumen controls directly into Minecraft's native "Quality & Performance" section.
  *
- * <p>The profile selector is always visible. Minecraft profile uses vanilla world-render controls.
- * Totem Lumen profile replaces those controls with Totem-specific RT controls while shared display
- * and scene-availability options remain supplied by Minecraft.</p>
+ * <p>No separate Totem or rendering category is created. The render-profile selector occupies the
+ * first row of the native quality section. Minecraft profile keeps vanilla quality options; Totem
+ * Lumen profile filters replaced vanilla renderer controls and inserts Totem-specific RT controls
+ * in the same section.</p>
  */
 public final class TotemLumenVideoSettingsIntegration {
-    private static boolean initialized;
-
     private TotemLumenVideoSettingsIntegration() {
     }
 
-    public static synchronized void initialize() {
-        if (initialized) return;
-        initialized = true;
-
-        ScreenEvents.AFTER_INIT.register((client, screen, scaledWidth, scaledHeight) -> {
-            if (!(screen instanceof VideoSettingsScreen videoSettings)) return;
-
-            OptionsList optionsList = Screens.getWidgets(screen).stream()
-                    .filter(OptionsList.class::isInstance)
-                    .map(OptionsList.class::cast)
-                    .findFirst()
-                    .orElse(null);
-            if (optionsList == null) return;
-
-            installProfileControls(client, videoSettings, optionsList);
-        });
+    /** Retained as a stable client-init entry point; the actual UI injection is mixin-driven. */
+    public static void initialize() {
     }
 
-    private static void installProfileControls(
-            Minecraft client,
+    public static void addQualityControls(
             VideoSettingsScreen screen,
             OptionsList list
     ) {
-        list.addHeader(Component.translatable("screen.totem-lumen.profile_section"));
+        Minecraft client = Minecraft.getInstance();
 
         Button profileButton = Button.builder(
                 TotemLumenVideoSettingsScreen.renderProfileLabel(),
@@ -66,8 +48,6 @@ public final class TotemLumenVideoSettingsIntegration {
         if (!RendererSettings.rendererEnabled()) {
             return;
         }
-
-        list.addHeader(Component.translatable("screen.totem-lumen.video_section"));
 
         Button giQualityButton = settingButton(
                 client,
@@ -139,18 +119,10 @@ public final class TotemLumenVideoSettingsIntegration {
         );
         list.addSmall(temporalQualityButton, denoiseQualityButton);
 
-        refreshTotemControls(
-                giQualityButton,
-                shadowQualityButton,
-                rayDistanceButton,
-                internalResolutionButton,
-                reflectionsEnabledButton,
-                waterReflectionsButton,
-                reflectionBouncesButton,
-                reflectionDistanceButton,
-                temporalQualityButton,
-                denoiseQualityButton
-        );
+        boolean reflectionsEnabled = RendererSettings.reflectionsEnabled();
+        waterReflectionsButton.active = reflectionsEnabled;
+        reflectionBouncesButton.active = reflectionsEnabled;
+        reflectionDistanceButton.active = reflectionsEnabled;
     }
 
     private static Button settingButton(
@@ -175,35 +147,5 @@ public final class TotemLumenVideoSettingsIntegration {
                 client,
                 accessor.totemLumen$getOptions()
         ));
-    }
-
-    private static void refreshTotemControls(
-            Button giQualityButton,
-            Button shadowQualityButton,
-            Button rayDistanceButton,
-            Button internalResolutionButton,
-            Button reflectionsEnabledButton,
-            Button waterReflectionsButton,
-            Button reflectionBouncesButton,
-            Button reflectionDistanceButton,
-            Button temporalQualityButton,
-            Button denoiseQualityButton
-    ) {
-        boolean reflectionsEnabled = RendererSettings.reflectionsEnabled();
-
-        giQualityButton.setMessage(TotemLumenVideoSettingsScreen.giQualityLabel());
-        shadowQualityButton.setMessage(TotemLumenVideoSettingsScreen.shadowQualityLabel());
-        rayDistanceButton.setMessage(TotemLumenVideoSettingsScreen.rayDistanceLabel());
-        internalResolutionButton.setMessage(TotemLumenVideoSettingsScreen.internalResolutionLabel());
-        reflectionsEnabledButton.setMessage(TotemLumenVideoSettingsScreen.reflectionsEnabledLabel());
-        waterReflectionsButton.setMessage(TotemLumenVideoSettingsScreen.waterReflectionsLabel());
-        reflectionBouncesButton.setMessage(TotemLumenVideoSettingsScreen.reflectionBouncesLabel());
-        reflectionDistanceButton.setMessage(TotemLumenVideoSettingsScreen.reflectionDistanceLabel());
-        temporalQualityButton.setMessage(TotemLumenVideoSettingsScreen.temporalQualityLabel());
-        denoiseQualityButton.setMessage(TotemLumenVideoSettingsScreen.denoiseQualityLabel());
-
-        waterReflectionsButton.active = reflectionsEnabled;
-        reflectionBouncesButton.active = reflectionsEnabled;
-        reflectionDistanceButton.active = reflectionsEnabled;
     }
 }
