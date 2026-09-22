@@ -347,3 +347,8 @@ Alpha 57 separates GI sampling from the shared shadow-quality enum so GI tiers c
 ## Alpha 58 render profiles
 
 Alpha 58 replaces the Totem renderer on/off control with a persistent render profile selector: Minecraft or Totem Lumen. Video Settings is rebuilt when the profile changes. Minecraft profile shows the normal vanilla renderer controls and omits Totem-specific quality controls. Totem Lumen profile filters vanilla world-render-only options from the native Video Settings option arrays and inserts Totem GI, shadow, ray-distance, internal-resolution, reflection, temporal and denoise controls. Shared display/interface controls plus render/simulation/entity distance remain available in both profiles. Legacy rendererEnabled config is migrated automatically when renderProfile is absent.
+
+
+## Alpha 59 native Quality & Performance integration
+
+Alpha 59 removes the extra Rendering and Totem Lumen section headers from Video Settings. The render-profile selector and all Totem-specific quality controls are injected directly beneath Minecraft's native Quality & Performance header. Minecraft profile shows the normal vanilla quality controls; Totem Lumen profile filters only the world-render controls Totem replaces and inserts GI, shadow, ray-distance, internal-resolution, reflection, temporal and denoise controls in the same native section. A Minecraft 26.2 verifier now gates the VideoSettingsScreen quality/display/preference option methods and the addOptions injection descriptor.
