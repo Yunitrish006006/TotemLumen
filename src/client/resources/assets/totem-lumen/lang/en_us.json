@@ -91,5 +91,7 @@
   "screen.totem-lumen.compile_hud.backend": "Vulkan backend",
   "screen.totem-lumen.compile_hud.bootstrap": "Base renderer setup",
   "screen.totem-lumen.compile_hud.full": "Lighting / materials / entities",
-  "screen.totem-lumen.compile_hud.advanced": "Reflections"
+  "screen.totem-lumen.compile_hud.advanced": "Reflections",
+  "screen.totem-lumen.video_section": "Totem Lumen",
+  "screen.totem-lumen.video_section_hint": "Totem Lumen replaces Minecraft world-render quality controls while enabled."
 }
