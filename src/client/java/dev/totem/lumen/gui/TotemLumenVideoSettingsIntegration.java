@@ -1,5 +1,6 @@
 package dev.totem.lumen.gui;
 
+import dev.totem.lumen.mixin.OptionsSubScreenAccessor;
 import dev.totem.lumen.render.RendererSettings;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
 import net.fabricmc.fabric.api.client.screen.v1.Screens;
@@ -51,9 +52,7 @@ public final class TotemLumenVideoSettingsIntegration {
                 TotemLumenVideoSettingsScreen.renderProfileLabel(),
                 ignored -> {
                     RendererSettings.cycleRenderProfile();
-                    // Rebuild the native Video Settings screen so its profile-dependent option
-                    // arrays are reconstructed instead of leaving disabled/blank stale rows.
-                    screen.rebuildWidgets();
+                    reopenVideoSettings(client, screen);
                 }
         ).bounds(0, 0, 150, 20).build();
 
@@ -134,22 +133,28 @@ public final class TotemLumenVideoSettingsIntegration {
         );
     }
 
-    private static Button settingButton(Component label, Runnable action) {
-        final Button[] self = new Button[1];
-        Button button = Button.builder(label, ignored -> {
+    private static Button settingButton(
+            Minecraft client,
+            VideoSettingsScreen screen,
+            Component label,
+            Runnable action
+    ) {
+        return Button.builder(label, ignored -> {
             action.run();
-            Button current = self[0];
-            if (current != null) {
-                // Individual labels are refreshed by a lightweight screen rebuild. This also keeps
-                // dependent reflection controls in sync without duplicating per-button state logic.
-                Minecraft client = Minecraft.getInstance();
-                if (client.screen instanceof VideoSettingsScreen videoSettings) {
-                    videoSettings.rebuildWidgets();
-                }
-            }
+            reopenVideoSettings(client, screen);
         }).bounds(0, 0, 150, 20).build();
-        self[0] = button;
-        return button;
+    }
+
+    private static void reopenVideoSettings(
+            Minecraft client,
+            VideoSettingsScreen screen
+    ) {
+        OptionsSubScreenAccessor accessor = (OptionsSubScreenAccessor) screen;
+        client.gui.setScreen(new VideoSettingsScreen(
+                accessor.totemLumen$getLastScreen(),
+                client,
+                accessor.totemLumen$getOptions()
+        ));
     }
 
     private static void refreshTotemControls(
