@@ -1023,7 +1023,10 @@ public final class P5StableLookupRenderer {
 
         int windowWidth = Math.max(1, Minecraft.getInstance().getWindow().getWidth());
         int windowHeight = Math.max(1, Minecraft.getInstance().getWindow().getHeight());
-        int targetWidth = RendererSettings.internalResolution().targetWidth(windowWidth);
+        int targetWidth = RendererSettings.internalResolution().targetWidth(
+                windowWidth,
+                windowHeight
+        );
         int targetHeight = Math.max(1, Math.round(targetWidth * (windowHeight / (float) windowWidth)));
         // The world-takeover blit samples the whole output texture. Keep the resource extent
         // equal to the active internal resolution so there is no unused HIGH-resolution padding
@@ -1033,12 +1036,13 @@ public final class P5StableLookupRenderer {
 
         if (settingsChanged) {
             TotemLumenClient.LOGGER.info(
-                    "Renderer settings ACTIVE: window={}x{}, render={}x{}, internalResolution={}, giSamples={}, shadowSamples={}, rayDistance={}, reflections={}, reflectionBounces={}, reflectionDistance={}, temporal={}, denoiseRadius={}",
+                    "Renderer settings ACTIVE: window={}x{}, render={}x{}, internalResolution={}, pixelBudget={}, giSamples={}, shadowSamples={}, rayDistance={}, reflections={}, reflectionBounces={}, reflectionDistance={}, temporal={}, denoiseRadius={}",
                     windowWidth,
                     windowHeight,
                     targetWidth,
                     targetHeight,
                     RendererSettings.internalResolution(),
+                    RendererSettings.internalResolution().maxPixels(),
                     RendererSettings.giQuality().samples(),
                     RendererSettings.shadowQuality().samples(),
                     RendererSettings.rayDistance(),
