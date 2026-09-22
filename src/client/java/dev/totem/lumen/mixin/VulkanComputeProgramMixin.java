@@ -62,11 +62,14 @@ public abstract class VulkanComputeProgramMixin {
     )
     private static void totemLumen$selectOptimization(long options, int requestedLevel) {
         String threadName = Thread.currentThread().getName();
-        int effectiveLevel = threadName.equals(P12_FULL_WORKER)
-                || threadName.equals(P16_WORKER)
-                || threadName.equals(P17_WORKER)
-                ? Shaderc.shaderc_optimization_level_zero
-                : requestedLevel;
+        int effectiveLevel;
+        if (threadName.equals(P12_FULL_WORKER)) {
+            effectiveLevel = Shaderc.shaderc_optimization_level_size;
+        } else if (threadName.equals(P16_WORKER) || threadName.equals(P17_WORKER)) {
+            effectiveLevel = Shaderc.shaderc_optimization_level_zero;
+        } else {
+            effectiveLevel = requestedLevel;
+        }
         Shaderc.shaderc_compile_options_set_optimization_level(options, effectiveLevel);
     }
 
