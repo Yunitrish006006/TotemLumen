@@ -22,6 +22,7 @@ public final class P17DynamicEntityGpuUploader {
     private static volatile long lastTextureCopyBytes;
     private static volatile long lastQuadByteOffset = -1L;
     private static volatile long lastQuadCopyBytes;
+    private static volatile long lastPackNanos;
     private static long lastPackedRevision = Long.MIN_VALUE;
     private static long lastPackedMaterialRevision = Long.MIN_VALUE;
     private static boolean copyPending;
@@ -65,6 +66,7 @@ public final class P17DynamicEntityGpuUploader {
         int p14BaseWord = Math.addExact(pixelBaseWord, pixelCount);
         int entityBaseWord = Math.addExact(p14BaseWord, P14ModelMeshGpuLayout.MAX_STORAGE_WORDS);
 
+        long packStartedNanos = System.nanoTime();
         GpuDynamicEntityScene.PackResult packed = writeMaterialPayload
                 ? GpuDynamicEntityScene.pack(
                         buffer,
@@ -98,6 +100,7 @@ public final class P17DynamicEntityGpuUploader {
         lastQuadCopyBytes = (long) packed.totalQuads()
                 * GpuDynamicEntityScene.QUAD_WORDS_PER_RECORD
                 * Integer.BYTES;
+        lastPackNanos = Math.max(0L, System.nanoTime() - packStartedNanos);
 
         lastPackedRevision = state.revision();
         lastPackedMaterialRevision = EntityMaterialRuleRegistry.revision();
@@ -170,6 +173,14 @@ public final class P17DynamicEntityGpuUploader {
 
     public static long lastQuadCopyBytes() {
         return lastQuadCopyBytes;
+    }
+
+    public static long lastPackNanos() {
+        return lastPackNanos;
+    }
+
+    public static long lastUploadBytes() {
+        return lastMetadataCopyBytes + lastTextureCopyBytes + lastQuadCopyBytes;
     }
 
     public static synchronized boolean consumeCopyPending() {
