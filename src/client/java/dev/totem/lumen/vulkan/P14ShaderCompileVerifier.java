@@ -474,11 +474,21 @@ public final class P14ShaderCompileVerifier {
                 "surface.emission = surface.albedo",
                 label + " LabPBR per-texel emission"
         );
+        requireSourceMarker(
+                source,
+                "float p18DiffuseMetalWeight(float metallic)",
+                label + " metallic diffuse fallback helper"
+        );
+        requireSourceMarker(
+                source,
+                "return scene.data[46] != 0u ? (1.0 - metallic) : 1.0;",
+                label + " reflection-aware metallic fallback"
+        );
         if (!reflectionPass) {
             requireSourceMarker(
                     source,
-                    "vec3 p18Diffuse = p18Surface.albedo * (1.0 - p18Surface.metallic);",
-                    label + " local-light metal diffuse suppression"
+                    "vec3 p18Diffuse = p18Surface.albedo * p18DiffuseMetalWeight(p18Surface.metallic);",
+                    label + " local-light reflection-aware metal diffuse"
             );
         }
         if (reflectionPass) {
