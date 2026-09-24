@@ -24,6 +24,14 @@ public final class RendererBootstrap {
             return;
         }
 
+        if (!RendererSettings.rendererEnabled()) {
+            TotemLumenClient.LOGGER.info(
+                    "Renderer profile {} uses Minecraft's native world renderer; Totem Vulkan bootstrap is not started",
+                    RendererSettings.renderProfile()
+            );
+            return;
+        }
+
         platformProfile = PlatformProfile.detect();
         TotemLumenClient.LOGGER.info("Platform: {}", platformProfile.displayName());
 
@@ -38,6 +46,12 @@ public final class RendererBootstrap {
     }
 
     public static void tick() {
+        if (!RendererSettings.rendererEnabled()) {
+            return;
+        }
+        if (state == RendererState.NEW) {
+            initialize();
+        }
         switch (state) {
             case WAITING_FOR_DEVICE -> detectGraphicsBackend();
             case WAITING_FOR_VULKAN_INTEROP -> tryInitializeVulkanInterop();

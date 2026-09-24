@@ -18,6 +18,24 @@ public final class P12FullBasePipeline {
     public static final String SHADER_NAME = "totem_lumen_p12_full_gi.comp";
     public static final String WORKER_NAME = "TotemLumen-P12FullPipeline";
 
+    public enum PrewarmStage {
+        IDLE("idle"),
+        ASSEMBLING_SOURCE("assembling shader source"),
+        SPIRV_AND_DRIVER("SPIR-V / Vulkan driver pipeline"),
+        READY("ready"),
+        FAILED("failed");
+
+        private final String label;
+
+        PrewarmStage(String label) {
+            this.label = label;
+        }
+
+        public String label() {
+            return label;
+        }
+    }
+
     private static final Object LOCK = new Object();
     private static final ThreadLocal<VulkanComputeProgram> DISPATCH_PROGRAM = new ThreadLocal<>();
 
@@ -29,6 +47,7 @@ public final class P12FullBasePipeline {
     private static volatile Throwable prewarmFailure;
     private static volatile long generation;
     private static volatile boolean prewarmStarted;
+    private static volatile PrewarmStage prewarmStage = PrewarmStage.IDLE;
     private static volatile boolean firstDispatchLogged;
 
     private P12FullBasePipeline() {
@@ -60,6 +79,7 @@ public final class P12FullBasePipeline {
 
             preparedDevice = device;
             prewarmStarted = true;
+            prewarmStage = PrewarmStage.ASSEMBLING_SOURCE;
             prewarmFailure = null;
             workerGeneration = generation;
         }
@@ -78,6 +98,7 @@ public final class P12FullBasePipeline {
         long startedAt = System.nanoTime();
         try {
             String source = buildSourceForVerification();
+            prewarmStage = PrewarmStage.SPIRV_AND_DRIVER;
             TotemLumenClient.LOGGER.info(
                     "Full lighting pipeline prewarm START: shader={}, sourceChars={}",
                     SHADER_NAME,
@@ -97,6 +118,7 @@ public final class P12FullBasePipeline {
                 preparedPipeline = created;
                 created = null;
                 prewarmStarted = false;
+                prewarmStage = PrewarmStage.READY;
                 LOCK.notifyAll();
             }
 
@@ -115,6 +137,7 @@ public final class P12FullBasePipeline {
                 if (workerGeneration == generation) {
                     prewarmFailure = buildFailure;
                     prewarmStarted = false;
+                    prewarmStage = PrewarmStage.FAILED;
                     LOCK.notifyAll();
                 }
             }
@@ -125,6 +148,10 @@ public final class P12FullBasePipeline {
         } finally {
             closePreparedAsync(created, "TotemLumen-P12FullFailedPreparedCleanup");
         }
+    }
+
+    public static PrewarmStage prewarmStage() {
+        return prewarmStage;
     }
 
     /**

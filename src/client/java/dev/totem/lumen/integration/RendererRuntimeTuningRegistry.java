@@ -59,7 +59,7 @@ public final class RendererRuntimeTuningRegistry {
     ) {
         public static final Values DEFAULT = new Values(
                 2.4f,
-                0.75f,
+                1.05f,
                 0.18f,
                 0.85f,
                 1.0f,

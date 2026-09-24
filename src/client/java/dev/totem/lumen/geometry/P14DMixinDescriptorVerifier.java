@@ -7,6 +7,7 @@ import dev.totem.lumen.mixin.EntityRenderDispatcherMixin;
 import dev.totem.lumen.mixin.EntityRendererStateMixin;
 import dev.totem.lumen.mixin.LevelRendererTakeoverMixin;
 import dev.totem.lumen.mixin.SubmitNodeCollectionBlockEntityMixin;
+import dev.totem.lumen.mixin.SubmitNodeCollectionItemMixin;
 import dev.totem.lumen.mixin.VideoSettingsRenderProfileMixin;
 import dev.totem.lumen.mixin.SubmitNodeStorageBlockEntityMixin;
 import net.minecraft.client.DeltaTracker;
@@ -25,6 +26,8 @@ import net.minecraft.client.renderer.feature.ModelFeatureRenderer;
 import net.minecraft.client.renderer.rendertype.RenderType;
 import net.minecraft.client.renderer.state.level.CameraRenderState;
 import net.minecraft.client.renderer.texture.TextureAtlasSprite;
+import net.minecraft.client.renderer.item.ItemStackRenderState;
+import net.minecraft.world.item.ItemDisplayContext;
 import net.minecraft.world.entity.Entity;
 import org.joml.Matrix4fc;
 import org.joml.Vector4f;
@@ -33,6 +36,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 import java.lang.reflect.Method;
 import java.util.Arrays;
+import java.util.List;
 
 /**
  * Build-time regression gate for Minecraft-facing render-submission mixins used by P14D/P17.
@@ -77,6 +81,17 @@ public final class P14DMixinDescriptorVerifier {
             boolean.class
     };
 
+    private static final Class<?>[] SUBMIT_ITEM_26_2 = {
+            PoseStack.class,
+            ItemDisplayContext.class,
+            int.class,
+            int.class,
+            int.class,
+            int[].class,
+            List.class,
+            ItemStackRenderState.FoilType.class
+    };
+
     private P14DMixinDescriptorVerifier() {
     }
 
@@ -91,6 +106,7 @@ public final class P14DMixinDescriptorVerifier {
         );
         verifyEntityStateBinding();
         verifyEntitySubmit();
+        verifyItemSubmit();
         verifyLevelRenderTakeover();
         verifyVideoSettingsProfileHooks();
         System.out.println(
@@ -98,6 +114,7 @@ public final class P14DMixinDescriptorVerifier {
                         + "submitModel=Model+Object+PoseStack+RenderType+III+TextureAtlasSprite+I+CrumblingOverlay, "
                         + "createRenderState=Entity+F->EntityRenderState, "
                         + "entitySubmit=EntityRenderState+CameraRenderState+DDD+PoseStack+SubmitNodeCollector, "
+                        + "itemSubmit=PoseStack+ItemDisplayContext+III+int[]+List<BakedQuad>+FoilType, "
                         + "levelRender=GraphicsResourceAllocator+DeltaTracker+Z+CameraRenderState+Matrix4fc+GpuBufferSlice+Vector4f+Z, "
                         + "videoSettings=qualityOptions/displayOptions/preferenceOptions/addOptions"
         );
@@ -183,6 +200,41 @@ public final class P14DMixinDescriptorVerifier {
 
         verifyEntityCallback("totemLumen$beginEntityCapture");
         verifyEntityCallback("totemLumen$endEntityCapture");
+    }
+
+    private static void verifyItemSubmit() throws Exception {
+        Method target = SubmitNodeCollection.class.getDeclaredMethod("submitItem", SUBMIT_ITEM_26_2);
+        if (target.getReturnType() != void.class) {
+            throw new IllegalStateException("SubmitNodeCollection.submitItem must return void");
+        }
+
+        Method handler = Arrays.stream(SubmitNodeCollectionItemMixin.class.getDeclaredMethods())
+                .filter(method -> method.getName().equals("totemLumen$captureItem"))
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException(
+                        "Missing P17 item-renderer submit callback"
+                ));
+        Class<?>[] callback = handler.getParameterTypes();
+        if (callback.length != SUBMIT_ITEM_26_2.length + 1) {
+            throw new IllegalStateException(
+                    "P17 item callback parameter count mismatch: " + callback.length
+            );
+        }
+        for (int i = 0; i < SUBMIT_ITEM_26_2.length; i++) {
+            if (callback[i] != SUBMIT_ITEM_26_2[i]) {
+                throw new IllegalStateException(
+                        "P17 item callback parameter " + i + " mismatch: expected "
+                                + SUBMIT_ITEM_26_2[i].getName() + " but found " + callback[i].getName()
+                );
+            }
+        }
+        if (callback[callback.length - 1] != CallbackInfo.class) {
+            throw new IllegalStateException("P17 item callback must end with CallbackInfo");
+        }
+
+        if (!List.class.isAssignableFrom(callback[6])) {
+            throw new IllegalStateException("P17 item callback must receive the resolved quad list");
+        }
     }
 
     private static void verifyLevelRenderTakeover() throws Exception {

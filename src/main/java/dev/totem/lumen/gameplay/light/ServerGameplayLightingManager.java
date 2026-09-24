@@ -92,6 +92,10 @@ public final class ServerGameplayLightingManager {
             int workShare = Math.max(1, remainingWork / remainingEngines);
             long timeShare = Math.max(1L, remainingTime / remainingEngines);
             int consumed = candidate.tick(workShare, timeShare);
+            // The RGB terrain field is recomputed locally by each client. Drain the server
+            // change queue so it remains bounded; the server engine is still required by
+            // gameplay consumers such as spawn-light logic.
+            candidate.drainChangedSections();
             remainingWork -= consumed;
             remainingEngines--;
         }

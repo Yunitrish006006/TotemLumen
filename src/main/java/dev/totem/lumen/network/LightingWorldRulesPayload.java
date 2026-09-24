@@ -47,6 +47,7 @@ public record LightingWorldRulesPayload(LightingWorldRuleSet rules) implements C
             buffer.writeFloat(rule.emissionR());
             buffer.writeFloat(rule.emissionG());
             buffer.writeFloat(rule.emissionB());
+            buffer.writeVarInt(rule.gameplayStrength());
         }
     }
 
@@ -62,7 +63,8 @@ public record LightingWorldRulesPayload(LightingWorldRuleSet rules) implements C
             LightingWorldRule rule = new LightingWorldRule(
                     buffer.readFloat(),
                     buffer.readFloat(),
-                    buffer.readFloat()
+                    buffer.readFloat(),
+                    buffer.readVarInt()
             );
             if (rules.put(blockId, rule) != null) {
                 throw new IllegalArgumentException("duplicate lighting world rule for " + blockId);

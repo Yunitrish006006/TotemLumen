@@ -63,11 +63,22 @@ public final class GpuSectionLightLists {
             ToIntFunction<SectionKey> slotResolver,
             EmissionResolver emissionResolver
     ) {
+        return build(sections, slotCapacity, slotResolver, emissionResolver, List.of());
+    }
+
+    /** Builds material lights together with externally supplied world lights. */
+    public static Result build(
+            List<SectionSnapshot> sections,
+            int slotCapacity,
+            ToIntFunction<SectionKey> slotResolver,
+            EmissionResolver emissionResolver,
+            List<PointLight> additionalLights
+    ) {
         if (slotCapacity < 1) {
             throw new IllegalArgumentException("slotCapacity must be positive");
         }
 
-        List<PointLight> lights = collectLights(sections, emissionResolver);
+        List<PointLight> lights = collectLights(sections, emissionResolver, additionalLights);
         int[][] indicesBySlot = new int[slotCapacity][MAX_LIGHTS_PER_SECTION];
         int[] countsBySlot = new int[slotCapacity];
         for (int[] indices : indicesBySlot) {
@@ -116,9 +127,18 @@ public final class GpuSectionLightLists {
 
     private static List<PointLight> collectLights(
             List<SectionSnapshot> sections,
-            EmissionResolver emissionResolver
+            EmissionResolver emissionResolver,
+            List<PointLight> additionalLights
     ) {
         List<PointLight> lights = new ArrayList<>();
+        for (PointLight light : additionalLights) {
+            if (light != null) {
+                lights.add(light);
+                if (lights.size() >= MAX_GLOBAL_LIGHTS) {
+                    return lights;
+                }
+            }
+        }
         outer:
         for (SectionSnapshot section : sections) {
             for (int localY = 0; localY < SectionVoxelData.SIZE; localY++) {

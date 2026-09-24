@@ -36,6 +36,10 @@ final class ServerLightSection {
         return nonZeroCount == 0;
     }
 
+    char[] copyValues() {
+        return values.clone();
+    }
+
     static int index(int x, int y, int z) {
         return ((y & 15) << 8) | ((z & 15) << 4) | (x & 15);
     }

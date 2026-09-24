@@ -42,7 +42,12 @@ public abstract class VideoSettingsRenderProfileMixin {
             Options options,
             CallbackInfoReturnable<OptionInstance<?>[]> cir
     ) {
-        cir.setReturnValue(filterForActiveProfile(options, cir.getReturnValue()));
+        OptionInstance<?>[] filtered = filterForActiveProfile(options, cir.getReturnValue());
+        if (Arrays.stream(filtered).noneMatch(option -> option == options.gamma())) {
+            filtered = Arrays.copyOf(filtered, filtered.length + 1);
+            filtered[filtered.length - 1] = options.gamma();
+        }
+        cir.setReturnValue(filtered);
     }
 
     @Inject(method = "displayOptions", at = @At("RETURN"), cancellable = true)
@@ -50,7 +55,11 @@ public abstract class VideoSettingsRenderProfileMixin {
             Options options,
             CallbackInfoReturnable<OptionInstance<?>[]> cir
     ) {
-        cir.setReturnValue(filterForActiveProfile(options, cir.getReturnValue()));
+        cir.setReturnValue(
+                Arrays.stream(filterForActiveProfile(options, cir.getReturnValue()))
+                        .filter(option -> option != options.gamma())
+                        .toArray(OptionInstance<?>[]::new)
+        );
     }
 
     @Inject(method = "preferenceOptions", at = @At("RETURN"), cancellable = true)

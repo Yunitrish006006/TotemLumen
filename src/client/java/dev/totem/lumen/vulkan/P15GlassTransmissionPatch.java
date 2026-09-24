@@ -186,7 +186,7 @@ final class P15GlassTransmissionPatch {
                         vec3 sun = p13SunColor(sunDirection)
                                 * (0.92 * nDotL * visibility * sunStrength);
                         vec3 moon = p13MoonColor()
-                                * (0.08 * moonNDotL * moonVisibility * moonStrength);
+                                * (0.20 * moonNDotL * moonVisibility * moonStrength);
                 """;
         String newCelestialVisibility = """
                         vec3 sunTransmission = vec3(0.0);

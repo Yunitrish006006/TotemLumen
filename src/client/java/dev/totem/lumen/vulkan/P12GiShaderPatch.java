@@ -126,7 +126,7 @@ final class P12GiShaderPatch {
                         vec3 daySky = mix(dayHorizon, dayZenith, pow(up, 0.70));
                         vec3 nightHorizon = vec3(0.010, 0.014, 0.028);
                         vec3 nightZenith = vec3(0.004, 0.008, 0.026);
-                        vec3 nightSky = mix(nightHorizon, nightZenith, up);
+                        vec3 nightSky = mix(nightHorizon, nightZenith, up) * 1.12;
                         vec3 sky = mix(nightSky, daySky, daylight) * 0.58;
 
                         float sunDot = max(dot(dir, sunDirection), 0.0);
@@ -184,7 +184,7 @@ final class P12GiShaderPatch {
                         vec3 sun = p13SunColor(sunDirection)
                                 * (0.92 * nDotL * visibility * sunStrength);
                         vec3 moon = p13MoonColor()
-                                * (0.08 * moonNDotL * moonVisibility * moonStrength);
+                                * (0.20 * moonNDotL * moonVisibility * moonStrength);
                         return albedo * (skyAmbient + sun + moon) + emitted;
                     }
                     if (environment == 1u) {
@@ -366,6 +366,9 @@ final class P12GiShaderPatch {
         );
         TotemLumenClient.LOGGER.info(
                 "P13 environment lighting patch active: dynamicOverworldSun=true, dynamicOverworldMoon=true, moonPhase=true, moonPhaseSteps=8, skyMissRadiance=true, dimensions=overworld+nether+end+fallback"
+        );
+        TotemLumenClient.LOGGER.info(
+                "P13 celestial environment lighting active: sun=true, moon=true, moonSurfaceEnergy=0.20, stellarAmbient=starfield-patched"
         );
         return source;
     }

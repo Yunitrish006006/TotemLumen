@@ -1,7 +1,6 @@
 package dev.totem.lumen.gameplay.light;
 
 import dev.totem.lumen.TotemLumen;
-import dev.totem.lumen.world.LightingWorldRule;
 import dev.totem.lumen.world.LightingWorldRulesReloadListener;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -19,6 +18,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.Collection;
 
 /**
  * Server-thread authoritative RGB gameplay-light field for one ServerLevel.
@@ -35,6 +35,7 @@ public final class ServerGameplayLightEngine {
     private final Map<ServerSectionKey, ServerLightSection> sections = new HashMap<>();
     private final Map<ServerSectionKey, Map<ServerBlockKey, Character>> sources = new HashMap<>();
     private final Map<ServerSectionKey, Integer> dirtySections = new HashMap<>();
+    private final Set<ServerSectionKey> changedSections = new LinkedHashSet<>();
 
     private final ArrayDeque<ServerSectionKey> pendingAnchors = new ArrayDeque<>();
     private final Set<ServerSectionKey> pendingAnchorSet = new HashSet<>();
@@ -97,6 +98,49 @@ public final class ServerGameplayLightEngine {
         return dirtySections.size();
     }
 
+    /** Returns the current RGB field for every allocated section, used for an initial client sync. */
+    public List<SectionSnapshot> snapshotSections() {
+        List<SectionSnapshot> result = new ArrayList<>(sections.size());
+        for (Map.Entry<ServerSectionKey, ServerLightSection> entry : sections.entrySet()) {
+            if (dirtySections.containsKey(entry.getKey())) {
+                continue;
+            }
+            result.add(snapshot(entry.getKey(), entry.getValue()));
+        }
+        return result;
+    }
+
+    /** Drains changed sections after budgeted propagation so clients receive stable field data. */
+    public List<SectionSnapshot> drainChangedSections() {
+        if (changedSections.isEmpty()) {
+            return List.of();
+        }
+        List<SectionSnapshot> result = new ArrayList<>(changedSections.size());
+        Iterator<ServerSectionKey> iterator = changedSections.iterator();
+        while (iterator.hasNext()) {
+            ServerSectionKey key = iterator.next();
+            // A rebuild clears and reseeds a region incrementally. Do not publish its transient
+            // empty/intermediate values; otherwise the client briefly loses RGB, then receives
+            // it again when propagation reaches the same section. Publish only stable sections.
+            if (dirtySections.containsKey(key)) {
+                continue;
+            }
+            ServerLightSection section = sections.get(key);
+            result.add(new SectionSnapshot(
+                    key.x(), key.y(), key.z(), section == null ? new char[ServerLightSection.VOXEL_COUNT] : section.copyValues()
+            ));
+            iterator.remove();
+        }
+        return result;
+    }
+
+    private static SectionSnapshot snapshot(ServerSectionKey key, ServerLightSection section) {
+        return new SectionSnapshot(key.x(), key.y(), key.z(), section.copyValues());
+    }
+
+    public record SectionSnapshot(int x, int y, int z, char[] values) {
+    }
+
     /** Queue a budgeted source scan for a newly loaded chunk. */
     public void onChunkLoaded(LevelChunk chunk) {
         ChunkKey key = new ChunkKey(chunk.getPos().x(), chunk.getPos().z());
@@ -137,7 +181,11 @@ public final class ServerGameplayLightEngine {
             }
         }
 
-        sections.keySet().removeIf(key -> key.x() == chunkX && key.z() == chunkZ);
+        Set<ServerSectionKey> removedSections = sections.keySet().stream()
+                .filter(key -> key.x() == chunkX && key.z() == chunkZ)
+                .collect(java.util.stream.Collectors.toSet());
+        changedSections.addAll(removedSections);
+        sections.keySet().removeAll(removedSections);
         dirtySections.keySet().removeIf(key -> key.x() == chunkX && key.z() == chunkZ);
 
         for (ServerSectionKey key : removedSourceSections) {
@@ -283,6 +331,7 @@ public final class ServerGameplayLightEngine {
 
     public void clear() {
         sections.clear();
+        changedSections.clear();
         sources.clear();
         dirtySections.clear();
         pendingAnchors.clear();
@@ -409,23 +458,11 @@ public final class ServerGameplayLightEngine {
     }
 
     private char sourceForState(BlockState state) {
-        int vanillaEmission = state.getLightEmission();
-        if (vanillaEmission <= 0) {
-            return 0;
-        }
-
         var blockId = BuiltInRegistries.BLOCK.getKey(state.getBlock());
-        LightingWorldRule rule = LightingWorldRulesReloadListener.currentRules().ruleFor(blockId);
-        EmissionColor color;
-        int strength;
-        if (rule != null) {
-            color = new EmissionColor(rule.emissionR(), rule.emissionG(), rule.emissionB());
-            strength = rule.gameplayStrengthOr(vanillaEmission);
-        } else {
-            color = DefaultEmissionColors.forBlock(blockId.toString(), vanillaEmission);
-            strength = vanillaEmission;
-        }
-        return PackedRgbLight.fromNormalized(color, strength);
+        return GameplayLightSource.packedFor(
+                state,
+                LightingWorldRulesReloadListener.currentRules().ruleFor(blockId)
+        );
     }
 
     private void updateIndexedSource(ServerBlockKey pos, char packed, boolean keepEmitter) {
@@ -464,13 +501,17 @@ public final class ServerGameplayLightEngine {
         ServerSectionKey key = ServerSectionKey.fromBlock(x, y, z);
         ServerLightSection section = sections.get(key);
         if (packed == 0) {
-            return section != null && section.set(x, y, z, 0);
+            boolean changed = section != null && section.set(x, y, z, 0);
+            if (changed) changedSections.add(key);
+            return changed;
         }
         if (section == null) {
             section = new ServerLightSection();
             sections.put(key, section);
         }
-        return section.set(x, y, z, packed);
+        boolean changed = section.set(x, y, z, packed);
+        if (changed) changedSections.add(key);
+        return changed;
     }
 
     private void pruneEmptySections(LightRebuildRegion region) {
@@ -787,8 +828,7 @@ public final class ServerGameplayLightEngine {
                 return;
             }
             mutablePos.set(x, y, z);
-            int attenuation = Math.max(1, level.getBlockState(mutablePos).getLightDampening());
-            int incoming = PackedRgbLight.attenuate(outside, attenuation);
+            int incoming = GameplayLightSource.attenuate(outside, level.getBlockState(mutablePos));
             if (incoming != 0 && setPackedMax(x, y, z, incoming)) {
                 queue.add(PackedServerPos.pack(x, y, z));
             }
@@ -820,8 +860,7 @@ public final class ServerGameplayLightEngine {
                 return;
             }
             mutablePos.set(x, y, z);
-            int attenuation = Math.max(1, level.getBlockState(mutablePos).getLightDampening());
-            int candidate = PackedRgbLight.attenuate(fromPacked, attenuation);
+            int candidate = GameplayLightSource.attenuate(fromPacked, level.getBlockState(mutablePos));
             if (candidate != 0 && setPackedMax(x, y, z, candidate)) {
                 queue.add(PackedServerPos.pack(x, y, z));
             }

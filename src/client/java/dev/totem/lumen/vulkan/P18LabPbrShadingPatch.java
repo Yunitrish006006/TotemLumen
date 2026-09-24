@@ -354,6 +354,7 @@ final class P18LabPbrShadingPatch {
                     surface.metallic = 0.0;
                     surface.reflectionScale = 1.0;
                     surface.f0 = vec3(0.04);
+                    uint resolvedLightEmitterAnchor = 0u;
                     vec4 baselineEmission = materialEmission(hit.materialId);
                     surface.emission = baselineEmission.rgb
                             * baselineEmission.a
@@ -377,6 +378,7 @@ final class P18LabPbrShadingPatch {
                         );
 
                         uint lightEmitterAnchor = scene.data[materialBase + 15u];
+                        resolvedLightEmitterAnchor = lightEmitterAnchor;
                         if ((lightEmitterAnchor & 0x80000000u) != 0u) {
                             vec3 emitterAnchor = vec3(
                                 float(lightEmitterAnchor & 255u),
@@ -503,6 +505,28 @@ final class P18LabPbrShadingPatch {
                                     * uintBitsToFloat(scene.data[83])
                                     * labPbrEmissionScale);
                         }
+                    }
+
+                    // Keep the flame's colored glow on the side pixels as well. LabPBR's
+                    // specular map is authoritative for the flame tip, but its zero-emission
+                    // side texels must not erase the block's point-emitter identity.
+                    if ((resolvedLightEmitterAnchor & 0x80000000u) != 0u) {
+                        vec3 emitterAnchor = vec3(
+                            float(resolvedLightEmitterAnchor & 255u),
+                            float((resolvedLightEmitterAnchor >> 8u) & 255u),
+                            float((resolvedLightEmitterAnchor >> 16u) & 255u)
+                        ) / 255.0;
+                        vec3 localHitPoint = rayOrigin
+                                + rayDirection * hit.distance
+                                - vec3(hit.voxel);
+                        float emitterDistance = distance(localHitPoint, emitterAnchor);
+                        float sideGlow = 1.0 - smoothstep(0.08, 0.42, emitterDistance);
+                        vec4 emitterMaterial = materialEmission(hit.materialId);
+                        surface.emission += emitterMaterial.rgb
+                                * emitterMaterial.a
+                                * sideGlow
+                                * 0.35
+                                * uintBitsToFloat(scene.data[83]);
                     }
 
                     surface.roughness = clamp(surface.roughness * roughnessScale, 0.0, 1.0);
@@ -656,6 +680,12 @@ final class P18LabPbrShadingPatch {
                     );
                     vec3 p18Diffuse = p18Surface.albedo * (1.0 - p18Surface.metallic * float(scene.data[46]));
                     vec3 emitted = emissiveMode ? p18Surface.emission : vec3(0.0);
+                    if (scene.data[92] == 0u) {
+                        return packRgba(
+                            p18Diffuse * (uintBitsToFloat(scene.data[82]) * p18Surface.ao) + emitted,
+                            255u
+                        );
+                    }
                 """,
                 "local light material"
         );

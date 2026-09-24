@@ -10,6 +10,41 @@
 
 The core Player/LivingEntity path is active, but P17 does not claim complete Minecraft entity-renderer coverage. Non-Model renderer families, armor/equipment, alpha silhouettes and first-person view-model rendering remain explicit follow-ups.
 
+## Alpha 59 item-renderer adapter — compiled; runtime acceptance pending
+
+The next coverage slice adds a client mixin at Minecraft 26.2's
+`SubmitNodeCollection.submitItem(...)` boundary. While an `minecraft:item` entity submission is
+active, the adapter copies renderer-resolved `BakedQuad` positions and packed UVs into the same
+immutable P17 snapshot path used by living entities. It does not alter vanilla item rendering and
+does not yet claim item-specific material identity, alpha fidelity, or special-model renderer
+support; those remain separate material/renderer follow-ups.
+
+Required acceptance evidence for this slice:
+
+1. Java 25 `check` passes, including the P17 item-submit descriptor gate.
+2. The client starts with no mixin application error for `SubmitNodeCollection.submitItem`.
+3. Dropped items produce `P17 dynamic entity geometry capture active: type=minecraft:item` and a
+   nonzero quad count in the log.
+4. The P17 GPU diagnostic reports the item geometry in its entity/quad totals without section
+   overflow or renderer disablement.
+5. With the Totem Lumen render profile active, a dropped stone, a flat item and a block-shaped item
+   remain visible in the ray-traced world while the vanilla item submission remains visually intact.
+6. Item movement/despawn and world exit/rejoin do not leave stale P17 geometry.
+
+This is an implementation/runtime gate, not a claim that the runtime gate has passed.
+
+## Alpha 59 vehicle/projectile model-family expansion
+
+The existing `EntityRenderDispatcher.submit(...)` scope now admits explicit vehicle and projectile
+families that use Minecraft's `submitModel(...)` path: boats, chest boats, minecarts, arrows,
+tridents, firework rockets and the common thrown/fireball projectile types. This reuses the already
+verified model capture and bounded P17 scene path; it does not claim support for text/display or
+custom geometry command families.
+
+Runtime acceptance for this slice requires at least one boat or minecart and two projectile types
+to produce nonzero P17 geometry without stale snapshots, section overflow or vanilla renderer
+regression.
+
 ## Goal
 
 Alpha 42 makes players and ordinary living entities first-class geometry in Totem Lumen's ray-traced scene instead of leaving them as a vanilla-only layer over a ray-traced world.

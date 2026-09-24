@@ -58,7 +58,7 @@ The server light field is intentionally not physically rendered light. It is a d
 
 | Property | Server policy |
 | --- | --- |
-| Channel range | RGB `0..15` |
+| Channel range | RGB chroma + intensity A, each `0..15` |
 | Combination | component-wise maximum |
 | Attenuation | at least 1 per block step |
 | Maximum propagation | 15 block steps |

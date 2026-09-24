@@ -14,7 +14,8 @@ import java.util.concurrent.atomic.AtomicLong;
 /** Persistent client-side renderer quality settings. */
 public final class RendererSettings {
     public enum RenderProfile {
-        MINECRAFT,
+        MINECRAFT_PURE,
+        MINECRAFT_RGB,
         TOTEM_LUMEN;
 
         public RenderProfile next() {
@@ -159,6 +160,17 @@ public final class RendererSettings {
         }
     }
 
+    public enum LocalLightQuality {
+        OFF,
+        LOW,
+        FULL;
+
+        public LocalLightQuality next() {
+            LocalLightQuality[] values = values();
+            return values[(ordinal() + 1) % values.length];
+        }
+    }
+
     private static final Path CONFIG_PATH = FabricLoader.getInstance()
             .getConfigDir()
             .resolve("totem-lumen.properties");
@@ -171,6 +183,8 @@ public final class RendererSettings {
     private static InternalResolution internalResolution = InternalResolution.BALANCED;
     private static boolean reflectionsEnabled = true;
     private static boolean waterReflections = true;
+    private static boolean entityRayTracingEnabled = true;
+    private static LocalLightQuality localLightQuality = LocalLightQuality.FULL;
     private static int reflectionBounces = 1;
     private static int reflectionDistance = 64;
     private static TemporalQuality temporalQuality = TemporalQuality.STABLE;
@@ -187,17 +201,12 @@ public final class RendererSettings {
             properties.load(input);
             String savedProfile = properties.getProperty("renderProfile");
             if (savedProfile != null) {
-                renderProfile = parseEnum(
-                        properties,
-                        "renderProfile",
-                        RenderProfile.class,
-                        renderProfile
-                );
+                renderProfile = parseRenderProfile(savedProfile, renderProfile);
             } else {
                 // Alpha 57 and earlier stored only rendererEnabled. Preserve the user's choice.
                 renderProfile = parseBoolean(properties, "rendererEnabled", true)
                         ? RenderProfile.TOTEM_LUMEN
-                        : RenderProfile.MINECRAFT;
+                        : RenderProfile.MINECRAFT_PURE;
             }
             giQuality = parseEnum(properties, "giQuality", GiQuality.class, giQuality);
             shadowQuality = parseEnum(properties, "shadowQuality", Quality.class, shadowQuality);
@@ -213,6 +222,17 @@ public final class RendererSettings {
             boolean legacyEnabled = legacyBounces > 0;
             reflectionsEnabled = parseBoolean(properties, "reflectionsEnabled", legacyEnabled);
             waterReflections = parseBoolean(properties, "waterReflections", waterReflections);
+            entityRayTracingEnabled = parseBoolean(
+                    properties,
+                    "entityRayTracingEnabled",
+                    entityRayTracingEnabled
+            );
+            localLightQuality = parseEnum(
+                    properties,
+                    "localLightQuality",
+                    LocalLightQuality.class,
+                    localLightQuality
+            );
             reflectionBounces = Math.max(1, legacyBounces);
             reflectionDistance = sanitizeReflectionDistance(
                     parseInt(properties, "reflectionDistance", reflectionDistance)
@@ -229,9 +249,8 @@ public final class RendererSettings {
                     DenoiseQuality.class,
                     denoiseQuality
             );
-
             TotemLumenClient.LOGGER.info(
-                    "Loaded renderer settings: renderProfile={}, gi={}, shadows={}, rayDistance={}, resolution={}, reflections={}, waterReflections={}, reflectionBounces={}, reflectionDistance={}, temporal={}, denoise={}",
+                    "Loaded renderer settings: renderProfile={}, gi={}, shadows={}, rayDistance={}, resolution={}, reflections={}, waterReflections={}, entityRayTracing={}, localLights={}, reflectionBounces={}, reflectionDistance={}, temporal={}, denoise={}",
                     renderProfile,
                     giQuality,
                     shadowQuality,
@@ -239,6 +258,8 @@ public final class RendererSettings {
                     internalResolution,
                     reflectionsEnabled,
                     waterReflections,
+                    entityRayTracingEnabled,
+                    localLightQuality,
                     reflectionBounces,
                     reflectionDistance,
                     temporalQuality,
@@ -258,13 +279,17 @@ public final class RendererSettings {
     }
 
     public static synchronized boolean rendererEnabled() {
+        // MINECRAFT_RGB deliberately stays on Minecraft's normal world renderer. Its RGB light
+        // field is presented by the independent vanilla overlay path, so it must never start or
+        // wait for Totem Lumen's monolithic Vulkan pipeline. Only the dedicated Totem profile
+        // owns the Vulkan renderer lifecycle.
         return renderProfile == RenderProfile.TOTEM_LUMEN;
     }
 
     /** Legacy compatibility for callers that still think in terms of an enable toggle. */
     public static synchronized boolean toggleRendererEnabled() {
         renderProfile = rendererEnabled()
-                ? RenderProfile.MINECRAFT
+                ? RenderProfile.MINECRAFT_PURE
                 : RenderProfile.TOTEM_LUMEN;
         changed();
         return rendererEnabled();
@@ -272,6 +297,13 @@ public final class RendererSettings {
 
     public static synchronized RenderProfile cycleRenderProfile() {
         renderProfile = renderProfile.next();
+        changed();
+        return renderProfile;
+    }
+
+    public static synchronized RenderProfile setRenderProfile(int index) {
+        RenderProfile[] values = RenderProfile.values();
+        renderProfile = values[Math.max(0, Math.min(values.length - 1, index))];
         changed();
         return renderProfile;
     }
@@ -300,6 +332,14 @@ public final class RendererSettings {
         return waterReflections;
     }
 
+    public static synchronized boolean entityRayTracingEnabled() {
+        return entityRayTracingEnabled;
+    }
+
+    public static synchronized LocalLightQuality localLightQuality() {
+        return localLightQuality;
+    }
+
     public static synchronized int reflectionBounces() {
         return reflectionBounces;
     }
@@ -322,8 +362,20 @@ public final class RendererSettings {
         return giQuality;
     }
 
+    public static synchronized GiQuality setGiQuality(int index) {
+        giQuality = GiQuality.values()[Math.max(0, Math.min(GiQuality.values().length - 1, index))];
+        changed();
+        return giQuality;
+    }
+
     public static synchronized Quality cycleShadowQuality() {
         shadowQuality = shadowQuality.next();
+        changed();
+        return shadowQuality;
+    }
+
+    public static synchronized Quality setShadowQuality(int index) {
+        shadowQuality = Quality.values()[Math.max(0, Math.min(Quality.values().length - 1, index))];
         changed();
         return shadowQuality;
     }
@@ -339,8 +391,20 @@ public final class RendererSettings {
         return rayDistance;
     }
 
+    public static synchronized int setRayDistanceIndex(int index) {
+        rayDistance = new int[]{32, 64, 96, 128}[Math.max(0, Math.min(3, index))];
+        changed();
+        return rayDistance;
+    }
+
     public static synchronized InternalResolution cycleInternalResolution() {
         internalResolution = internalResolution.next();
+        changed();
+        return internalResolution;
+    }
+
+    public static synchronized InternalResolution setInternalResolution(int index) {
+        internalResolution = InternalResolution.values()[Math.max(0, Math.min(InternalResolution.values().length - 1, index))];
         changed();
         return internalResolution;
     }
@@ -357,6 +421,18 @@ public final class RendererSettings {
         return waterReflections;
     }
 
+    public static synchronized boolean toggleEntityRayTracing() {
+        entityRayTracingEnabled = !entityRayTracingEnabled;
+        changed();
+        return entityRayTracingEnabled;
+    }
+
+    public static synchronized LocalLightQuality cycleLocalLightQuality() {
+        localLightQuality = localLightQuality.next();
+        changed();
+        return localLightQuality;
+    }
+
     public static synchronized int cycleReflectionBounces() {
         reflectionBounces = reflectionBounces == 1 ? 2 : 1;
         changed();
@@ -369,14 +445,30 @@ public final class RendererSettings {
         return reflectionDistance;
     }
 
+    public static synchronized int setReflectionDistanceIndex(int index) {
+        return setReflectionDistance(new int[]{16, 32, 64}[Math.max(0, Math.min(2, index))]);
+    }
+
     public static synchronized TemporalQuality cycleTemporalQuality() {
         temporalQuality = temporalQuality.next();
         changed();
         return temporalQuality;
     }
 
+    public static synchronized TemporalQuality setTemporalQuality(int index) {
+        temporalQuality = TemporalQuality.values()[Math.max(0, Math.min(TemporalQuality.values().length - 1, index))];
+        changed();
+        return temporalQuality;
+    }
+
     public static synchronized DenoiseQuality cycleDenoiseQuality() {
         denoiseQuality = denoiseQuality.next();
+        changed();
+        return denoiseQuality;
+    }
+
+    public static synchronized DenoiseQuality setDenoiseQuality(int index) {
+        denoiseQuality = DenoiseQuality.values()[Math.max(0, Math.min(DenoiseQuality.values().length - 1, index))];
         changed();
         return denoiseQuality;
     }
@@ -450,6 +542,18 @@ public final class RendererSettings {
         }
     }
 
+    private static RenderProfile parseRenderProfile(String value, RenderProfile fallback) {
+        if ("MINECRAFT".equals(value)) {
+            // Alpha 59's Minecraft profile already meant vanilla plus RGB lighting.
+            return RenderProfile.MINECRAFT_RGB;
+        }
+        try {
+            return RenderProfile.valueOf(value);
+        } catch (IllegalArgumentException ignored) {
+            return fallback;
+        }
+    }
+
     private static void save() {
         Properties properties = new Properties();
         properties.setProperty("renderProfile", renderProfile.name());
@@ -460,6 +564,8 @@ public final class RendererSettings {
         properties.setProperty("internalResolution", internalResolution.name());
         properties.setProperty("reflectionsEnabled", Boolean.toString(reflectionsEnabled));
         properties.setProperty("waterReflections", Boolean.toString(waterReflections));
+        properties.setProperty("entityRayTracingEnabled", Boolean.toString(entityRayTracingEnabled));
+        properties.setProperty("localLightQuality", localLightQuality.name());
         properties.setProperty("reflectionBounces", Integer.toString(reflectionBounces));
         properties.setProperty("reflectionDistance", Integer.toString(reflectionDistance));
         properties.setProperty("temporalQuality", temporalQuality.name());

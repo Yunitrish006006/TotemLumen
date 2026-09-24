@@ -3,10 +3,13 @@ package dev.totem.lumen.gui;
 import dev.totem.lumen.mixin.OptionsSubScreenAccessor;
 import dev.totem.lumen.render.RendererSettings;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.OptionsList;
 import net.minecraft.client.gui.screens.options.VideoSettingsScreen;
 import net.minecraft.network.chat.Component;
+
+import java.util.function.Supplier;
 
 /**
  * Injects Totem Lumen controls directly into Minecraft's native "Quality & Performance" section.
@@ -30,111 +33,154 @@ public final class TotemLumenVideoSettingsIntegration {
     ) {
         Minecraft client = Minecraft.getInstance();
 
-        Button profileButton = Button.builder(
-                TotemLumenVideoSettingsScreen.renderProfileLabel(),
-                ignored -> {
-                    RendererSettings.cycleRenderProfile();
-                    reopenVideoSettings(client, screen);
-                }
-        ).bounds(0, 0, 150, 20).build();
+        RendererSettingSlider profileSlider = new RendererSettingSlider(
+                0, 0, 150, 20,
+                RendererSettings.RenderProfile.values().length - 1,
+                () -> RendererSettings.renderProfile().ordinal(),
+                RendererSettings::setRenderProfile,
+                index -> TotemLumenVideoSettingsScreen.renderProfileLabel(
+                        RendererSettings.RenderProfile.values()[index]
+                ),
+                () -> reopenVideoSettings(client, screen)
+        );
 
         Button diagnosticsButton = Button.builder(
                 Component.translatable("screen.totem-lumen.diagnostics"),
                 ignored -> client.gui.setScreen(new TotemLumenDiagnosticsScreen(screen))
         ).bounds(0, 0, 150, 20).build();
 
-        list.addSmall(profileButton, diagnosticsButton);
+        list.addSmall(profileSlider, diagnosticsButton);
 
         if (!RendererSettings.rendererEnabled()) {
             return;
         }
 
-        Button giQualityButton = settingButton(
-                client,
-                screen,
-                TotemLumenVideoSettingsScreen.giQualityLabel(),
-                RendererSettings::cycleGiQuality
+        RendererSettingSlider giQualitySlider = settingSlider(
+                RendererSettings.GiQuality.values().length - 1,
+                () -> RendererSettings.giQuality().ordinal(),
+                RendererSettings::setGiQuality,
+                index -> TotemLumenVideoSettingsScreen.giQualityLabel(RendererSettings.GiQuality.values()[index])
         );
-        Button shadowQualityButton = settingButton(
-                client,
-                screen,
-                TotemLumenVideoSettingsScreen.shadowQualityLabel(),
-                RendererSettings::cycleShadowQuality
+        RendererSettingSlider shadowQualitySlider = settingSlider(
+                RendererSettings.Quality.values().length - 1,
+                () -> RendererSettings.shadowQuality().ordinal(),
+                RendererSettings::setShadowQuality,
+                index -> TotemLumenVideoSettingsScreen.shadowQualityLabel(RendererSettings.Quality.values()[index])
         );
-        list.addSmall(giQualityButton, shadowQualityButton);
+        list.addSmall(giQualitySlider, shadowQualitySlider);
 
-        Button rayDistanceButton = settingButton(
-                client,
-                screen,
-                TotemLumenVideoSettingsScreen.rayDistanceLabel(),
-                RendererSettings::cycleRayDistance
+        RendererSettingSlider rayDistanceSlider = settingSlider(
+                3,
+                () -> rayDistanceIndex(RendererSettings.rayDistance()),
+                RendererSettings::setRayDistanceIndex,
+                index -> TotemLumenVideoSettingsScreen.rayDistanceLabel(new int[]{32, 64, 96, 128}[index])
         );
-        Button internalResolutionButton = settingButton(
-                client,
-                screen,
-                TotemLumenVideoSettingsScreen.internalResolutionLabel(),
-                RendererSettings::cycleInternalResolution
+        RendererSettingSlider internalResolutionSlider = settingSlider(
+                RendererSettings.InternalResolution.values().length - 1,
+                () -> RendererSettings.internalResolution().ordinal(),
+                RendererSettings::setInternalResolution,
+                index -> TotemLumenVideoSettingsScreen.internalResolutionLabel(RendererSettings.InternalResolution.values()[index])
         );
-        list.addSmall(rayDistanceButton, internalResolutionButton);
+        list.addSmall(rayDistanceSlider, internalResolutionSlider);
 
+        AbstractWidget[] reflectionControls = new AbstractWidget[3];
         Button reflectionsEnabledButton = settingButton(
-                client,
-                screen,
-                TotemLumenVideoSettingsScreen.reflectionsEnabledLabel(),
-                RendererSettings::toggleReflectionsEnabled
+                TotemLumenVideoSettingsScreen::reflectionsEnabledLabel,
+                RendererSettings::toggleReflectionsEnabled,
+                () -> refreshReflectionControls(reflectionControls)
         );
         Button waterReflectionsButton = settingButton(
-                client,
-                screen,
-                TotemLumenVideoSettingsScreen.waterReflectionsLabel(),
+                TotemLumenVideoSettingsScreen::waterReflectionsLabel,
                 RendererSettings::toggleWaterReflections
         );
         list.addSmall(reflectionsEnabledButton, waterReflectionsButton);
 
-        Button reflectionBouncesButton = settingButton(
-                client,
-                screen,
-                TotemLumenVideoSettingsScreen.reflectionBouncesLabel(),
-                RendererSettings::cycleReflectionBounces
+        Button entityRayTracingButton = settingButton(
+                TotemLumenVideoSettingsScreen::entityRayTracingLabel,
+                RendererSettings::toggleEntityRayTracing
         );
-        Button reflectionDistanceButton = settingButton(
-                client,
-                screen,
-                TotemLumenVideoSettingsScreen.reflectionDistanceLabel(),
-                RendererSettings::cycleReflectionDistance
+        Button localLightQualityButton = settingButton(
+                TotemLumenVideoSettingsScreen::localLightQualityLabel,
+                RendererSettings::cycleLocalLightQuality
         );
-        list.addSmall(reflectionBouncesButton, reflectionDistanceButton);
+        list.addSmall(localLightQualityButton, entityRayTracingButton);
 
-        Button temporalQualityButton = settingButton(
-                client,
-                screen,
-                TotemLumenVideoSettingsScreen.temporalQualityLabel(),
-                RendererSettings::cycleTemporalQuality
+        RendererSettingSlider reflectionBouncesSlider = settingSlider(
+                1,
+                () -> RendererSettings.reflectionBounces() - 1,
+                index -> RendererSettings.setReflectionBounces(index + 1),
+                index -> TotemLumenVideoSettingsScreen.reflectionBouncesLabel(index + 1)
         );
-        Button denoiseQualityButton = settingButton(
-                client,
-                screen,
-                TotemLumenVideoSettingsScreen.denoiseQualityLabel(),
-                RendererSettings::cycleDenoiseQuality
+        RendererSettingSlider reflectionDistanceSlider = settingSlider(
+                2,
+                () -> reflectionDistanceIndex(RendererSettings.reflectionDistance()),
+                RendererSettings::setReflectionDistanceIndex,
+                index -> TotemLumenVideoSettingsScreen.reflectionDistanceLabel(new int[]{16, 32, 64}[index])
         );
-        list.addSmall(temporalQualityButton, denoiseQualityButton);
+        list.addSmall(reflectionBouncesSlider, reflectionDistanceSlider);
 
-        boolean reflectionsEnabled = RendererSettings.reflectionsEnabled();
-        waterReflectionsButton.active = reflectionsEnabled;
-        reflectionBouncesButton.active = reflectionsEnabled;
-        reflectionDistanceButton.active = reflectionsEnabled;
+        RendererSettingSlider temporalQualitySlider = settingSlider(
+                RendererSettings.TemporalQuality.values().length - 1,
+                () -> RendererSettings.temporalQuality().ordinal(),
+                RendererSettings::setTemporalQuality,
+                index -> TotemLumenVideoSettingsScreen.temporalQualityLabel(RendererSettings.TemporalQuality.values()[index])
+        );
+        RendererSettingSlider denoiseQualitySlider = settingSlider(
+                RendererSettings.DenoiseQuality.values().length - 1,
+                () -> RendererSettings.denoiseQuality().ordinal(),
+                RendererSettings::setDenoiseQuality,
+                index -> TotemLumenVideoSettingsScreen.denoiseQualityLabel(RendererSettings.DenoiseQuality.values()[index])
+        );
+        list.addSmall(temporalQualitySlider, denoiseQualitySlider);
+
+        reflectionControls[0] = reflectionsEnabledButton;
+        reflectionControls[1] = reflectionBouncesSlider;
+        reflectionControls[2] = reflectionDistanceSlider;
+
+        refreshReflectionControls(reflectionControls);
+    }
+
+    private static Button settingButton(Supplier<Component> labelSupplier, Runnable action) {
+        return settingButton(labelSupplier, action, () -> {
+        });
     }
 
     private static Button settingButton(
-            Minecraft client,
-            VideoSettingsScreen screen,
-            Component label,
-            Runnable action
+            Supplier<Component> labelSupplier,
+            Runnable action,
+            Runnable afterAction
     ) {
-        return Button.builder(label, ignored -> {
+        Button[] buttonRef = new Button[1];
+        buttonRef[0] = Button.builder(labelSupplier.get(), ignored -> {
             action.run();
-            reopenVideoSettings(client, screen);
+            buttonRef[0].setMessage(labelSupplier.get());
+            afterAction.run();
         }).bounds(0, 0, 150, 20).build();
+        return buttonRef[0];
+    }
+
+    private static RendererSettingSlider settingSlider(
+            int maximumIndex,
+            java.util.function.IntSupplier currentIndex,
+            java.util.function.IntConsumer applyIndex,
+            java.util.function.Function<Integer, Component> label
+    ) {
+        return new RendererSettingSlider(0, 0, 150, 20, maximumIndex, currentIndex, applyIndex, label);
+    }
+
+    private static void refreshReflectionControls(AbstractWidget[] controls) {
+        boolean enabled = RendererSettings.reflectionsEnabled();
+        for (AbstractWidget control : controls) {
+            if (control != null) control.active = enabled;
+        }
+    }
+
+    private static int rayDistanceIndex(int value) {
+        return value <= 32 ? 0 : value <= 64 ? 1 : value <= 96 ? 2 : 3;
+    }
+
+    private static int reflectionDistanceIndex(int value) {
+        return value <= 16 ? 0 : value <= 32 ? 1 : 2;
     }
 
     private static void reopenVideoSettings(

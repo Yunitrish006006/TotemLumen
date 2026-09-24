@@ -85,7 +85,12 @@ public final class RendererCompileProgressNotifier {
 
         if (!P12FullBasePipeline.ready()) {
             enterPhase(client, Phase.FULL_BASE, now, "message.totem-lumen.compile.full");
-            heartbeat(client, now, "message.totem-lumen.compile.full_wait");
+            heartbeat(
+                    client,
+                    now,
+                    "message.totem-lumen.compile.full_wait",
+                    P12FullBasePipeline.prewarmStage().label()
+            );
             return;
         }
 
@@ -260,6 +265,14 @@ public final class RendererCompileProgressNotifier {
         }
         lastHeartbeatNanos = now;
         send(client, key, formatElapsed(now - phaseStartedNanos));
+    }
+
+    private static void heartbeat(Minecraft client, long now, String key, String stage) {
+        if (now - lastHeartbeatNanos < HEARTBEAT_NANOS) {
+            return;
+        }
+        lastHeartbeatNanos = now;
+        send(client, key, formatElapsed(now - phaseStartedNanos), stage);
     }
 
     private static String formatElapsed(long elapsedNanos) {

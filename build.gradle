@@ -1,5 +1,5 @@
 plugins {
-    id 'net.fabricmc.fabric-loom' version "${loom_version}"
+    id 'fabric-loom' version "${loom_version}"
     id 'maven-publish'
 }
 
@@ -24,6 +24,7 @@ loom {
         client {
             client()
             runDir('run/client')
+            vmArgs '-Xmx16G'
             programArg('--graphicsBackend=VULKAN')
         }
     }
@@ -31,15 +32,85 @@ loom {
 
 repositories {
     mavenCentral()
+    maven { url = 'https://repo.codemc.io/repository/relativitymc/' }
 }
 
 dependencies {
     minecraft "com.mojang:minecraft:${project.minecraft_version}"
-    implementation "net.fabricmc:fabric-loader:${project.loader_version}"
-    implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+    mappings "org.relativitymc:modern-yarn:${project.yarn_mappings}:v2"
+    modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+    compileOnly "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+    runtimeOnly "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
 
     testImplementation 'org.junit.jupiter:junit-jupiter:5.11.4'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+// Minecraft 26.2 development runs use the named namespace. Fabric API jars
+// may carry official class-tweaker headers, so isolate normalized copies for
+// the local runClient classpath without changing published/runtime artifacts.
+def namedRuntimeSources = new LinkedHashSet<File>()
+def namedRuntimeCopies = [:]
+def namedRuntimeCopyFor = { File source ->
+    namedRuntimeCopies.computeIfAbsent(source.absolutePath) {
+        def digest = java.security.MessageDigest.getInstance('SHA-256').digest(source.bytes).encodeHex().toString()
+        layout.buildDirectory.file("named-runtime-api/v2/${digest}-${source.name}").get().asFile
+    }
+}
+
+tasks.register('normalizeFabricApiTweakersForNamedDevRuntime') {
+    group = 'fabric'
+    description = 'Creates isolated named-namespace Fabric API copies for development runs.'
+    inputs.files(provider { namedRuntimeSources })
+    outputs.dir(layout.buildDirectory.dir('named-runtime-api/v2'))
+    doLast {
+        def outputDir = layout.buildDirectory.dir('named-runtime-api/v2').get().asFile
+        outputDir.mkdirs()
+        namedRuntimeSources.each { jarFile ->
+            def zip = new java.util.zip.ZipFile(jarFile)
+            try {
+                def changes = [:]
+                zip.entries().each { entry ->
+                    if (!entry.directory && (entry.name.endsWith('.classtweaker') || entry.name.endsWith('.accesswidener'))) {
+                        def original = zip.getInputStream(entry).getText('UTF-8')
+                        def normalized = original.replaceFirst(/(?m)^((?:classTweaker|accessWidener)\s+v\d+\s+)official(\s*)$/, '$1named$2')
+                        if (normalized != original) changes[entry.name] = normalized.getBytes('UTF-8')
+                    }
+                }
+                def copy = namedRuntimeCopyFor(jarFile)
+                if (!copy.isFile()) {
+                    def temporary = new File(copy.parentFile, copy.name + '.tmp')
+                    def out = new java.util.zip.ZipOutputStream(new FileOutputStream(temporary))
+                    try {
+                        zip.entries().each { entry ->
+                            out.putNextEntry(new java.util.zip.ZipEntry(entry.name))
+                            if (!entry.directory) out.write(changes[entry.name] ?: zip.getInputStream(entry).bytes)
+                            out.closeEntry()
+                        }
+                    } finally { out.close() }
+                    java.nio.file.Files.move(temporary.toPath(), copy.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE)
+                }
+            } finally { zip.close() }
+        }
+        logger.lifecycle("Prepared ${namedRuntimeCopies.size()} isolated named-runtime API copies.")
+    }
+}
+
+afterEvaluate {
+    tasks.withType(net.fabricmc.loom.task.RunGameTask).all { runTask ->
+        dependsOn('normalizeFabricApiTweakersForNamedDevRuntime')
+        def classpathProducers = classpath.buildDependencies.getDependencies(runTask).toList()
+        dependsOn(classpathProducers)
+        def originals = classpath.files.toList()
+        def copies = originals.collect { file ->
+            if (file.absolutePath.contains('/net.fabricmc.fabric-api/') && file.name.endsWith('.jar')) {
+                namedRuntimeSources.add(file)
+                return namedRuntimeCopyFor(file)
+            }
+            return file
+        }
+        setClasspath(files(copies))
+    }
 }
 
 tasks.withType(JavaCompile).configureEach {

@@ -18,6 +18,8 @@ Render profile: Minecraft / Totem Lumen
 
 Minecraft profile keeps the vanilla world-render quality controls. Totem Lumen profile removes only the vanilla controls whose world-render effect is replaced by Totem and shows Totem GI/shadow/ray-distance/internal-resolution/reflection/temporal/denoise controls in the same section. Shared display/interface and scene-availability settings remain visible in both profiles.
 
+The vanilla brightness/gamma slider is kept as Minecraft's own `Options.gamma()` instance and is displayed in the native Quality & Performance section alongside these controls; Totem Lumen does not create a second brightness setting.
+
 Pipeline status and developer Render View controls remain on **Diagnostics & Render View**.
 
 ## Defaults and ranges
@@ -42,7 +44,35 @@ All values persist in:
 config/totem-lumen.properties
 ```
 
-Legacy configs without `renderProfile` migrate from the old `rendererEnabled` boolean automatically. Legacy `reflectionBounces=0` remains interpreted as reflections disabled.
+The profile slider has three values: pure Minecraft rendering, Minecraft geometry with a
+client-computed RGB terrain light field, and Totem Lumen. The server still owns gameplay light
+queries and synchronizes world light-source rules, but does not stream the visual RGB field.
+Legacy configs without `renderProfile`
+migrate from the old `rendererEnabled` boolean automatically. The previous Alpha 59
+`renderProfile=MINECRAFT` value migrates to `MINECRAFT_RGB`; legacy `reflectionBounces=0` remains
+interpreted as reflections disabled.
+
+In `MINECRAFT_RGB`, loaded block sources propagate three 0–15 channels on the client. Terrain
+quads keep Minecraft/Indigo geometry, texture and alpha; their RGB vertex colors carry block and
+sky illumination, and a neutral full-bright lightmap lookup prevents Minecraft's scalar block
+light from whitening that terrain. Source removal recomputes neighboring contributions under a
+tick budget, then publishes the completed local region without exposing the intermediate clear.
+Only changed mesh sections and the boundary neighbors needed for vertex interpolation are marked
+dirty. Because sky RGB is baked into terrain
+vertices, time/sky-epoch changes queue a bounded refresh of loaded sections known to receive sky
+light, nearest first; they do not invalidate all compiled geometry at once. Ordinary torches use
+a slightly less-red warm-white fallback, while soul and redstone torches keep their own palettes.
+Server and client propagation store light chroma in RGB and attenuation in A within the existing
+16-bit field. The A channel is light intensity, not texture transparency, so a warm torch does not
+leave a pure-red fringe at its dim edge. This also changes the RGB field
+used by server gameplay-light queries. Entity, particle, fluid and other non-terrain render
+families have not yet been migrated to this RGB terrain path; the profile is not a complete
+replacement of Minecraft's lighting pipeline.
+
+On Indigo terrain, smooth lighting interpolates effective RGB at each quad vertex in floating
+point from neighboring light voxels. It does not round the surface average back into four-bit
+RGBA, which had produced conspicuous colored squares. With smooth lighting disabled, the quad
+uses one unblended block/face value. The texture's original vertex alpha is preserved.
 
 ## Runtime ABI
 

@@ -2,6 +2,7 @@ package dev.totem.lumen.mixin;
 
 import dev.totem.lumen.integration.FluidRenderGeometryCache;
 import dev.totem.lumen.integration.SceneExtractionBridge;
+import dev.totem.lumen.integration.ClientGameplayLightPredictor;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.state.BlockState;
@@ -31,5 +32,6 @@ abstract class ClientLevelBlockUpdateMixin {
     ) {
         FluidRenderGeometryCache.invalidateNeighborhood(pos);
         SceneExtractionBridge.onBlockChanged(pos, updateFlags);
+        ClientGameplayLightPredictor.onBlockChanged((ClientLevel) (Object) this, pos, oldState, newState);
     }
 }

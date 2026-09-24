@@ -72,15 +72,16 @@ Gameplay: one stable server value, e.g. 13
 
 This prevents a temporary visual dip from unexpectedly allowing a hostile mob to spawn next to a torch.
 
-## Packed RGB storage
+## Packed RGBA light storage
 
-Each logical voxel has three 4-bit channels:
+Each logical voxel has four 4-bit channels. RGB is unmultiplied light chroma; A is light
+intensity, not block/texture opacity:
 
 ```text
 bits 0..3   red   0..15
 bits 4..7   green 0..15
 bits 8..11  blue  0..15
-bits 12..15 reserved
+bits 12..15 light intensity A 0..15
 ```
 
 A `16 x 16 x 16` section contains 4096 positions. Alpha 32 uses a `char[4096]`, or **8 KiB per allocated RGB section**. All-zero sections do not allocate the dense array.
@@ -89,8 +90,8 @@ A `16 x 16 x 16` section contains 4096 positions. Alpha 32 uses a `char[4096]`, 
 
 | Layout | Bytes / section | Advantage | Trade-off |
 | --- | ---: | --- | --- |
-| Three 4-bit nibble arrays | 6 KiB | Minimum RAM | More packing work / less convenient random access |
-| 16-bit packed `char[4096]` | 8 KiB | Simple, fast CPU access; 4 spare bits | 33% more raw light-cache RAM |
+| Three 4-bit nibble arrays | 6 KiB | Historical RGB-only minimum | Cannot represent separate light intensity A |
+| 16-bit packed `char[4096]` | 8 KiB | Simple, fast CPU access; RGBA in one word | 2 KiB more than the old RGB-only minimum |
 
 Alpha 32 chooses the 16-bit layout because server tick latency is more important than saving 2 KiB per lit section.
 
@@ -111,11 +112,13 @@ These values exclude Java map/source-index overhead. Actual RAM is lower than `a
 Server block light is intentionally Minecraft-like rather than physically additive:
 
 ```text
-source RGB = color * gameplay_strength
-combined RGB = component-wise maximum
-next voxel = current RGB - attenuation
+source RGB = normalized light chroma
+source A = strongest color channel * gameplay_strength
+effective RGB = RGB * A / 15
+combined effective RGB = component-wise maximum, then repack RGB + A
+next voxel = same RGB chroma, A reduced by attenuation
 attenuation >= 1 per step
-channel range = 0..15
+RGB and A channel range = 0..15
 ```
 
 Example:

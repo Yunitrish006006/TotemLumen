@@ -102,7 +102,12 @@ final class P13StarfieldPatch {
                 """;
         String newSkyReturn = """
                         vec3 stars = p13StarRadiance(dir, sunDirection);
+                        float nightAmbient = 1.0 - smoothstep(-0.16, 0.06, sunDirection.y);
+                        // Stars are not only a visible sky decal: their aggregate contribution
+                        // must remain available to hemisphere/environment samples at night.
+                        vec3 stellarAmbient = vec3(0.0035, 0.0045, 0.0090) * nightAmbient;
                         return sky
+                                + stellarAmbient
                                 + stars
                                 + p13SunColor(sunDirection) * sunDisk
                                 + p13MoonColor() * (moonDisk * 0.72 + moonGlow);
@@ -110,7 +115,8 @@ final class P13StarfieldPatch {
         source = replaceRequiredOnce(source, oldSkyReturn, newSkyReturn, "Overworld sky star composition");
 
         TotemLumenClient.LOGGER.info(
-                "P13 Overworld starfield active: procedural=true, deterministic=true, celestialAxis=Z, movesWithMoon=true, twinkle=false, horizonFade=true"
+                "P13 Overworld starfield active: procedural=true, deterministic=true, celestialAxis=Z, movesWithMoon=true, "
+                        + "twinkle=false, horizonFade=true, stellarAmbient=true"
         );
         return source;
     }

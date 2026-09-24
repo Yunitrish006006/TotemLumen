@@ -8,6 +8,7 @@
     "BlockEntityRenderDispatcherMixin",
     "EntityRendererStateMixin",
     "EntityRenderDispatcherMixin",
+    "SubmitNodeCollectionItemMixin",
     "SubmitNodeStorageBlockEntityMixin",
     "SubmitNodeCollectionBlockEntityMixin",
     "MinecraftBlockModelMeshResolverMixin",
@@ -18,7 +19,9 @@
     "P5StableLookupRendererP17Mixin",
     "P5RendererResourcesMixin",
     "VulkanComputeProgramMixin",
-    "VideoSettingsRenderProfileMixin"
+    "VideoSettingsRenderProfileMixin",
+    "VanillaRgbLightingLighterMixin",
+    "VanillaRgbIndigoLightingMixin"
   ],
   "injectors": {
     "defaultRequire": 1

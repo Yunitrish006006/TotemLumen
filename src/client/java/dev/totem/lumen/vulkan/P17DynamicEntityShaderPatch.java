@@ -467,6 +467,8 @@ final class P17DynamicEntityShaderPatch {
                     result.distance = 0.0;
                     result.steps = 0u;
 
+                    if (scene.data[91] == 0u) return result;
+
                     uint entityBase = p17EntitySceneBase();
                     if (scene.data[entityBase] != P17_ENTITY_ABI_VERSION
                             || scene.data[entityBase + 1u] == 0u) return result;

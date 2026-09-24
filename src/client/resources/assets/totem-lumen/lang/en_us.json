@@ -7,7 +7,7 @@
   "message.totem-lumen.compile.bootstrap_wait": "[Totem Lumen] [1/4] Vulkan bootstrap is still compiling (%s). Vanilla rendering remains active.",
   "message.totem-lumen.compile.bootstrap_ready": "[Totem Lumen] [1/4] Vulkan bootstrap ready. Full lighting is not ready yet; Minecraft's normal presentation remains active.",
   "message.totem-lumen.compile.full": "[Totem Lumen] [2/4] Compiling full lighting, materials and player/entity ray tracing in the background...",
-  "message.totem-lumen.compile.full_wait": "[Totem Lumen] [2/4] Full lighting is still compiling (%s). Minecraft's normal renderer and your selected resource pack remain active.",
+  "message.totem-lumen.compile.full_wait": "[Totem Lumen] [2/4] Full lighting is still compiling (%s). Current stage: %s. Minecraft's normal renderer and your selected resource pack remain active.",
   "message.totem-lumen.compile.full_ready": "[Totem Lumen] [2/4] Full lighting, materials and player/entity ray tracing are ready. Totem Lumen will take over after the first complete frame.",
   "message.totem-lumen.compile.advanced": "[Totem Lumen] [4/4] Compiling reflections in the background...",
   "message.totem-lumen.compile.advanced_wait": "[Totem Lumen] [4/4] Reflections are still compiling (%s). Full lighting and entity ray tracing remain active.",
@@ -71,6 +71,8 @@
   "screen.totem-lumen.internal_resolution": "Internal resolution: %s (%s%% viewport)",
   "screen.totem-lumen.reflections_enabled": "Reflections: %s",
   "screen.totem-lumen.water_reflections": "Water reflections: %s",
+  "screen.totem-lumen.entity_ray_tracing": "Entity ray tracing: %s",
+  "screen.totem-lumen.local_light_quality": "Local lights: %s",
   "screen.totem-lumen.temporal_quality": "Temporal: %s",
   "screen.totem-lumen.denoise_quality": "Denoise: %s",
   "screen.totem-lumen.diagnostics": "Diagnostics & Render View...",
@@ -96,6 +98,7 @@
   "screen.totem-lumen.video_section_hint": "Totem Lumen replaces Minecraft world-render quality controls while enabled.",
   "screen.totem-lumen.profile_section": "Rendering",
   "screen.totem-lumen.render_profile": "Render profile: %s",
-  "screen.totem-lumen.render_profile.minecraft": "Minecraft",
+  "screen.totem-lumen.render_profile.minecraft_pure": "Minecraft Vanilla",
+  "screen.totem-lumen.render_profile.minecraft_rgb": "Minecraft + RGB Lighting",
   "screen.totem-lumen.render_profile.totem": "Totem Lumen"
 }

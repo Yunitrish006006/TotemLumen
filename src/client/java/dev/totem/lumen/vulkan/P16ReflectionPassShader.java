@@ -51,7 +51,7 @@ final class P16ReflectionPassShader {
                 const uint LOOKUP_WORDS_PER_BUCKET = 4u;
                 const uint VOXEL_BASE = 608u;
                 const uint VOXELS_PER_SECTION = 4096u;
-                const uint MATERIAL_EMISSION_BASE = 265376u;
+                const uint MATERIAL_EMISSION_BASE = 528096u;
                 const uint MATERIAL_EMISSION_WORDS_PER_RECORD = 16u;
                 const float SOFT_SHADOW_ANGULAR_RADIUS = 0.055;
                 const vec2 SOFT_SHADOW_OFFSETS[4] = vec2[4](
@@ -186,6 +186,18 @@ final class P16ReflectionPassShader {
                         vec3 f0 = p18Surface.textured != 0u
                                 ? p18Surface.f0
                                 : mix(vec3(0.04), baseColor, metallic);
+                        // Keep conductor reflections chromatic and texture-responsive. The
+                        // canonical LabPBR metal F0 remains the base, while the sampled albedo
+                        // supplies controlled per-texel tint instead of producing white mirrors.
+                        if (metallic > 0.001) {
+                            vec3 metalTint = mix(
+                                vec3(1.0),
+                                clamp(baseColor, vec3(0.0), vec3(1.0)),
+                                0.55 * metallic
+                            );
+                            f0 *= metalTint;
+                            roughness = max(roughness, 0.16 * metallic);
+                        }
                         float viewCosine = clamp(
                             dot(normal, -normalize(currentDirection)),
                             0.0,
@@ -294,19 +306,26 @@ final class P16ReflectionPassShader {
                         forward + right * (ndcX * aspect * tanHalfFov) + up * (ndcY * tanHalfFov)
                     );
 
+                    uint pixelBase = scene.data[3];
+                    uint pixelIndex = pixelBase + (height - 1u - pixel.y) * width + pixel.x;
+                    vec3 baseRadiance = unpackRgb(scene.data[pixelIndex]);
+
                     P15TraceResult primaryTrace = p15TraceFiltered(
                         origin,
                         direction,
                         uintBitsToFloat(scene.data[7])
                     );
-                    if (primaryTrace.hit.hit == 0u) return;
+                    if (primaryTrace.hit.hit == 0u) {
+                        scene.data[pixelIndex] = packRgba(applyVanillaGamma(baseRadiance), 255u);
+                        return;
+                    }
 
                     vec3 reflected = p16ReflectionRgb(primaryTrace.hit, origin, direction)
                             * primaryTrace.transmission;
-                    uint pixelBase = scene.data[3];
-                    uint pixelIndex = pixelBase + (height - 1u - pixel.y) * width + pixel.x;
-                    vec3 baseRadiance = unpackRgb(scene.data[pixelIndex]);
-                    scene.data[pixelIndex] = packRgba(baseRadiance + reflected, 255u);
+                    scene.data[pixelIndex] = packRgba(
+                            applyVanillaGamma(baseRadiance + reflected),
+                            255u
+                    );
                 }
                 """;
     }

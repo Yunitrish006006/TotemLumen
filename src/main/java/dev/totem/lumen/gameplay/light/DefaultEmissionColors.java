@@ -12,6 +12,7 @@ public final class DefaultEmissionColors {
     private static final EmissionColor END_ROD = new EmissionColor(0.88f, 0.84f, 1.0f);
     private static final EmissionColor GLOWSTONE = new EmissionColor(1.0f, 0.78f, 0.42f);
     private static final EmissionColor SHROOMLIGHT = new EmissionColor(1.0f, 0.48f, 0.18f);
+    private static final EmissionColor TORCH = new EmissionColor(1.0f, 0.64f, 0.34f);
     private static final EmissionColor WARM = new EmissionColor(1.0f, 0.55f, 0.22f);
     private static final EmissionColor FALLBACK = new EmissionColor(1.0f, 0.86f, 0.66f);
 
@@ -32,8 +33,8 @@ public final class DefaultEmissionColors {
         if (sourceId.contains("end_rod")) return END_ROD;
         if (sourceId.contains("glowstone")) return GLOWSTONE;
         if (sourceId.contains("shroomlight")) return SHROOMLIGHT;
+        if (sourceId.contains("torch")) return TORCH;
         if (sourceId.contains("fire")
-                || sourceId.contains("torch")
                 || sourceId.contains("lantern")
                 || sourceId.contains("campfire")
                 || sourceId.contains("jack_o_lantern")) {

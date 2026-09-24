@@ -1,6 +1,6 @@
 {
   "local_light_gain": 2.4,
-  "reflection_spread_scale": 0.75,
+  "reflection_spread_scale": 1.05,
   "reflection_roughness_energy": 0.18,
   "reflection_dielectric_energy": 0.85,
   "reflection_metal_energy": 1.0,

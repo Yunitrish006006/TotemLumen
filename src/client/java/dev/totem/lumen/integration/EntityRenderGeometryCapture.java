@@ -3,11 +3,13 @@ package dev.totem.lumen.integration;
 import com.mojang.blaze3d.vertex.PoseStack;
 import dev.totem.lumen.TotemLumenClient;
 import dev.totem.lumen.scene.DynamicEntitySnapshot;
+import dev.totem.lumen.render.RendererSettings;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.model.Model;
 import net.minecraft.client.model.geom.ModelPart;
 import net.minecraft.client.renderer.entity.state.EntityRenderState;
 import net.minecraft.client.renderer.entity.state.LivingEntityRenderState;
+import net.minecraft.client.resources.model.geometry.BakedQuad;
 import net.minecraft.core.registries.BuiltInRegistries;
 import org.joml.Matrix4f;
 import org.joml.Vector3f;
@@ -16,15 +18,17 @@ import java.util.ArrayDeque;
 import java.util.Arrays;
 import java.util.Deque;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 /**
- * Captures renderer-resolved Model submissions while Minecraft submits one living entity.
+ * Captures renderer-resolved Model and item submissions while Minecraft submits one entity.
  *
- * <p>Alpha 42 deliberately starts with Player/general LivingEntity renderers because they share the
- * Model/ModelPart submit path. Items, boats, projectiles and custom-geometry command families are
- * separate follow-up adapters. Mutable Minecraft model/render-state objects never enter the retained
- * Totem Lumen scene.</p>
+ * <p>Alpha 42 starts with Player/general LivingEntity renderers because they share the
+ * Model/ModelPart submit path. The Alpha 59 follow-up also captures item-renderer quads through
+ * the generic {@code submitItem} command and extends the same model path to explicit vehicle and
+ * projectile families. Text/display and custom-geometry command families remain separate adapters.
+ * Mutable Minecraft model/render-state objects never enter the retained Totem Lumen scene.</p>
  */
 public final class EntityRenderGeometryCapture {
     private static final ThreadLocal<Deque<CaptureContext>> CONTEXTS =
@@ -42,7 +46,9 @@ public final class EntityRenderGeometryCapture {
             double renderY,
             double renderZ
     ) {
-        if (!(state instanceof LivingEntityRenderState) || poseStack == null) return;
+        if (!RendererSettings.entityRayTracingEnabled()) return;
+        if (!supportsModelFamily(state)) return;
+        if (poseStack == null) return;
         var level = Minecraft.getInstance().level;
         if (level == null) return;
 
@@ -50,9 +56,7 @@ public final class EntityRenderGeometryCapture {
         float determinant = base.determinant();
         if (!Float.isFinite(determinant) || Math.abs(determinant) < 1.0e-8f) return;
 
-        String typeId = state.entityType == null
-                ? "unknown"
-                : BuiltInRegistries.ENTITY_TYPE.getKey(state.entityType).toString();
+        String typeId = entityTypeId(state);
         String dimensionId = level.dimension().identifier().toString();
         long instanceId = EntityRenderGeometryCache.instanceId(state);
         CONTEXTS.get().push(new CaptureContext(
@@ -76,7 +80,8 @@ public final class EntityRenderGeometryCapture {
         if (stack.isEmpty()) return;
         CaptureContext context = stack.pop();
         if (stack.isEmpty()) CONTEXTS.remove();
-        if (!context.hadModelSubmission || context.positions.isEmpty()) return;
+        if ((!context.hadModelSubmission && !context.hadItemSubmission)
+                || context.positions.isEmpty()) return;
 
         DynamicEntitySnapshot snapshot = new DynamicEntitySnapshot(
                 context.instanceId,
@@ -111,6 +116,82 @@ public final class EntityRenderGeometryCapture {
             }
         }
         capturePart(context, model.root(), poseStack);
+    }
+
+    /** Captures renderer-resolved item quads after Minecraft has applied the item transform. */
+    public static void captureItem(PoseStack poseStack, List<BakedQuad> quads) {
+        CaptureContext context = current();
+        if (context == null || poseStack == null || quads == null || quads.isEmpty()) return;
+        if (!context.markSubmission(quads, poseStack)) return;
+        context.hadItemSubmission = true;
+
+        try {
+            Matrix4f dispatcherLocal = new Matrix4f(context.baseInverse).mul(poseStack.last().pose());
+            for (BakedQuad quad : quads) {
+                if (quad == null) continue;
+                for (int vertex = 0; vertex < BakedQuad.VERTEX_COUNT; vertex++) {
+                    Vector3f point = new Vector3f(quad.position(vertex));
+                    dispatcherLocal.transformPosition(point);
+                    point.sub(
+                            (float) context.renderX,
+                            (float) context.renderY,
+                            (float) context.renderZ
+                    );
+                    context.positions.add(canonicalFloat(point.x));
+                    context.positions.add(canonicalFloat(point.y));
+                    context.positions.add(canonicalFloat(point.z));
+
+                    long packedUv = quad.packedUV(vertex);
+                    context.uvs.add(canonicalFloat(Float.intBitsToFloat((int) packedUv)));
+                    context.uvs.add(canonicalFloat(Float.intBitsToFloat((int) (packedUv >>> 32))));
+                }
+            }
+        } catch (Throwable failure) {
+            if (!captureFailureLogged) {
+                captureFailureLogged = true;
+                TotemLumenClient.LOGGER.warn(
+                        "P17 item-renderer quad capture failed; vanilla rendering continues unchanged",
+                        failure
+                );
+            }
+        }
+    }
+
+    private static String entityTypeId(EntityRenderState state) {
+        return state.entityType == null
+                ? "unknown"
+                : BuiltInRegistries.ENTITY_TYPE.getKey(state.entityType).toString();
+    }
+
+    private static boolean supportsModelFamily(EntityRenderState state) {
+        if (state instanceof LivingEntityRenderState) return true;
+        String typeId = entityTypeId(state);
+        if ("minecraft:item".equals(typeId)) return true;
+        if (typeId.endsWith("_minecart")
+                || "minecraft:minecart".equals(typeId)
+                || "minecraft:boat".equals(typeId)
+                || "minecraft:chest_boat".equals(typeId)) return true;
+        return switch (typeId) {
+            case "minecraft:arrow",
+                    "minecraft:spectral_arrow",
+                    "minecraft:trident",
+                    "minecraft:firework_rocket",
+                    "minecraft:wind_charge",
+                    "minecraft:small_fireball",
+                    "minecraft:fireball",
+                    "minecraft:dragon_fireball",
+                    "minecraft:llama_spit",
+                    "minecraft:shulker_bullet",
+                    "minecraft:wither_skull",
+                    "minecraft:egg",
+                    "minecraft:snowball",
+                    "minecraft:ender_pearl",
+                    "minecraft:experience_bottle",
+                    "minecraft:potion",
+                    "minecraft:evoker_fangs",
+                    "minecraft:fishing_bobber" -> true;
+            default -> false;
+        };
     }
 
     private static void capturePart(CaptureContext context, ModelPart part, PoseStack submitPose) {
@@ -211,6 +292,7 @@ public final class EntityRenderGeometryCapture {
         final FloatAccumulator uvs = new FloatAccumulator(384);
         final Set<Long> submissions = new HashSet<>();
         boolean hadModelSubmission;
+        boolean hadItemSubmission;
 
         CaptureContext(
                 EntityRenderState renderState,

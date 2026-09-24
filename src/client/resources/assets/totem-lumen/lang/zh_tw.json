@@ -7,7 +7,7 @@
   "message.totem-lumen.compile.bootstrap_wait": "[Totem Lumen] [1/4] Vulkan 啟動管線仍在編譯（%s）；目前維持原版渲染。",
   "message.totem-lumen.compile.bootstrap_ready": "[Totem Lumen] [1/4] Vulkan 啟動管線完成；完整光影尚未就緒，繼續使用 Minecraft 一般畫面。",
   "message.totem-lumen.compile.full": "[Totem Lumen] [2/4] 正在背景編譯完整光照、材質與玩家 / 生物光追…",
-  "message.totem-lumen.compile.full_wait": "[Totem Lumen] [2/4] 完整光照仍在編譯（%s）；目前維持 Minecraft 一般渲染與玩家選用的材質包。",
+  "message.totem-lumen.compile.full_wait": "[Totem Lumen] [2/4] 完整光照仍在編譯（%s）；目前階段：%s。維持 Minecraft 一般渲染與玩家選用的材質包。",
   "message.totem-lumen.compile.full_ready": "[Totem Lumen] [2/4] 完整光照、材質與玩家 / 生物光追已完成；Totem Lumen 將在首個完整 frame 後接管畫面。",
   "message.totem-lumen.compile.advanced": "[Totem Lumen] [4/4] 正在背景編譯反射管線…",
   "message.totem-lumen.compile.advanced_wait": "[Totem Lumen] [4/4] 反射仍在編譯（%s）；完整光照與實體光追會持續運作。",
@@ -71,6 +71,8 @@
   "screen.totem-lumen.internal_resolution": "內部解析度：%s（視窗 %s%%）",
   "screen.totem-lumen.reflections_enabled": "反射：%s",
   "screen.totem-lumen.water_reflections": "水面反射：%s",
+  "screen.totem-lumen.entity_ray_tracing": "實體光追：%s",
+  "screen.totem-lumen.local_light_quality": "局部光源：%s",
   "screen.totem-lumen.temporal_quality": "時間累積：%s",
   "screen.totem-lumen.denoise_quality": "降噪：%s",
   "screen.totem-lumen.diagnostics": "診斷與渲染檢視…",
@@ -96,6 +98,7 @@
   "screen.totem-lumen.video_section_hint": "啟用 Totem Lumen 時，由 Totem 接管的原版世界渲染選項會鎖定。",
   "screen.totem-lumen.profile_section": "渲染",
   "screen.totem-lumen.render_profile": "渲染設定檔：%s",
-  "screen.totem-lumen.render_profile.minecraft": "Minecraft 原版",
+  "screen.totem-lumen.render_profile.minecraft_pure": "Minecraft 純原版",
+  "screen.totem-lumen.render_profile.minecraft_rgb": "Minecraft 原版 + RGB 光源",
   "screen.totem-lumen.render_profile.totem": "Totem Lumen"
 }

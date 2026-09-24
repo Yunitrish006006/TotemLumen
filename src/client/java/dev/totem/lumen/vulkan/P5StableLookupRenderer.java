@@ -13,6 +13,8 @@ import dev.totem.lumen.TotemLumenClient;
 import dev.totem.lumen.gpu.GpuSectionLightLists;
 import dev.totem.lumen.gpu.GpuSectionLookupTable;
 import dev.totem.lumen.gpu.GpuSectionSlotAllocator;
+import dev.totem.lumen.gameplay.light.PackedRgbLight;
+import dev.totem.lumen.integration.ClientGameplayLightField;
 import dev.totem.lumen.integration.LabPbrTextureRegistry;
 import dev.totem.lumen.integration.RendererRuntimeTuningRegistry;
 import dev.totem.lumen.integration.SceneExtractionBridge;
@@ -39,6 +41,7 @@ import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.PriorityQueue;
 import java.util.Set;
 
 /**
@@ -46,7 +49,7 @@ import java.util.Set;
  * GPU-resident temporal history, edge-aware spatial denoising and a one-bounce diffuse GI baseline.
  */
 public final class P5StableLookupRenderer {
-    private static final int MAX_SECTIONS = 64;
+    private static final int MAX_SECTIONS = 128;
     private static final int MIN_SECTIONS = 16;
     private static final int HEADER_WORDS = 96;
     private static final int LOOKUP_CAPACITY = 128;
@@ -92,12 +95,12 @@ public final class P5StableLookupRenderer {
             const uint LOOKUP_WORDS_PER_BUCKET = 4u;
             const uint VOXEL_BASE = 608u;
             const uint VOXELS_PER_SECTION = 4096u;
-            const uint SECTION_LIGHT_COUNT_BASE = 262752u;
-            const uint SECTION_LIGHT_INDEX_BASE = 262816u;
-            const uint LIGHT_DATA_BASE = 263328u;
+            const uint SECTION_LIGHT_COUNT_BASE = 524896u;
+            const uint SECTION_LIGHT_INDEX_BASE = 525024u;
+            const uint LIGHT_DATA_BASE = 526048u;
             const uint MAX_LIGHTS_PER_SECTION = 8u;
             const uint LIGHT_WORDS_PER_RECORD = 8u;
-            const uint MATERIAL_EMISSION_BASE = 265376u;
+            const uint MATERIAL_EMISSION_BASE = 528096u;
             const uint MATERIAL_EMISSION_WORDS_PER_RECORD = 16u;
             const uint HISTORY_RECORD_WORDS = 8u;
             const float TEMPORAL_HISTORY_WEIGHT = 0.80;
@@ -267,6 +270,12 @@ public final class P5StableLookupRenderer {
                     float((rgba >> 8u) & 255u),
                     float((rgba >> 16u) & 255u)
                 ) / 255.0;
+            }
+
+            vec3 applyVanillaGamma(vec3 rgb) {
+                float gamma = clamp(uintBitsToFloat(scene.data[90]), 0.0, 1.0);
+                vec3 brightened = vec3(1.0) - pow(vec3(1.0) - clamp(rgb, vec3(0.0), vec3(1.0)), vec3(4.0));
+                return mix(rgb, brightened, gamma);
             }
 
             vec3 materialColor(uint materialId) {
@@ -503,8 +512,10 @@ public final class P5StableLookupRenderer {
                 vec3 surfaceNormal = resolvedSurfaceNormal(hit, primaryDirection);
                 vec3 hitPoint = primaryOrigin + primaryDirection * hit.distance;
                 vec3 lighting = vec3(uintBitsToFloat(scene.data[82]));
-                uint lightCount = min(scene.data[SECTION_LIGHT_COUNT_BASE + uint(slot)], MAX_LIGHTS_PER_SECTION);
-                uint areaSamples = clamp(scene.data[45], 1u, 4u);
+                uint quality = scene.data[92];
+                uint maxLights = quality == 1u ? 2u : MAX_LIGHTS_PER_SECTION;
+                uint lightCount = min(scene.data[SECTION_LIGHT_COUNT_BASE + uint(slot)], maxLights);
+                uint areaSamples = quality == 1u ? 1u : clamp(scene.data[45], 1u, 4u);
 
                 for (uint localIndex = 0u; localIndex < lightCount; localIndex++) {
                     uint listWord = SECTION_LIGHT_INDEX_BASE + uint(slot) * MAX_LIGHTS_PER_SECTION + localIndex;
@@ -560,7 +571,11 @@ public final class P5StableLookupRenderer {
 
                         float visibility = 1.0;
                         float shadowMaxDistance = max(distanceToLight - 0.06, 0.0);
-                        if (shadowMaxDistance > 0.02) {
+                        // Point emitters such as torches are anchored inside their source voxel.
+                        // A shadow ray from the block below therefore hits the torch itself and
+                        // incorrectly removes all direct light. Area emitters retain full
+                        // visibility tracing; point emitters use their explicit source anchor.
+                        if (!pointEmitter && shadowMaxDistance > 0.02) {
                             vec3 shadowOrigin = hitPoint + surfaceNormal * 0.025 + lightDirection * 0.01;
                             HitResult blocker = traceRayLimited(shadowOrigin, lightDirection, shadowMaxDistance);
                             visibility = blocker.hit == 0u ? 1.0 : 0.0;
@@ -881,6 +896,10 @@ public final class P5StableLookupRenderer {
                     color = debugColor(primaryHit, origin, direction);
                 }
 
+                if (scene.data[46] == 0u) {
+                    color = packRgba(applyVanillaGamma(unpackRgb(color)), 255u);
+                }
+
                 uint pixelBase = scene.data[3];
                 scene.data[pixelBase + (height - 1u - pixel.y) * width + pixel.x] = color;
             }
@@ -951,7 +970,9 @@ public final class P5StableLookupRenderer {
     private static String dimensionId;
     private static long lastSettingsRevision = Long.MIN_VALUE;
     private static long lastRuntimeTuningRevision = Long.MIN_VALUE;
+    private static long lastRgbFieldRevision = Long.MIN_VALUE;
     private static long lastAnimationSignature = Long.MIN_VALUE;
+    private static int lastUploadedGammaBits = Integer.MIN_VALUE;
     private static int activeRenderWidth;
     private static int activeRenderHeight;
     private static DebugMode performanceProbeMode;
@@ -1086,6 +1107,13 @@ public final class P5StableLookupRenderer {
             ready = false;
         }
 
+        long rgbFieldRevision = ClientGameplayLightField.revision();
+        if (rgbFieldRevision != lastRgbFieldRevision) {
+            lastRgbFieldRevision = rgbFieldRevision;
+            sceneUploadRequired = true;
+            historyValid = false;
+        }
+
         long newSignature = sectionSignature(sections);
         if (newSignature != sceneSignature) {
             syncStableSlots(sections);
@@ -1119,13 +1147,27 @@ public final class P5StableLookupRenderer {
         );
 
         int uploadBytes;
+        boolean entityChanged = false;
         if (fullSceneUpload) {
             packLookupSectionsAndLights(upload, sections);
+            // Keep the dynamic-entity tail on the same explicit upload path as the static scene.
+            // The entity capture can happen after the first full scene pack, so this must also be
+            // refreshed on later camera uploads when the retained entity revision changes.
+            P17DynamicEntityGpuUploader.pack(upload);
             uploadBytes = STATIC_DATA_END_WORD * Integer.BYTES;
         } else {
+            entityChanged = P17DynamicEntityGpuUploader.packIfDirty(upload);
             uploadBytes = CAMERA_UPLOAD_WORDS * Integer.BYTES;
         }
         r.upload.flush(0, uploadBytes);
+
+        if (fullSceneUpload || entityChanged) {
+            flushTail(
+                    r.upload,
+                    P17DynamicEntityGpuUploader.lastContiguousByteOffset(),
+                    P17DynamicEntityGpuUploader.lastContiguousCopyBytes()
+            );
+        }
 
         sceneUploadRequired = false;
         inFlight = true;
@@ -1606,7 +1648,20 @@ public final class P5StableLookupRenderer {
         putWord(buffer, 87, Float.floatToRawIntBits(tuning.waterReflectionScale()));
         putWord(buffer, 88, Float.floatToRawIntBits(tuning.lavaReflectionScale()));
         putWord(buffer, 89, Float.floatToRawIntBits(tuning.entityEmissiveGain()));
-        for (int word = 90; word < HEADER_WORDS; word++) putWord(buffer, word, 0);
+        float vanillaGamma = Minecraft.getInstance().options.gamma().get().floatValue();
+        int vanillaGammaBits = Float.floatToRawIntBits(vanillaGamma);
+        putWord(buffer, 90, vanillaGammaBits);
+        if (vanillaGammaBits != lastUploadedGammaBits) {
+            lastUploadedGammaBits = vanillaGammaBits;
+            TotemLumenClient.LOGGER.info(
+                    "Vulkan vanilla gamma upload: value={}, reflectionPassActive={}",
+                    vanillaGamma,
+                    reflectionPassActive
+            );
+        }
+        for (int word = 91; word < HEADER_WORDS; word++) putWord(buffer, word, 0);
+        putWord(buffer, 91, RendererSettings.entityRayTracingEnabled() ? 1 : 0);
+        putWord(buffer, 92, RendererSettings.localLightQuality().ordinal());
     }
 
     private static long currentAnimationTick(FrameSnapshot frame) {
@@ -1689,7 +1744,8 @@ public final class P5StableLookupRenderer {
                             material.lightEmitterY(),
                             material.lightEmitterZ()
                     );
-                }
+                },
+                gameplayRgbLights()
         );
 
         int[] counts = lightLists.countsBySlot();
@@ -1725,6 +1781,91 @@ public final class P5StableLookupRenderer {
         lastLightCount = lights.size();
         lastMaxLightsPerSection = lightLists.maxLightsInSection();
         lastPopulatedLightLists = lightLists.populatedLists();
+        if (RendererSettings.renderProfile() == RendererSettings.RenderProfile.MINECRAFT_RGB) {
+            TotemLumenClient.LOGGER.info(
+                    "RGB world lights uploaded: fieldRevision={}, gpuLights={}, sourceSections={}",
+                    ClientGameplayLightField.revision(),
+                    gameplayRgbLights().size(),
+                    ClientGameplayLightField.snapshotForGpu(
+                            Minecraft.getInstance().level.dimension().identifier().toString()
+                    ).size()
+            );
+        }
+    }
+
+    /**
+     * Converts the RGB world field into the same GPU point-light records used by the main
+     * lighting pass. The nearest cells are retained so the field participates in scene lighting
+     * without exhausting the existing global-light budget.
+     */
+    private static List<GpuSectionLightLists.PointLight> gameplayRgbLights() {
+        if (RendererSettings.renderProfile() != RendererSettings.RenderProfile.MINECRAFT_RGB) {
+            return List.of();
+        }
+        Minecraft client = Minecraft.getInstance();
+        if (client.level == null || client.player == null) {
+            return List.of();
+        }
+        String dimension = client.level.dimension().identifier().toString();
+        List<ClientGameplayLightField.GpuSection> field =
+                ClientGameplayLightField.snapshotForGpu(dimension);
+        if (field.isEmpty()) {
+            return List.of();
+        }
+        PriorityQueue<GpuRgbCandidate> nearest = new PriorityQueue<>(
+                192,
+                java.util.Comparator.comparingDouble(GpuRgbCandidate::distanceSquared).reversed()
+        );
+        for (ClientGameplayLightField.GpuSection section : field) {
+            char[] values = section.values();
+            for (int index = 0; index < values.length; index++) {
+                int packed = values[index];
+                int maximum = PackedRgbLight.maxChannel(packed);
+                if (maximum <= 0) {
+                    continue;
+                }
+                int x = section.x() * 16 + (index & 15);
+                int y = section.y() * 16 + ((index >>> 8) & 15);
+                int z = section.z() * 16 + ((index >>> 4) & 15);
+                double dx = x + 0.5 - client.player.getX();
+                double dy = y + 0.5 - client.player.getY();
+                double dz = z + 0.5 - client.player.getZ();
+                GpuSectionLightLists.PointLight light = new GpuSectionLightLists.PointLight(
+                        x + 0.5f,
+                        y + 0.5f,
+                        z + 0.5f,
+                        Math.max(2.0f, maximum + 0.5f),
+                        Math.min(2.0f, maximum / 15.0f * 1.35f),
+                        PackedRgbLight.hueRed(packed) / 15.0f,
+                        PackedRgbLight.hueGreen(packed) / 15.0f,
+                        PackedRgbLight.hueBlue(packed) / 15.0f,
+                        x,
+                        y,
+                        z,
+                        true
+                );
+                GpuRgbCandidate candidate = new GpuRgbCandidate(
+                        light,
+                        dx * dx + dy * dy + dz * dz
+                );
+                if (nearest.size() < 192) {
+                    nearest.add(candidate);
+                } else if (candidate.distanceSquared() < nearest.peek().distanceSquared()) {
+                    nearest.poll();
+                    nearest.add(candidate);
+                }
+            }
+        }
+        return nearest.stream()
+                .sorted(java.util.Comparator.comparingDouble(GpuRgbCandidate::distanceSquared))
+                .map(GpuRgbCandidate::light)
+                .toList();
+    }
+
+    private record GpuRgbCandidate(
+            GpuSectionLightLists.PointLight light,
+            double distanceSquared
+    ) {
     }
 
     private static float[][] cameraBasis(FrameSnapshot frame) {
@@ -1761,6 +1902,10 @@ public final class P5StableLookupRenderer {
         buffer.putInt(wordIndex * Integer.BYTES, value);
     }
 
+    private static void flushTail(VulkanOwnedBuffer upload, long offset, long bytes) {
+        if (offset >= 0L && bytes > 0L) upload.flush(offset, bytes);
+    }
+
     private static void recordCommands(
             VkCommandBuffer commandBuffer,
             Resources r,
@@ -1772,6 +1917,16 @@ public final class P5StableLookupRenderer {
             VkBufferCopy.Buffer uploadCopy = VkBufferCopy.calloc(1, stack);
             uploadCopy.get(0).srcOffset(0).dstOffset(0).size(uploadBytes);
             VK10.vkCmdCopyBuffer(commandBuffer, r.upload.vkBuffer(), r.scene.vkBuffer(), uploadCopy);
+
+            if (P17DynamicEntityGpuUploader.consumeCopyPending()) {
+                copyTail(
+                        commandBuffer,
+                        r.upload.vkBuffer(),
+                        r.scene.vkBuffer(),
+                        P17DynamicEntityGpuUploader.lastContiguousByteOffset(),
+                        P17DynamicEntityGpuUploader.lastContiguousCopyBytes()
+                );
+            }
 
             VkBufferMemoryBarrier.Buffer uploadToCompute = VkBufferMemoryBarrier.calloc(1, stack);
             uploadToCompute.get(0)
@@ -1893,9 +2048,28 @@ public final class P5StableLookupRenderer {
         lastSubmittedFrame = -1;
         dimensionId = null;
         lastSettingsRevision = Long.MIN_VALUE;
+        lastRgbFieldRevision = Long.MIN_VALUE;
         activeRenderWidth = 0;
         activeRenderHeight = 0;
         worldTakeoverLogged = false;
+    }
+
+    private static void copyTail(
+            VkCommandBuffer commandBuffer,
+            long sourceBuffer,
+            long destinationBuffer,
+            long offset,
+            long bytes
+    ) {
+        if (offset < 0L || bytes <= 0L) return;
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            VkBufferCopy.Buffer copy = VkBufferCopy.calloc(1, stack);
+            copy.get(0)
+                    .srcOffset(offset)
+                    .dstOffset(offset)
+                    .size(bytes);
+            VK10.vkCmdCopyBuffer(commandBuffer, sourceBuffer, destinationBuffer, copy);
+        }
     }
 
     private static void closeQuietly(AutoCloseable closeable) {

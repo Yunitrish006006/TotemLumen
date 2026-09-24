@@ -91,7 +91,7 @@ Status: **planned after profiling**
 
 Potential work, only if measurements justify it:
 
-- compact 6 KiB three-nibble section layout if RAM dominates;
+- profile-driven sparse/compressed RGBA sections if RAM dominates; do not discard light-intensity A;
 - selective data-pack reload invalidation by affected block IDs;
 - more compact source/index maps;
 - optional derived-cache persistence keyed by lighting-profile hash;

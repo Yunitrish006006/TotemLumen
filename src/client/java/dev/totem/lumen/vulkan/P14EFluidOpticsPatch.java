@@ -182,7 +182,10 @@ final class P14EFluidOpticsPatch {
                         direction,
                         uintBitsToFloat(scene.data[7])
                     );
-                    if (primaryTrace.hit.hit == 0u) return;
+                    if (primaryTrace.hit.hit == 0u) {
+                        scene.data[pixelIndex] = packRgba(applyVanillaGamma(baseRadiance), 255u);
+                        return;
+                    }
 
                     vec3 reflected = p16ReflectionRgb(primaryTrace.hit, origin, direction)
                             * primaryTrace.transmission;
@@ -205,6 +208,10 @@ final class P14EFluidOpticsPatch {
                     if (p14eReflectionSurface.hit == 0u) return;
                     vec3 reflected = p16ReflectionRgb(p14eReflectionSurface, origin, direction)
                             * (p14eReflectWater ? vec3(1.0) : primaryTrace.transmission);
+                    scene.data[pixelIndex] = packRgba(
+                            applyVanillaGamma(baseRadiance + reflected),
+                            255u
+                    );
                 """;
         return replaceRequiredOnce(
                 source,
