@@ -26,4 +26,8 @@ public final class DimensionLightingRuleSet {
     public int size() {
         return rules.size();
     }
+
+    public Map<Identifier, DimensionLightingRule> rules() {
+        return rules;
+    }
 }

@@ -23,7 +23,8 @@ loom {
     runs {
         client {
             client()
-            runDir('run/client')
+            // Keep 26.2 test worlds intact; Minecraft world upgrades are not reversible.
+            runDir('run/client-26.3')
             vmArgs '-Xmx16G'
             programArg('--graphicsBackend=VULKAN')
         }
@@ -46,7 +47,7 @@ dependencies {
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
-// Minecraft 26.2 development runs use the named namespace. Fabric API jars
+// Minecraft 26.3 development runs use the named namespace. Fabric API jars
 // may carry official class-tweaker headers, so isolate normalized copies for
 // the local runClient classpath without changing published/runtime artifacts.
 def namedRuntimeSources = new LinkedHashSet<File>()
@@ -145,8 +146,32 @@ tasks.register('verifyP14EFluidMixinDescriptors', JavaExec) {
     mainClass = 'dev.totem.lumen.geometry.P14EFluidMixinDescriptorVerifier'
 }
 
+tasks.register('verifyHeldLightShader', JavaExec) {
+    group = 'verification'
+    dependsOn tasks.named('clientClasses')
+    classpath = sourceSets.client.runtimeClasspath + sourceSets.main.runtimeClasspath
+    mainClass = 'dev.totem.lumen.integration.HeldLightShaderVerifier'
+}
+
+tasks.register('verifyRgbSectionRefresh', JavaExec) {
+    group = 'verification'
+    dependsOn tasks.named('clientClasses')
+    classpath = sourceSets.client.runtimeClasspath + sourceSets.main.runtimeClasspath
+    mainClass = 'dev.totem.lumen.integration.RgbSectionRefreshVerifier'
+}
+
+tasks.register('verifyRgbHotPaths', JavaExec) {
+    group = 'verification'
+    dependsOn tasks.named('clientClasses')
+    classpath = sourceSets.client.runtimeClasspath + sourceSets.main.runtimeClasspath
+    mainClass = 'dev.totem.lumen.integration.RgbHotPathVerifier'
+}
+
 tasks.named('check') {
     dependsOn tasks.named('verifyRuntimeShader')
+    dependsOn tasks.named('verifyHeldLightShader')
+    dependsOn tasks.named('verifyRgbSectionRefresh')
+    dependsOn tasks.named('verifyRgbHotPaths')
     dependsOn tasks.named('verifyP14DDynamicMeshes')
     dependsOn tasks.named('verifyP14DMixinDescriptors')
     dependsOn tasks.named('verifyP14EFluidMixinDescriptors')

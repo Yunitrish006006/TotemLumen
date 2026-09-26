@@ -3,6 +3,7 @@ package dev.totem.lumen.integration;
 import com.mojang.blaze3d.vertex.PoseStack;
 import dev.totem.lumen.TotemLumenClient;
 import dev.totem.lumen.geometry.BlockModelMeshRegistry;
+import dev.totem.lumen.render.RendererSettings;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.model.Model;
 import net.minecraft.client.model.geom.ModelPart;
@@ -34,6 +35,7 @@ public final class BlockEntityRenderGeometryCapture {
     }
 
     public static void begin(BlockEntityRenderState state, PoseStack poseStack) {
+        if (!RendererSettings.rendererEnabled()) return;
         if (state == null || state.blockPos == null || poseStack == null) return;
         var level = Minecraft.getInstance().level;
         if (level == null) return;
@@ -47,7 +49,7 @@ public final class BlockEntityRenderGeometryCapture {
                 ? "unknown"
                 : BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(state.blockEntityType).toString();
         String dimensionId = level.dimension().identifier().toString();
-        BlockPos pos = new BlockPos(state.blockPos);
+        BlockPos pos = new BlockPos(state.blockPos.getX(), state.blockPos.getY(), state.blockPos.getZ());
         CONTEXTS.get().push(new CaptureContext(dimensionId, pos, typeId, inverse));
     }
 

@@ -37,6 +37,22 @@ public abstract class VideoSettingsRenderProfileMixin {
         );
     }
 
+    @Inject(
+            method = "addOptions",
+            at = @At(
+                    value = "INVOKE",
+                    target = "Lnet/minecraft/client/gui/components/OptionsList;addSmall([Lnet/minecraft/client/OptionInstance;)V",
+                    ordinal = 0,
+                    shift = At.Shift.AFTER
+            )
+    )
+    private void totemLumen$addDisplayLightingControls(CallbackInfo ci) {
+        OptionsSubScreenAccessor accessor = (OptionsSubScreenAccessor) (Object) this;
+        TotemLumenVideoSettingsIntegration.addDisplayControls(
+                (VideoSettingsScreen) (Object) this,
+                accessor.totemLumen$getList());
+    }
+
     @Inject(method = "qualityOptions", at = @At("RETURN"), cancellable = true)
     private static void totemLumen$filterQualityOptions(
             Options options,

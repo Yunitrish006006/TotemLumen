@@ -1,12 +1,12 @@
 package dev.totem.lumen.vulkan;
 
 import com.mojang.blaze3d.systems.RenderSystem;
-import com.mojang.blaze3d.vulkan.VulkanDevice;
+import com.mojang.renderpearl.backend.vulkan.VulkanDevice;
 import dev.totem.lumen.mixin.GpuDeviceAccessor;
 import org.jspecify.annotations.Nullable;
 
 /**
- * Access point for Minecraft 26.2's Vulkan backend.
+ * Access point for Minecraft 26.3's Vulkan backend.
  *
  * <p>Minecraft owns the instance, device, allocator, queues, swapchain and shutdown order. Totem
  * Lumen may borrow the backend for compute/storage work that public Blaze3D does not currently

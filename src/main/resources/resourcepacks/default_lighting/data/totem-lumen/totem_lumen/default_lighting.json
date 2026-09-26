@@ -1,0 +1,24 @@
+{
+  "fallback": [1.0, 0.86, 0.66],
+  "matchers": [
+    {"exact": "minecraft:soul_lantern", "color": [0.26, 0.76, 1.0]},
+    {"contains": "soul_", "color": [0.28, 0.78, 1.0]},
+    {"contains": "redstone_torch", "color": [1.0, 0.18, 0.06]},
+    {"contains": "redstone_ore", "color": [1.0, 0.18, 0.06]},
+    {"contains": "lava", "color": [1.0, 0.32, 0.08]},
+    {"contains": "magma", "color": [1.0, 0.32, 0.08]},
+    {"contains": "ochre_froglight", "color": [1.0, 0.76, 0.35]},
+    {"contains": "verdant_froglight", "color": [0.58, 1.0, 0.62]},
+    {"contains": "pearlescent_froglight", "color": [1.0, 0.62, 0.92]},
+    {"contains": "sea_lantern", "color": [0.62, 0.90, 1.0]},
+    {"contains": "conduit", "color": [0.62, 0.90, 1.0]},
+    {"contains": "end_rod", "color": [0.88, 0.84, 1.0]},
+    {"contains": "glowstone", "color": [1.0, 0.78, 0.42]},
+    {"contains": "shroomlight", "color": [1.0, 0.48, 0.18]},
+    {"contains": "torch", "color": [1.0, 0.64, 0.34]},
+    {"contains": "fire", "color": [1.0, 0.55, 0.22]},
+    {"contains": "lantern", "color": [1.0, 0.55, 0.22]},
+    {"contains": "campfire", "color": [1.0, 0.55, 0.22]},
+    {"contains": "jack_o_lantern", "color": [1.0, 0.55, 0.22]}
+  ]
+}

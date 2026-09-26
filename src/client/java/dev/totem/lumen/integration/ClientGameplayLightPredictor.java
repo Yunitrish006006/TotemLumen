@@ -1,15 +1,13 @@
 package dev.totem.lumen.integration;
 
 import dev.totem.lumen.TotemLumenClient;
-import dev.totem.lumen.gameplay.light.GameplayLightSource;
 import dev.totem.lumen.gameplay.light.PackedRgbLight;
+import dev.totem.lumen.gameplay.light.RgbLightAttenuation;
 import dev.totem.lumen.render.RendererSettings;
-import dev.totem.lumen.world.LightingWorldRule;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
@@ -24,6 +22,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Predicate;
 
 /**
  * Client-side prediction of the gameplay RGB field.
@@ -37,12 +36,15 @@ public final class ClientGameplayLightPredictor {
     private static final int CHUNK_RADIUS = 2;
     private static final int WORK_BUDGET = 24_000;
     private static final long TIME_BUDGET_NANOS = 2_000_000L;
+    private static final Predicate<BlockState> EMITS_LIGHT = state -> state.getLightEmission() > 0;
 
     private static ClientLevel activeLevel;
     private static String activeDimension;
     private static final Map<ChunkKey, ScanTask> scans = new HashMap<>();
     private static final ArrayDeque<ScanTask> pendingScans = new ArrayDeque<>();
     private static final Map<BlockKey, Character> sources = new HashMap<>();
+    /** Avoid a whole-world source scan for every bounded RGB correction. */
+    private static final Map<SectionKey, Set<BlockKey>> sourcesBySection = new HashMap<>();
     private static final ArrayDeque<ImmediatePropagationTask> immediatePropagations = new ArrayDeque<>();
     private static final ArrayDeque<RebuildTask> pendingRebuilds = new ArrayDeque<>();
     private static final Set<SectionKey> queuedRebuilds = new HashSet<>();
@@ -65,6 +67,7 @@ public final class ClientGameplayLightPredictor {
         scans.clear();
         pendingScans.clear();
         sources.clear();
+        sourcesBySection.clear();
         immediatePropagations.clear();
         pendingRebuilds.clear();
         queuedRebuilds.clear();
@@ -118,9 +121,9 @@ public final class ClientGameplayLightPredictor {
         char oldSource = sources.getOrDefault(key, sourceFor(oldState));
         char nextSource = sourceFor(newState);
         if (nextSource == 0) {
-            sources.remove(key);
+            removeSource(key);
         } else {
-            sources.put(key, nextSource);
+            putSource(key, nextSource);
         }
         boolean sourceChanged = oldSource != nextSource;
         boolean propagationChanged = oldState.getLightDampening() != newState.getLightDampening();
@@ -239,7 +242,7 @@ public final class ClientGameplayLightPredictor {
                 continue;
             }
             if (level.getChunkSource().getChunk(section.x(), section.z(), ChunkStatus.FULL, false) != null) {
-                ClientGameplayLightField.markSectionDirty(
+                ClientGameplayLightField.markSkySectionDirty(
                         dimension, section.x(), section.y(), section.z()
                 );
                 queued++;
@@ -391,6 +394,7 @@ public final class ClientGameplayLightPredictor {
                     continue;
                 }
                 iterator.remove();
+                unindexSource(source);
                 rescheduleRebuild(
                         SectionKey.fromBlock(source.x, source.y, source.z),
                         Region.aroundBlock(activeLevel, new BlockPos(source.x, source.y, source.z))
@@ -400,7 +404,7 @@ public final class ClientGameplayLightPredictor {
         for (Map.Entry<BlockKey, Character> entry : observed.entrySet()) {
             BlockKey source = entry.getKey();
             char current = entry.getValue();
-            Character previous = sources.put(source, current);
+            Character previous = putSource(source, current);
             if (previous == null || previous != current) {
                 knownSourceSections.add(SectionKey.fromBlock(source.x, source.y, source.z));
                 rescheduleRebuild(
@@ -420,6 +424,7 @@ public final class ClientGameplayLightPredictor {
             if (Math.floorDiv(key.x, 16) == chunk.x && Math.floorDiv(key.z, 16) == chunk.z) {
                 affected.add(new RemovedSource(key));
                 iterator.remove();
+                unindexSource(key);
             }
         }
         return affected;
@@ -430,6 +435,81 @@ public final class ClientGameplayLightPredictor {
             if (activeLevel != null) {
                 pendingRebuilds.addLast(new RebuildTask(anchor, Region.around(activeLevel, anchor)));
             }
+        }
+    }
+
+    private static Character putSource(BlockKey key, char packed) {
+        Character previous = sources.put(key, packed);
+        sourcesBySection.computeIfAbsent(
+                SectionKey.fromBlock(key.x, key.y, key.z), ignored -> new HashSet<>()
+        ).add(key);
+        return previous;
+    }
+
+    private static Character removeSource(BlockKey key) {
+        Character previous = sources.remove(key);
+        if (previous != null) {
+            unindexSource(key);
+        }
+        return previous;
+    }
+
+    private static void unindexSource(BlockKey key) {
+        SectionKey section = SectionKey.fromBlock(key.x, key.y, key.z);
+        Set<BlockKey> entries = sourcesBySection.get(section);
+        if (entries != null && entries.remove(key) && entries.isEmpty()) {
+            sourcesBySection.remove(section);
+        }
+    }
+
+    private static List<RebuildTask.Source> sourcesIn(Region region) {
+        List<RebuildTask.Source> result = new ArrayList<>();
+        for (int sectionY = Math.floorDiv(region.minY, 16); sectionY <= Math.floorDiv(region.maxY, 16); sectionY++) {
+            for (int sectionZ = Math.floorDiv(region.minZ, 16); sectionZ <= Math.floorDiv(region.maxZ, 16); sectionZ++) {
+                for (int sectionX = Math.floorDiv(region.minX, 16); sectionX <= Math.floorDiv(region.maxX, 16); sectionX++) {
+                    Set<BlockKey> entries = sourcesBySection.get(new SectionKey(sectionX, sectionY, sectionZ));
+                    if (entries == null) continue;
+                    for (BlockKey key : entries) {
+                        if (region.contains(key.x, key.y, key.z)) {
+                            Character packed = sources.get(key);
+                            if (packed != null) result.add(new RebuildTask.Source(key, packed));
+                        }
+                    }
+                }
+            }
+        }
+        return result;
+    }
+
+    /** Deterministic build-time guard for negative-section indexing and source removal. */
+    static void verifySourceIndex() {
+        if (!sources.isEmpty() || !sourcesBySection.isEmpty()) {
+            throw new IllegalStateException("RGB source index verifier requires an unused predictor");
+        }
+        BlockKey left = new BlockKey(-17, 64, 3);
+        BlockKey right = new BlockKey(-16, 64, 3);
+        BlockKey distant = new BlockKey(160, 64, 3);
+        Region nearby = new Region(-20, 60, 0, -15, 70, 7);
+        try {
+            putSource(left, (char) 0xF321);
+            putSource(right, (char) 0xF456);
+            putSource(distant, (char) 0xF789);
+            if (sourcesIn(nearby).size() != 2) {
+                throw new IllegalStateException("RGB index must return only sources inside the region");
+            }
+            putSource(right, (char) 0xFABC);
+            if (sourcesIn(nearby).stream().noneMatch(source -> source.position.equals(right)
+                    && source.packed == (char) 0xFABC)) {
+                throw new IllegalStateException("RGB index must reflect source color changes");
+            }
+            removeSource(left);
+            if (sourcesIn(nearby).size() != 1 || sourcesBySection.containsKey(
+                    SectionKey.fromBlock(left.x, left.y, left.z))) {
+                throw new IllegalStateException("RGB index must remove obsolete source sections");
+            }
+        } finally {
+            sources.clear();
+            sourcesBySection.clear();
         }
     }
 
@@ -471,9 +551,7 @@ public final class ClientGameplayLightPredictor {
     }
 
     private static char sourceFor(BlockState state) {
-        String sourceId = BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
-        LightingWorldRule rule = ClientLightingWorldRules.ruleFor(sourceId);
-        return GameplayLightSource.packedFor(state, rule);
+        return ClientRgbVisualLightSource.packedFor(state);
     }
 
     private static int getPacked(int x, int y, int z) {
@@ -498,6 +576,16 @@ public final class ClientGameplayLightPredictor {
     }
 
     private record BlockKey(int x, int y, int z) {
+    }
+
+    private record PropagationNode(
+            BlockKey position,
+            int packed,
+            float distance,
+            float occlusionPenalty,
+            BlockKey origin,
+            boolean rounded
+    ) {
     }
 
     private record RemovedSource(BlockKey position) {
@@ -574,7 +662,9 @@ public final class ClientGameplayLightPredictor {
             int consumed = 0;
             while (sectionIndex < sections.length && consumed < budget) {
                 LevelChunkSection section = sections[sectionIndex];
-                if (section.hasOnlyAir()) {
+                // The section palette can reject non-emissive sections without visiting all
+                // 4096 voxels. Most newly loaded terrain sections contain no RGB sources.
+                if (section.hasOnlyAir() || !section.maybeHas(EMITS_LIGHT)) {
                     sectionIndex++;
                     voxelIndex = 0;
                     consumed++;
@@ -620,7 +710,7 @@ public final class ClientGameplayLightPredictor {
         private final SectionKey anchor;
         private final Region region;
         private final List<Source> sourceSnapshot;
-        private final ArrayDeque<BlockKey> queue = new ArrayDeque<>();
+        private final ArrayDeque<PropagationNode> queue = new ArrayDeque<>();
         private final Map<ClientGameplayLightField.SectionCoordinate, char[]> staged = new HashMap<>();
         private int phase = SOURCES;
         private int sourceCursor;
@@ -629,10 +719,7 @@ public final class ClientGameplayLightPredictor {
         private RebuildTask(SectionKey anchor, Region region) {
             this.anchor = anchor;
             this.region = region;
-            this.sourceSnapshot = sources.entrySet().stream()
-                    .filter(entry -> region.contains(entry.getKey().x, entry.getKey().y, entry.getKey().z))
-                    .map(entry -> new Source(entry.getKey(), entry.getValue()))
-                    .toList();
+            this.sourceSnapshot = sourcesIn(region);
         }
 
         private int process(int budget) {
@@ -648,7 +735,9 @@ public final class ClientGameplayLightPredictor {
                         }
                         if (loaded(source.position.x, source.position.z)
                                 && setMax(source.position.x, source.position.y, source.position.z, source.packed)) {
-                            queue.add(source.position);
+                            queue.add(new PropagationNode(
+                                    source.position, source.packed, 0.0f, 0.0f, source.position, true
+                            ));
                         }
                         consumed++;
                     }
@@ -662,15 +751,20 @@ public final class ClientGameplayLightPredictor {
                     if (boundaryCursor >= count) phase = PROPAGATE;
                 } else {
                     while (!queue.isEmpty() && consumed < budget) {
-                        BlockKey current = queue.removeFirst();
-                        int packed = stagedAt(current.x, current.y, current.z);
-                        if (packed != 0) {
-                            propagate(current.x - 1, current.y, current.z, packed);
-                            propagate(current.x + 1, current.y, current.z, packed);
-                            propagate(current.x, current.y - 1, current.z, packed);
-                            propagate(current.x, current.y + 1, current.z, packed);
-                            propagate(current.x, current.y, current.z - 1, packed);
-                            propagate(current.x, current.y, current.z + 1, packed);
+                        PropagationNode current = queue.removeFirst();
+                        if (current.packed != 0) {
+                            if (current.rounded) {
+                                for (RgbLightAttenuation.Step step : RgbLightAttenuation.ROUND_STEPS) {
+                                    propagate(current, step);
+                                }
+                            } else {
+                                propagateCardinal(current, -1, 0, 0);
+                                propagateCardinal(current, 1, 0, 0);
+                                propagateCardinal(current, 0, -1, 0);
+                                propagateCardinal(current, 0, 1, 0);
+                                propagateCardinal(current, 0, 0, -1);
+                                propagateCardinal(current, 0, 0, 1);
+                            }
                         }
                         consumed++;
                     }
@@ -750,17 +844,58 @@ public final class ClientGameplayLightPredictor {
             int outside = getPacked(outsideX, outsideY, outsideZ);
             if (outside == 0) return;
             mutablePos.set(x, y, z);
-            int incoming = GameplayLightSource.attenuate(outside, activeLevel.getBlockState(mutablePos));
+            int incoming = ClientRgbVisualLightSource.attenuate(outside, activeLevel.getBlockState(mutablePos));
             if (incoming != 0 && setMax(x, y, z, incoming)) {
-                queue.add(new BlockKey(x, y, z));
+                queue.add(new PropagationNode(
+                        new BlockKey(x, y, z), incoming, 0.0f, 0.0f, null, false
+                ));
             }
         }
 
-        private void propagate(int x, int y, int z, int fromPacked) {
+        private void propagateCardinal(PropagationNode from, int dx, int dy, int dz) {
+            propagate(from, new RgbLightAttenuation.Step(dx, dy, dz, 1.0f));
+        }
+
+        private void propagate(PropagationNode from, RgbLightAttenuation.Step step) {
+            int x = from.position.x + step.x();
+            int y = from.position.y + step.y();
+            int z = from.position.z + step.z();
             if (!region.contains(x, y, z) || !activeLevel.isInsideBuildHeight(y) || !loaded(x, z)) return;
+            if (step.diagonal() && !diagonalPathOpen(from.position, step)) return;
             mutablePos.set(x, y, z);
-            int candidate = GameplayLightSource.attenuate(fromPacked, activeLevel.getBlockState(mutablePos));
-            if (candidate != 0 && setMax(x, y, z, candidate)) queue.add(new BlockKey(x, y, z));
+            BlockState destination = activeLevel.getBlockState(mutablePos);
+            float nextPenalty = from.occlusionPenalty + RgbLightAttenuation.obstaclePenalty(destination);
+            float nextDistance = from.rounded
+                    ? Math.max(from.distance, visualDistance(from.origin, x, y, z) + nextPenalty)
+                    : 0.0f;
+            int candidate = from.rounded
+                    ? ClientRgbVisualLightSource.attenuateRounded(from.packed, from.distance, nextDistance)
+                    : ClientRgbVisualLightSource.attenuate(from.packed, destination);
+            if (candidate != 0 && setMax(x, y, z, candidate)) {
+                queue.add(new PropagationNode(
+                        new BlockKey(x, y, z), candidate,
+                        nextDistance,
+                        nextPenalty,
+                        from.origin,
+                        from.rounded
+                ));
+            }
+        }
+
+        private boolean diagonalPathOpen(BlockKey from, RgbLightAttenuation.Step step) {
+            if (step.x() != 0) {
+                mutablePos.set(from.x + step.x(), from.y, from.z);
+                if (activeLevel.getBlockState(mutablePos).getLightDampening() > 1) return false;
+            }
+            if (step.y() != 0) {
+                mutablePos.set(from.x, from.y + step.y(), from.z);
+                if (activeLevel.getBlockState(mutablePos).getLightDampening() > 1) return false;
+            }
+            if (step.z() != 0) {
+                mutablePos.set(from.x, from.y, from.z + step.z());
+                if (activeLevel.getBlockState(mutablePos).getLightDampening() > 1) return false;
+            }
+            return true;
         }
 
         private boolean setMax(int x, int y, int z, int candidate) {
@@ -779,7 +914,7 @@ public final class ClientGameplayLightPredictor {
 
     /** Fast additive propagation used for a newly placed source before a full correction arrives. */
     private static final class ImmediatePropagationTask {
-        private final ArrayDeque<BlockKey> queue = new ArrayDeque<>();
+        private final ArrayDeque<PropagationNode> queue = new ArrayDeque<>();
         private final BlockKey source;
         private final char sourcePacked;
         private boolean complete;
@@ -787,7 +922,7 @@ public final class ClientGameplayLightPredictor {
         private ImmediatePropagationTask(BlockKey source, char packed) {
             this.source = source;
             this.sourcePacked = packed;
-            queue.add(source);
+            queue.add(new PropagationNode(source, packed, 0.0f, 0.0f, source, true));
         }
 
         private int process(int budget) {
@@ -799,15 +934,11 @@ public final class ClientGameplayLightPredictor {
             }
             int consumed = 0;
             while (!queue.isEmpty() && consumed < budget) {
-                BlockKey current = queue.removeFirst();
-                int packed = getLocalPacked(current.x, current.y, current.z);
-                if (packed != 0) {
-                    propagate(current.x - 1, current.y, current.z, packed);
-                    propagate(current.x + 1, current.y, current.z, packed);
-                    propagate(current.x, current.y - 1, current.z, packed);
-                    propagate(current.x, current.y + 1, current.z, packed);
-                    propagate(current.x, current.y, current.z - 1, packed);
-                    propagate(current.x, current.y, current.z + 1, packed);
+                PropagationNode current = queue.removeFirst();
+                if (current.packed != 0) {
+                    for (RgbLightAttenuation.Step step : RgbLightAttenuation.ROUND_STEPS) {
+                        propagate(current, step);
+                    }
                 }
                 consumed++;
             }
@@ -815,19 +946,50 @@ public final class ClientGameplayLightPredictor {
             return consumed;
         }
 
-        private void propagate(int x, int y, int z, int fromPacked) {
+        private void propagate(PropagationNode from, RgbLightAttenuation.Step step) {
+            int x = from.position.x + step.x();
+            int y = from.position.y + step.y();
+            int z = from.position.z + step.z();
             if (activeLevel == null || !activeLevel.isInsideBuildHeight(y) || !loaded(x, z)) return;
-            if (Math.abs(x - source.x) + Math.abs(y - source.y) + Math.abs(z - source.z)
-                    > PackedRgbLight.MAX_CHANNEL) {
-                return;
-            }
+            if (step.diagonal() && !diagonalPathOpen(from.position, step)) return;
             mutablePos.set(x, y, z);
-            int candidate = GameplayLightSource.attenuate(fromPacked, activeLevel.getBlockState(mutablePos));
+            BlockState destination = activeLevel.getBlockState(mutablePos);
+            float nextPenalty = from.occlusionPenalty + RgbLightAttenuation.obstaclePenalty(destination);
+            float nextDistance = Math.max(
+                    from.distance, visualDistance(from.origin, x, y, z) + nextPenalty
+            );
+            if (nextDistance > PackedRgbLight.MAX_CHANNEL + 1.0f) return;
+            int candidate = ClientRgbVisualLightSource.attenuateRounded(
+                    from.packed, from.distance, nextDistance
+            );
             int previous = getLocalPacked(x, y, z);
             int next = PackedRgbLight.componentMax(previous, candidate);
             if (candidate != 0 && next != previous && setPacked(x, y, z, next)) {
-                queue.add(new BlockKey(x, y, z));
+                queue.add(new PropagationNode(
+                        new BlockKey(x, y, z), candidate, nextDistance, nextPenalty, from.origin, true
+                ));
             }
         }
+
+        private boolean diagonalPathOpen(BlockKey from, RgbLightAttenuation.Step step) {
+            if (step.x() != 0) {
+                mutablePos.set(from.x + step.x(), from.y, from.z);
+                if (activeLevel.getBlockState(mutablePos).getLightDampening() > 1) return false;
+            }
+            if (step.y() != 0) {
+                mutablePos.set(from.x, from.y + step.y(), from.z);
+                if (activeLevel.getBlockState(mutablePos).getLightDampening() > 1) return false;
+            }
+            if (step.z() != 0) {
+                mutablePos.set(from.x, from.y, from.z + step.z());
+                if (activeLevel.getBlockState(mutablePos).getLightDampening() > 1) return false;
+            }
+            return true;
+        }
+    }
+
+    private static float visualDistance(BlockKey origin, int x, int y, int z) {
+        if (origin == null) return 0.0f;
+        return RgbLightAttenuation.radialDistance(origin.x, origin.y, origin.z, x, y, z);
     }
 }

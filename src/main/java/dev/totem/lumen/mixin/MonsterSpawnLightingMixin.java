@@ -1,6 +1,8 @@
 package dev.totem.lumen.mixin;
 
 import dev.totem.lumen.gameplay.light.GameplaySpawnLighting;
+import dev.totem.lumen.config.ServerLightingConfig;
+import dev.totem.lumen.config.ServerLightingConfigStore;
 import dev.totem.lumen.gameplay.light.SpawnLightContext;
 import net.minecraft.core.BlockPos;
 import net.minecraft.util.RandomSource;
@@ -47,6 +49,9 @@ abstract class MonsterSpawnLightingMixin {
             RandomSource random,
             CallbackInfoReturnable<Boolean> cir
     ) {
+        if (ServerLightingConfigStore.current().spawnMode() == ServerLightingConfig.SpawnMode.VANILLA) {
+            return;
+        }
         cir.setReturnValue(GameplaySpawnLighting.isDarkEnough(
                 level.getLevel(),
                 pos,

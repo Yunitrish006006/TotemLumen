@@ -2,6 +2,7 @@ package dev.totem.lumen.integration;
 
 import dev.totem.lumen.world.LightingWorldRule;
 import dev.totem.lumen.world.LightingWorldRuleSet;
+import dev.totem.lumen.world.LightingTuning;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -9,6 +10,7 @@ import java.util.Map;
 /** Client-side string-keyed view of the currently connected server's lighting world rules. */
 public final class ClientLightingWorldRules {
     private static volatile Map<String, LightingWorldRule> rules = Map.of();
+    private static volatile LightingTuning tuning = LightingTuning.DEFAULT;
 
     private ClientLightingWorldRules() {
     }
@@ -18,28 +20,34 @@ public final class ClientLightingWorldRules {
      * Identifier strings are materialized once here so section extraction does not parse identifiers
      * for every voxel.
      */
-    public static boolean apply(LightingWorldRuleSet ruleSet) {
+    public static boolean apply(LightingWorldRuleSet ruleSet, LightingTuning nextTuning) {
         Map<String, LightingWorldRule> mutable = new LinkedHashMap<>();
         ruleSet.rules().forEach((blockId, rule) -> mutable.put(blockId.toString(), rule));
         Map<String, LightingWorldRule> next = Map.copyOf(mutable);
 
-        if (next.equals(rules)) {
+        if (next.equals(rules) && nextTuning.equals(tuning)) {
             return false;
         }
         rules = next;
+        tuning = nextTuning;
         return true;
     }
 
     public static boolean reset() {
-        if (rules.isEmpty()) {
+        if (rules.isEmpty() && tuning.equals(LightingTuning.DEFAULT)) {
             return false;
         }
         rules = Map.of();
+        tuning = LightingTuning.DEFAULT;
         return true;
     }
 
     public static LightingWorldRule ruleFor(String sourceId) {
         return rules.get(sourceId);
+    }
+
+    public static LightingTuning tuning() {
+        return tuning;
     }
 
     public static int size() {

@@ -17,14 +17,18 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /** Loads optional per-dimension gameplay ambient-light rules from server data packs. */
-public final class DimensionLightingRulesReloadListener extends SimpleReloadListener<DimensionLightingRuleSet> {
+public final class DimensionLightingRulesReloadListener extends SimpleReloadListener<DimensionLightingRulesReloadListener.Prepared> {
     public static final Identifier ID = Identifier.fromNamespaceAndPath(TotemLumen.MOD_ID, "dimension_lighting_rules");
     private static final FileToIdConverter CONVERTER = FileToIdConverter.json("totem_lumen/dimension_lighting");
     private static volatile DimensionLightingRuleSet currentRules = DimensionLightingRuleSet.EMPTY;
+    private static volatile Map<String, DimensionLightingRuleSet> currentPackRules = Map.of();
+
+    record Prepared(DimensionLightingRuleSet rules, Map<String, DimensionLightingRuleSet> packRules) {}
 
     @Override
-    protected DimensionLightingRuleSet prepare(SharedState state) {
+    protected Prepared prepare(SharedState state) {
         Map<Identifier, DimensionLightingRule> loaded = new LinkedHashMap<>();
+        Map<String, Map<Identifier, DimensionLightingRule>> byPack = new LinkedHashMap<>();
         for (Map.Entry<Identifier, Resource> entry : CONVERTER
                 .listMatchingResources(state.resourceManager())
                 .entrySet()) {
@@ -40,22 +44,43 @@ public final class DimensionLightingRulesReloadListener extends SimpleReloadList
                         exception
                 );
             }
+            for (Resource layer : state.resourceManager().getResourceStack(resourceId)) {
+                try (Reader reader = layer.openAsReader()) {
+                    byPack.computeIfAbsent(layer.sourcePackId(), ignored -> new LinkedHashMap<>())
+                            .put(dimensionId, parse(dimensionId, StrictJsonParser.parse(reader)));
+                } catch (IOException | RuntimeException exception) {
+                    TotemLumen.LOGGER.warn("Ignoring shadowed dimension lighting rule {} in pack {}: {}",
+                            dimensionId, layer.sourcePackId(), exception.toString());
+                }
+            }
         }
-        return DimensionLightingRuleSet.of(loaded);
+        Map<String, DimensionLightingRuleSet> snapshots = new LinkedHashMap<>();
+        byPack.forEach((id, rules) -> snapshots.put(id, DimensionLightingRuleSet.of(rules)));
+        return new Prepared(DimensionLightingRuleSet.of(loaded), Map.copyOf(snapshots));
     }
 
     @Override
-    protected void apply(DimensionLightingRuleSet prepared, SharedState state) {
-        currentRules = prepared;
-        TotemLumen.LOGGER.info("Loaded {} server dimension-lighting rule(s)", prepared.size());
+    protected void apply(Prepared prepared, SharedState state) {
+        currentRules = prepared.rules();
+        currentPackRules = prepared.packRules();
+        TotemLumen.LOGGER.info("Loaded {} server dimension-lighting rule(s)", prepared.rules().size());
     }
 
     public static DimensionLightingRuleSet currentRules() {
         return currentRules;
     }
 
+    public static DimensionLightingRuleSet rulesForPack(String packId) {
+        return currentPackRules.getOrDefault(packId, DimensionLightingRuleSet.EMPTY);
+    }
+
+    public static java.util.Set<String> currentPackIds() {
+        return java.util.Set.copyOf(currentPackRules.keySet());
+    }
+
     public static void reset() {
         currentRules = DimensionLightingRuleSet.EMPTY;
+        currentPackRules = Map.of();
     }
 
     private static DimensionLightingRule parse(Identifier dimensionId, JsonElement root) {

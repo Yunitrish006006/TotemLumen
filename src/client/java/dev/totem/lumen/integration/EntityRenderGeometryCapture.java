@@ -46,7 +46,7 @@ public final class EntityRenderGeometryCapture {
             double renderY,
             double renderZ
     ) {
-        if (!RendererSettings.entityRayTracingEnabled()) return;
+        if (!RendererSettings.rendererEnabled() || !RendererSettings.entityRayTracingEnabled()) return;
         if (!supportsModelFamily(state)) return;
         if (poseStack == null) return;
         var level = Minecraft.getInstance().level;

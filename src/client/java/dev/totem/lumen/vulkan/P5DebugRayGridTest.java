@@ -297,7 +297,7 @@ public final class P5DebugRayGridTest {
             List<SectionSnapshot> sections,
             int width,
             int height,
-            com.mojang.blaze3d.vulkan.VulkanDevice device,
+            com.mojang.renderpearl.backend.vulkan.VulkanDevice device,
             VulkanCapabilities capabilities
     ) {
         int sectionCount = sections.size();

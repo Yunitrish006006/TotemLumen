@@ -1,6 +1,7 @@
 package dev.totem.lumen.gameplay.light;
 
 import dev.totem.lumen.world.LightingWorldRule;
+import dev.totem.lumen.world.LightingWorldRulesReloadListener;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.block.state.BlockState;
 
@@ -28,6 +29,7 @@ public final class GameplayLightSource {
     }
 
     public static char attenuate(int packed, BlockState state) {
-        return PackedRgbLight.attenuate(packed, Math.max(1, state.getLightDampening()));
+        return RgbLightAttenuation.attenuate(packed, state,
+                LightingWorldRulesReloadListener.currentTuning().attenuationMultiplier());
     }
 }

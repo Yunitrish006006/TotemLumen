@@ -27,6 +27,19 @@ public final class TotemLumenVideoSettingsIntegration {
     public static void initialize() {
     }
 
+    public static void addDisplayControls(VideoSettingsScreen screen, OptionsList list) {
+        Minecraft client = Minecraft.getInstance();
+        Button preview = Button.builder(
+                Component.translatable("screen.totem-lumen.server_preview.entry"),
+                ignored -> client.gui.setScreen(new ServerLightingPreviewScreen(screen))
+        ).bounds(0, 0, 150, 20).build();
+        Button packs = Button.builder(
+                Component.translatable("screen.totem-lumen.server_packs.entry"),
+                ignored -> client.gui.setScreen(new ServerLightingPacksScreen(screen))
+        ).bounds(0, 0, 150, 20).build();
+        list.addSmall(preview, packs);
+    }
+
     public static void addQualityControls(
             VideoSettingsScreen screen,
             OptionsList list

@@ -23,6 +23,9 @@ import java.util.function.ToIntFunction;
  */
 public final class GpuSectionLightLists {
     public static final int MAX_GLOBAL_LIGHTS = 256;
+    /** The last four ABI slots are updated independently for moving held-item emitters. */
+    public static final int RESERVED_DYNAMIC_LIGHTS = 4;
+    public static final int MAX_STATIC_LIGHTS = MAX_GLOBAL_LIGHTS - RESERVED_DYNAMIC_LIGHTS;
     public static final int MAX_LIGHTS_PER_SECTION = 8;
 
     private GpuSectionLightLists() {
@@ -134,7 +137,7 @@ public final class GpuSectionLightLists {
         for (PointLight light : additionalLights) {
             if (light != null) {
                 lights.add(light);
-                if (lights.size() >= MAX_GLOBAL_LIGHTS) {
+                if (lights.size() >= MAX_STATIC_LIGHTS) {
                     return lights;
                 }
             }
@@ -177,7 +180,7 @@ public final class GpuSectionLightLists {
                                 blockZ,
                                 emission.pointEmitter()
                         ));
-                        if (lights.size() >= MAX_GLOBAL_LIGHTS) {
+                        if (lights.size() >= MAX_STATIC_LIGHTS) {
                             break outer;
                         }
                     }

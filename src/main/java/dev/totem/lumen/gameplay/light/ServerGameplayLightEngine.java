@@ -1,7 +1,7 @@
 package dev.totem.lumen.gameplay.light;
 
 import dev.totem.lumen.TotemLumen;
-import dev.totem.lumen.world.LightingWorldRulesReloadListener;
+import dev.totem.lumen.world.EffectiveLightingRules;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.level.ServerLevel;
@@ -461,7 +461,7 @@ public final class ServerGameplayLightEngine {
         var blockId = BuiltInRegistries.BLOCK.getKey(state.getBlock());
         return GameplayLightSource.packedFor(
                 state,
-                LightingWorldRulesReloadListener.currentRules().ruleFor(blockId)
+                EffectiveLightingRules.ruleFor(blockId)
         );
     }
 
@@ -676,7 +676,7 @@ public final class ServerGameplayLightEngine {
         private final ServerSectionKey anchor;
         private final LightRebuildRegion region;
         private final List<LightSource> sourceSnapshot;
-        private final LongQueue queue = new LongQueue();
+        private final RgbPropagationQueue queue = new RgbPropagationQueue();
         private final BlockPos.MutableBlockPos mutablePos = new BlockPos.MutableBlockPos();
 
         private int phase = CLEAR;
@@ -759,7 +759,8 @@ public final class ServerGameplayLightEngine {
                 LightSource source = sourceSnapshot.get(sourceCursor++);
                 ServerBlockKey pos = source.position();
                 if (loaded(pos.x(), pos.z()) && setPackedMax(pos.x(), pos.y(), pos.z(), source.packedRgb())) {
-                    queue.add(PackedServerPos.pack(pos.x(), pos.y(), pos.z()));
+                    long packed = PackedServerPos.pack(pos.x(), pos.y(), pos.z());
+                    queue.add(packed, source.packedRgb(), 0.0f, 0, packed, true);
                 }
                 consumed++;
             }
@@ -830,7 +831,7 @@ public final class ServerGameplayLightEngine {
             mutablePos.set(x, y, z);
             int incoming = GameplayLightSource.attenuate(outside, level.getBlockState(mutablePos));
             if (incoming != 0 && setPackedMax(x, y, z, incoming)) {
-                queue.add(PackedServerPos.pack(x, y, z));
+                queue.add(PackedServerPos.pack(x, y, z), incoming, 0.0f, 0, 0L, false);
             }
         }
 
@@ -841,14 +842,20 @@ public final class ServerGameplayLightEngine {
                 int x = PackedServerPos.x(packedPos);
                 int y = PackedServerPos.y(packedPos);
                 int z = PackedServerPos.z(packedPos);
-                int current = getPacked(x, y, z);
+                int current = queue.packed();
                 if (current != 0) {
-                    propagateNeighbor(x - 1, y, z, current);
-                    propagateNeighbor(x + 1, y, z, current);
-                    propagateNeighbor(x, y - 1, z, current);
-                    propagateNeighbor(x, y + 1, z, current);
-                    propagateNeighbor(x, y, z - 1, current);
-                    propagateNeighbor(x, y, z + 1, current);
+                    if (queue.rounded()) {
+                        for (RgbLightAttenuation.Step step : RgbLightAttenuation.ROUND_STEPS) {
+                            propagateRounded(x, y, z, current, queue.distance(), queue.penalty(), queue.origin(), step);
+                        }
+                    } else {
+                        propagateNeighbor(x - 1, y, z, current);
+                        propagateNeighbor(x + 1, y, z, current);
+                        propagateNeighbor(x, y - 1, z, current);
+                        propagateNeighbor(x, y + 1, z, current);
+                        propagateNeighbor(x, y, z - 1, current);
+                        propagateNeighbor(x, y, z + 1, current);
+                    }
                 }
                 consumed++;
             }
@@ -862,8 +869,57 @@ public final class ServerGameplayLightEngine {
             mutablePos.set(x, y, z);
             int candidate = GameplayLightSource.attenuate(fromPacked, level.getBlockState(mutablePos));
             if (candidate != 0 && setPackedMax(x, y, z, candidate)) {
-                queue.add(PackedServerPos.pack(x, y, z));
+                queue.add(PackedServerPos.pack(x, y, z), candidate, 0.0f, 0, 0L, false);
             }
+        }
+
+        private void propagateRounded(
+                int fromX, int fromY, int fromZ,
+                int fromPacked, float fromDistance, int fromPenalty, long origin,
+                RgbLightAttenuation.Step step
+        ) {
+            int x = fromX + step.x();
+            int y = fromY + step.y();
+            int z = fromZ + step.z();
+            if (!region.contains(x, y, z) || !level.isInsideBuildHeight(y) || !loaded(x, z)) {
+                return;
+            }
+            if (step.diagonal() && !diagonalPathOpen(fromX, fromY, fromZ, step)) {
+                return;
+            }
+            mutablePos.set(x, y, z);
+            BlockState destination = level.getBlockState(mutablePos);
+            int nextPenalty = fromPenalty + RgbLightAttenuation.obstaclePenalty(destination);
+            float nextDistance = Math.max(
+                    fromDistance,
+                    RgbLightAttenuation.radialDistance(
+                            PackedServerPos.x(origin), PackedServerPos.y(origin), PackedServerPos.z(origin),
+                            x, y, z
+                    ) + nextPenalty
+            );
+            int candidate = RgbLightAttenuation.attenuateRounded(fromPacked, fromDistance, nextDistance,
+                    dev.totem.lumen.world.LightingWorldRulesReloadListener.currentTuning().attenuationMultiplier());
+            if (candidate != 0 && setPackedMax(x, y, z, candidate)) {
+                queue.add(
+                        PackedServerPos.pack(x, y, z), candidate, nextDistance, nextPenalty, origin, true
+                );
+            }
+        }
+
+        private boolean diagonalPathOpen(int fromX, int fromY, int fromZ, RgbLightAttenuation.Step step) {
+            if (step.x() != 0) {
+                mutablePos.set(fromX + step.x(), fromY, fromZ);
+                if (level.getBlockState(mutablePos).getLightDampening() > 1) return false;
+            }
+            if (step.y() != 0) {
+                mutablePos.set(fromX, fromY + step.y(), fromZ);
+                if (level.getBlockState(mutablePos).getLightDampening() > 1) return false;
+            }
+            if (step.z() != 0) {
+                mutablePos.set(fromX, fromY, fromZ + step.z());
+                if (level.getBlockState(mutablePos).getLightDampening() > 1) return false;
+            }
+            return true;
         }
 
         private boolean setPackedMax(int x, int y, int z, int candidate) {

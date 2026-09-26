@@ -13,7 +13,7 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
-/** Captures Minecraft 26.2's renderer-resolved fluid faces without reimplementing fluid heights. */
+/** Captures Minecraft 26.3's renderer-resolved fluid faces without reimplementing fluid heights. */
 @Mixin(FluidRenderer.class)
 public abstract class FluidRendererCaptureMixin {
     @Inject(method = "tesselate", at = @At("HEAD"))

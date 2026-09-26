@@ -11,7 +11,7 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
-/** Establishes one P17 capture scope around each Minecraft 26.2 entity renderer submission. */
+/** Establishes one P17 capture scope around each Minecraft 26.3 entity renderer submission. */
 @Mixin(EntityRenderDispatcher.class)
 public abstract class EntityRenderDispatcherMixin {
     private static final String SUBMIT_26_2 =

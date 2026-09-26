@@ -41,6 +41,14 @@ public final class SpawnLightProfile {
         return sensitivity;
     }
 
+    public Set<Identifier> entities() {
+        return entities;
+    }
+
+    public List<Identifier> entityTagIds() {
+        return entityTags.stream().map(TagKey::location).toList();
+    }
+
     public boolean matches(EntityType<?> entityType) {
         Identifier entityId = BuiltInRegistries.ENTITY_TYPE.getKey(entityType);
         if (entities.contains(entityId)) {

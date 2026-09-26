@@ -1,6 +1,7 @@
 package dev.totem.lumen.integration;
 
 import dev.totem.lumen.TotemLumenClient;
+import dev.totem.lumen.render.RendererSettings;
 import dev.totem.lumen.scene.FluidGeometrySnapshot;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -20,6 +21,10 @@ public final class FluidRenderGeometryCapture {
     }
 
     public static void begin(BlockPos pos, BlockState blockState, FluidState fluidState) {
+        if (!RendererSettings.rendererEnabled()) {
+            ACTIVE.remove();
+            return;
+        }
         String dimensionId = FluidRenderGeometryCache.activeDimensionId();
         if (dimensionId == null || pos == null || blockState == null || fluidState == null || fluidState.isEmpty()) {
             ACTIVE.remove();

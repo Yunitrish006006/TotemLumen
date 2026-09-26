@@ -14,9 +14,9 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import java.lang.reflect.Method;
 import java.util.Arrays;
 
-/** Build-time ABI gate for the Minecraft 26.2 fluid tessellation capture boundary. */
+/** Build-time ABI gate for the Minecraft 26.3 fluid tessellation capture boundary. */
 public final class P14EFluidMixinDescriptorVerifier {
-    private static final Class<?>[] TESSELATE_26_2 = {
+    private static final Class<?>[] TESSELATE_26_3 = {
             BlockAndTintGetter.class,
             BlockPos.class,
             FluidRenderer.Output.class,
@@ -28,7 +28,7 @@ public final class P14EFluidMixinDescriptorVerifier {
     }
 
     public static void main(String[] args) throws Exception {
-        Method tesselate = FluidRenderer.class.getDeclaredMethod("tesselate", TESSELATE_26_2);
+        Method tesselate = FluidRenderer.class.getDeclaredMethod("tesselate", TESSELATE_26_3);
         if (tesselate.getReturnType() != void.class) {
             throw new IllegalStateException("FluidRenderer.tesselate must return void");
         }
@@ -59,7 +59,7 @@ public final class P14EFluidMixinDescriptorVerifier {
         }
 
         System.out.println(
-                "P14E fluid mixin descriptor verification PASS: minecraft=26.2, "
+                "P14E fluid mixin descriptor verification PASS: minecraft=26.3, "
                         + "tesselate=BlockAndTintGetter+BlockPos+Output+BlockState+FluidState, "
                         + "tintSource=BlockState+BlockAndTintGetter+BlockPos->int, "
                         + "addFace=VertexConsumer+20F+II+Z, output=ChunkSectionLayer->VertexConsumer"
@@ -72,14 +72,14 @@ public final class P14EFluidMixinDescriptorVerifier {
                 .findFirst()
                 .orElseThrow(() -> new IllegalStateException("Missing P14E callback " + methodName));
         Class<?>[] callback = handler.getParameterTypes();
-        if (callback.length != TESSELATE_26_2.length + 1) {
+        if (callback.length != TESSELATE_26_3.length + 1) {
             throw new IllegalStateException(methodName + " callback parameter count mismatch");
         }
-        for (int i = 0; i < TESSELATE_26_2.length; i++) {
-            if (callback[i] != TESSELATE_26_2[i]) {
+        for (int i = 0; i < TESSELATE_26_3.length; i++) {
+            if (callback[i] != TESSELATE_26_3[i]) {
                 throw new IllegalStateException(
                         methodName + " callback parameter " + i + " mismatch: expected "
-                                + TESSELATE_26_2[i].getName() + " but found " + callback[i].getName()
+                                + TESSELATE_26_3[i].getName() + " but found " + callback[i].getName()
                 );
             }
         }

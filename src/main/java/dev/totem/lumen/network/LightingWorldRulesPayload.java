@@ -2,6 +2,7 @@ package dev.totem.lumen.network;
 
 import dev.totem.lumen.world.LightingWorldRule;
 import dev.totem.lumen.world.LightingWorldRuleSet;
+import dev.totem.lumen.world.LightingTuning;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
@@ -14,7 +15,8 @@ import java.util.List;
 import java.util.Map;
 
 /** Server-to-client snapshot of the current world's authoritative lighting rules. */
-public record LightingWorldRulesPayload(LightingWorldRuleSet rules) implements CustomPacketPayload {
+public record LightingWorldRulesPayload(LightingWorldRuleSet rules, LightingTuning tuning)
+        implements CustomPacketPayload {
     private static final int MAX_RULES = 8192;
 
     public static final Type<LightingWorldRulesPayload> TYPE = new Type<>(
@@ -24,8 +26,8 @@ public record LightingWorldRulesPayload(LightingWorldRuleSet rules) implements C
             CustomPacketPayload.codec(LightingWorldRulesPayload::write, LightingWorldRulesPayload::new);
 
     public LightingWorldRulesPayload {
-        if (rules == null) {
-            throw new IllegalArgumentException("rules must not be null");
+        if (rules == null || tuning == null) {
+            throw new IllegalArgumentException("rules and tuning must not be null");
         }
         if (rules.size() > MAX_RULES) {
             throw new IllegalArgumentException("too many lighting world rules: " + rules.size());
@@ -33,7 +35,7 @@ public record LightingWorldRulesPayload(LightingWorldRuleSet rules) implements C
     }
 
     private LightingWorldRulesPayload(RegistryFriendlyByteBuf buffer) {
-        this(readRules(buffer));
+        this(readRules(buffer), new LightingTuning(buffer.readFloat(), buffer.readFloat()));
     }
 
     private void write(RegistryFriendlyByteBuf buffer) {
@@ -49,6 +51,8 @@ public record LightingWorldRulesPayload(LightingWorldRuleSet rules) implements C
             buffer.writeFloat(rule.emissionB());
             buffer.writeVarInt(rule.gameplayStrength());
         }
+        buffer.writeFloat(tuning.brightnessMultiplier());
+        buffer.writeFloat(tuning.attenuationMultiplier());
     }
 
     private static LightingWorldRuleSet readRules(RegistryFriendlyByteBuf buffer) {

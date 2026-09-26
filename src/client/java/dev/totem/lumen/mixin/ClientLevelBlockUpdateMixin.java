@@ -12,7 +12,7 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
- * Mirrors Minecraft 26.2's client-world block update into Totem Lumen's high-priority
+ * Mirrors Minecraft 26.3's client-world block update into Totem Lumen's high-priority
  * section snapshot queue and invalidates exact fluid geometry that depends on the changed cell.
  *
  * <p>ClientLevel.sendBlockUpdated is the canonical client-side bridge that forwards a block

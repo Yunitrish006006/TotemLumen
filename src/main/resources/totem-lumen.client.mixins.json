@@ -8,6 +8,8 @@
     "BlockEntityRenderDispatcherMixin",
     "EntityRendererStateMixin",
     "EntityRenderDispatcherMixin",
+    "ItemModelResolverGlowMixin",
+    "ItemStackRenderStateGlowMixin",
     "SubmitNodeCollectionItemMixin",
     "SubmitNodeStorageBlockEntityMixin",
     "SubmitNodeCollectionBlockEntityMixin",
@@ -21,7 +23,8 @@
     "VulkanComputeProgramMixin",
     "VideoSettingsRenderProfileMixin",
     "VanillaRgbLightingLighterMixin",
-    "VanillaRgbIndigoLightingMixin"
+    "VanillaRgbIndigoLightingMixin",
+    "VanillaRgbOverlayMixin"
   ],
   "injectors": {
     "defaultRequire": 1

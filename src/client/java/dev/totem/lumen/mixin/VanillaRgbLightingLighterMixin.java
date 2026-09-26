@@ -12,7 +12,7 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
-/** Applies RGB after Minecraft 26.2 has prepared the final vanilla quad light data. */
+/** Applies RGB after Minecraft 26.3 has prepared the final vanilla quad light data. */
 @Mixin(BlockModelLighter.class)
 public abstract class VanillaRgbLightingLighterMixin {
     @Inject(method = "prepareQuadAmbientOcclusion", at = @At("TAIL"))

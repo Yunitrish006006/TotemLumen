@@ -681,8 +681,12 @@ final class P18LabPbrShadingPatch {
                     vec3 p18Diffuse = p18Surface.albedo * (1.0 - p18Surface.metallic * float(scene.data[46]));
                     vec3 emitted = emissiveMode ? p18Surface.emission : vec3(0.0);
                     if (scene.data[92] == 0u) {
+                        vec3 held = heldLightRgb(
+                            primaryOrigin + primaryDirection * hit.distance,
+                            p18Surface.normal
+                        );
                         return packRgba(
-                            p18Diffuse * (uintBitsToFloat(scene.data[82]) * p18Surface.ao) + emitted,
+                            p18Diffuse * (uintBitsToFloat(scene.data[82]) * p18Surface.ao + held) + emitted,
                             255u
                         );
                     }

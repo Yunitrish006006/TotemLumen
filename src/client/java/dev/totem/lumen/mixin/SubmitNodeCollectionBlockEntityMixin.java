@@ -5,9 +5,8 @@ import dev.totem.lumen.integration.BlockEntityRenderGeometryCapture;
 import dev.totem.lumen.integration.EntityRenderGeometryCapture;
 import net.minecraft.client.model.Model;
 import net.minecraft.client.renderer.SubmitNodeCollection;
-import net.minecraft.client.renderer.feature.ModelFeatureRenderer;
 import net.minecraft.client.renderer.rendertype.RenderType;
-import net.minecraft.client.renderer.texture.TextureAtlasSprite;
+import net.minecraft.client.renderer.texture.UvMapping;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -16,15 +15,14 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 /** Covers renderers that submit through collector.order(...), including P14D/P17 scopes. */
 @Mixin(SubmitNodeCollection.class)
 public abstract class SubmitNodeCollectionBlockEntityMixin {
-    private static final String SUBMIT_MODEL_26_2 =
+    private static final String SUBMIT_MODEL_26_3 =
             "submitModel(Lnet/minecraft/client/model/Model;Ljava/lang/Object;"
                     + "Lcom/mojang/blaze3d/vertex/PoseStack;"
                     + "Lnet/minecraft/client/renderer/rendertype/RenderType;III"
-                    + "Lnet/minecraft/client/renderer/texture/TextureAtlasSprite;I"
-                    + "Lnet/minecraft/client/renderer/feature/ModelFeatureRenderer$CrumblingOverlay;)V";
+                    + "Lnet/minecraft/client/renderer/texture/UvMapping;I)V";
 
-    @Inject(method = SUBMIT_MODEL_26_2, at = @At("HEAD"), require = 1)
-    private <S> void totemLumen$captureModelWithSprite(
+    @Inject(method = SUBMIT_MODEL_26_3, at = @At("HEAD"), require = 1)
+    private <S> void totemLumen$captureModelWithUvMapping(
             Model<? super S> model,
             S state,
             PoseStack poseStack,
@@ -32,9 +30,8 @@ public abstract class SubmitNodeCollectionBlockEntityMixin {
             int light,
             int overlay,
             int color,
-            TextureAtlasSprite sprite,
+            UvMapping uvMapping,
             int outlineColor,
-            ModelFeatureRenderer.CrumblingOverlay crumblingOverlay,
             CallbackInfo ci
     ) {
         BlockEntityRenderGeometryCapture.captureModel(model, state, poseStack);

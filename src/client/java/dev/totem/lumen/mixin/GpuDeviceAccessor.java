@@ -1,7 +1,7 @@
 package dev.totem.lumen.mixin;
 
-import com.mojang.blaze3d.systems.GpuDevice;
-import com.mojang.blaze3d.systems.GpuDeviceBackend;
+import com.mojang.renderpearl.backend.api.GpuDeviceBackend;
+import com.mojang.renderpearl.frontend.FrontendGpuDevice;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.gen.Accessor;
 
@@ -11,7 +11,7 @@ import org.spongepowered.asm.mixin.gen.Accessor;
  * <p>Totem Lumen never creates a second VkInstance/VkDevice. Vulkan-native compute code obtains
  * the existing backend through this accessor and leaves device/swapchain ownership to Minecraft.</p>
  */
-@Mixin(GpuDevice.class)
+@Mixin(FrontendGpuDevice.class)
 public interface GpuDeviceAccessor {
     @Accessor("backend")
     GpuDeviceBackend totemLumen$getBackend();

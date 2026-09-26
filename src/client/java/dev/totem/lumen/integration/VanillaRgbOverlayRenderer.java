@@ -1,19 +1,19 @@
 package dev.totem.lumen.integration;
 
-import com.mojang.blaze3d.PrimitiveTopology;
-import com.mojang.blaze3d.buffers.GpuBuffer;
-import com.mojang.blaze3d.buffers.GpuFence;
-import com.mojang.blaze3d.pipeline.BlendFunction;
-import com.mojang.blaze3d.pipeline.ColorTargetState;
-import com.mojang.blaze3d.pipeline.DepthStencilState;
-import com.mojang.blaze3d.pipeline.RenderPipeline;
+import com.mojang.renderpearl.api.pipeline.PrimitiveTopology;
+import com.mojang.renderpearl.api.buffers.GpuBuffer;
+import com.mojang.renderpearl.api.commands.GpuFence;
+import com.mojang.renderpearl.api.pipeline.BlendFunction;
+import com.mojang.renderpearl.api.pipeline.ColorTargetState;
+import com.mojang.renderpearl.api.pipeline.DepthStencilState;
+import com.mojang.renderpearl.api.pipeline.RenderPipeline;
 import com.mojang.blaze3d.pipeline.RenderTarget;
-import com.mojang.blaze3d.platform.CompareOp;
-import com.mojang.blaze3d.systems.CommandEncoder;
-import com.mojang.blaze3d.systems.RenderPass;
+import com.mojang.renderpearl.api.pipeline.CompareOp;
+import com.mojang.renderpearl.api.commands.CommandEncoder;
+import com.mojang.renderpearl.api.commands.RenderPass;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.DefaultVertexFormat;
-import com.mojang.blaze3d.vertex.VertexFormat;
+import com.mojang.renderpearl.api.vertex.VertexFormat;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -24,7 +24,8 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 import dev.totem.lumen.render.RendererSettings;
 import dev.totem.lumen.TotemLumenClient;
-import net.minecraft.client.renderer.DynamicUniforms;
+import net.minecraft.client.renderer.DynamicGpuData;
+import com.mojang.renderpearl.api.pipeline.ShaderType;
 import org.joml.Matrix4f;
 import org.joml.Matrix4fc;
 import org.joml.Vector3f;
@@ -87,15 +88,15 @@ public final class VanillaRgbOverlayRenderer {
         RenderPipeline vanilla = RenderPipelines.DEBUG_FILLED_BOX;
         RenderPipeline.Builder builder = RenderPipeline.builder()
                 .withLocation(PIPELINE_ID)
-                .withVertexShader(vanilla.getVertexShader())
-                .withFragmentShader(vanilla.getFragmentShader())
+                .withVertexShader(vanilla.getShaders().get(ShaderType.VERTEX))
+                .withFragmentShader(vanilla.getShaders().get(ShaderType.FRAGMENT))
                 .withColorTargetState(new ColorTargetState(
                         // RGB gameplay light is emissive contribution on top of vanilla's
                         // already-composited terrain, not a translucent replacement for the
                         // terrain. TRANSLUCENT made the daytime lightmap wash the hue toward
                         // white; additive composition preserves the colored contribution.
                         Optional.of(BlendFunction.ADDITIVE),
-                        vanilla.getColorTargetState().format(),
+                        vanilla.getColorTargetStates().getFirst().format(),
                         ColorTargetState.WRITE_ALL
                 ))
                 // Reverse-Z depth with the same polygon-offset convention Minecraft uses for
@@ -110,7 +111,7 @@ public final class VanillaRgbOverlayRenderer {
                 .withCull(false)
                 .withVertexBinding(0, DefaultVertexFormat.POSITION_COLOR)
                 .withPrimitiveTopology(PrimitiveTopology.TRIANGLES);
-        // Projection, dynamic transforms, and fog are separate bind groups in 26.2. Copy the
+        // Projection, dynamic transforms, and fog are separate bind groups in 26.3. Copy the
         // complete layout instead of assuming the first group contains every vanilla uniform.
         for (var layout : vanilla.getBindGroupLayouts()) {
             builder.withBindGroupLayout(layout);
@@ -162,9 +163,9 @@ public final class VanillaRgbOverlayRenderer {
                 Optional.empty(),
                 target.getDepthTextureView(),
                 OptionalDouble.empty())) {
-            pass.setPipeline(PIPELINE);
+            pass.setPipeline(RenderSystem.getCompiledPipeline(PIPELINE));
             RenderSystem.bindDefaultUniforms(pass);
-            DynamicUniforms uniforms = RenderSystem.getDynamicUniforms();
+            DynamicGpuData uniforms = RenderSystem.getDynamicUniforms();
             pass.setUniform(
                     "DynamicTransforms",
                     uniforms.writeTransform(
@@ -427,17 +428,7 @@ public final class VanillaRgbOverlayRenderer {
     }
 
     private static int sourcePacked(BlockState state) {
-        String sourceId = net.minecraft.core.registries.BuiltInRegistries.BLOCK
-                .getKey(state.getBlock()).toString();
-        dev.totem.lumen.world.LightingWorldRule rule = ClientLightingWorldRules.ruleFor(sourceId);
-        dev.totem.lumen.gameplay.light.EmissionColor color = rule == null
-                ? dev.totem.lumen.gameplay.light.DefaultEmissionColors.forBlock(sourceId, state.getLightEmission())
-                : new dev.totem.lumen.gameplay.light.EmissionColor(
-                        rule.emissionR(), rule.emissionG(), rule.emissionB()
-                );
-        return dev.totem.lumen.gameplay.light.PackedRgbLight.fromNormalized(
-                color, rule == null ? state.getLightEmission() : rule.gameplayStrengthOr(state.getLightEmission())
-        );
+        return ClientRgbVisualLightSource.packedFor(state);
     }
 
     private static int packedAt(Map<SectionKey, char[]> sections, int x, int y, int z) {
@@ -557,7 +548,7 @@ public final class VanillaRgbOverlayRenderer {
         );
     }
 
-    private record RetiredBuffer(GpuBuffer buffer, com.mojang.blaze3d.buffers.GpuFence fence) {
+    private record RetiredBuffer(GpuBuffer buffer, com.mojang.renderpearl.api.commands.GpuFence fence) {
     }
 
     private record BoundaryCell(int x, int y, int z, int packed, int faceMask, double distanceSquared) {

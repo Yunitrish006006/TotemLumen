@@ -21,7 +21,9 @@ public final class ClientGameplayLightField {
     /** Local prediction is preferred until the matching stable server section arrives. */
     private static final Map<Key, char[]> LOCAL_SECTIONS = new ConcurrentHashMap<>();
     private static volatile String activeDimension = "minecraft:overworld";
-    private static long revision;
+    private static volatile long revision;
+    /** Terrain workers repeatedly sample nearby voxels in the same 16³ light section. */
+    private static final ThreadLocal<LocalLookup> localLookup = ThreadLocal.withInitial(LocalLookup::new);
     private static boolean rebuildRequested;
     private static int quietTicks;
     private static long lastRebuildTick = Long.MIN_VALUE;
@@ -29,6 +31,9 @@ public final class ClientGameplayLightField {
     private static long snapshotRevision = Long.MIN_VALUE;
     private static List<GpuSection> snapshotCache = List.of();
     private static final LinkedHashSet<SectionCoordinate> dirtySections = new LinkedHashSet<>();
+    /** Lower-priority daylight refreshes must not delay a newly placed or removed RGB source. */
+    private static final LinkedHashSet<SectionCoordinate> skyDirtySections = new LinkedHashSet<>();
+    private static final int SKY_SECTIONS_PER_TICK = 12;
     private static final Set<SectionCoordinate> skyAffectedSections = ConcurrentHashMap.newKeySet();
     private static final ThreadLocal<SkyNote> lastSkyNote = new ThreadLocal<>();
     private static volatile int skyRegistryEpoch;
@@ -93,17 +98,27 @@ public final class ClientGameplayLightField {
     }
 
     private static int packedAt(String dimension, int x, int y, int z) {
-        Key key = new Key(
-                dimension,
-                Math.floorDiv(x, 16),
-                Math.floorDiv(y, 16),
-                Math.floorDiv(z, 16)
+        char[] values = localSectionValues(
+                dimension, Math.floorDiv(x, 16), Math.floorDiv(y, 16), Math.floorDiv(z, 16)
         );
-        char[] values = LOCAL_SECTIONS.get(key);
         if (values == null) {
             return 0;
         }
         return values[((y & 15) << 8) | ((z & 15) << 4) | (x & 15)];
+    }
+
+    private static char[] localSectionValues(String dimension, int x, int y, int z) {
+        return localLookup.get().sectionValues(dimension, x, y, z);
+    }
+
+    /** Obtain once per terrain quad instead of doing a ThreadLocal lookup for every RGB sample. */
+    static LocalLookup localSampler() {
+        return localLookup.get();
+    }
+
+    /** Immutable section snapshot identity for bounded client-only GPU light-field updates. */
+    static char[] localSectionReference(int sectionX, int sectionY, int sectionZ) {
+        return LOCAL_SECTIONS.get(new Key(activeDimension, sectionX, sectionY, sectionZ));
     }
 
     public static synchronized void clear() {
@@ -111,6 +126,7 @@ public final class ClientGameplayLightField {
         LOCAL_SECTIONS.clear();
         activeDimension = "minecraft:overworld";
         dirtySections.clear();
+        skyDirtySections.clear();
         clearSkyAffected();
         rebuildRequested = true;
         quietTicks = 0;
@@ -124,6 +140,7 @@ public final class ClientGameplayLightField {
         SECTIONS.keySet().removeIf(key -> key.dimension.equals(dimension));
         LOCAL_SECTIONS.keySet().removeIf(key -> key.dimension.equals(dimension));
         dirtySections.removeIf(section -> section.dimension.equals(dimension));
+        skyDirtySections.removeIf(section -> section.dimension.equals(dimension));
         skyAffectedSections.removeIf(section -> section.dimension.equals(dimension));
         skyRegistryEpoch++;
         rebuildRequested = true;
@@ -174,11 +191,15 @@ public final class ClientGameplayLightField {
 
     /** Drains RGB sections whose vanilla chunk meshes must be re-extracted. */
     public static synchronized List<SectionCoordinate> drainDirtySections(String dimension) {
-        return drainDirtySections(dimension, Integer.MAX_VALUE);
+        return drainDirtySections(dimension, Integer.MAX_VALUE, Integer.MAX_VALUE);
     }
 
     /** Drains a bounded number of dirty sections so propagation cannot monopolize a frame. */
     public static synchronized List<SectionCoordinate> drainDirtySections(String dimension, int limit) {
+        return drainDirtySections(dimension, limit, SKY_SECTIONS_PER_TICK);
+    }
+
+    private static List<SectionCoordinate> drainDirtySections(String dimension, int limit, int skyLimit) {
         List<SectionCoordinate> result = new ArrayList<>();
         var iterator = dirtySections.iterator();
         while (iterator.hasNext() && result.size() < limit) {
@@ -186,6 +207,17 @@ public final class ClientGameplayLightField {
             if (section.dimension.equals(dimension)) {
                 result.add(section);
                 iterator.remove();
+                skyDirtySections.remove(section);
+            }
+        }
+        int skyDrained = 0;
+        iterator = skyDirtySections.iterator();
+        while (iterator.hasNext() && result.size() < limit && skyDrained < skyLimit) {
+            SectionCoordinate section = iterator.next();
+            if (section.dimension.equals(dimension)) {
+                result.add(section);
+                iterator.remove();
+                skyDrained++;
             }
         }
         return result;
@@ -193,7 +225,17 @@ public final class ClientGameplayLightField {
 
     /** Queues a bounded mesh refresh when changing profiles, including sections without RGB sources. */
     public static synchronized void markSectionDirty(String dimension, int x, int y, int z) {
-        dirtySections.add(new SectionCoordinate(dimension, x, y, z));
+        SectionCoordinate section = new SectionCoordinate(dimension, x, y, z);
+        skyDirtySections.remove(section);
+        dirtySections.add(section);
+    }
+
+    /** Rebuilds baked RGB skylight gradually, after source-driven geometry changes. */
+    public static synchronized void markSkySectionDirty(String dimension, int x, int y, int z) {
+        SectionCoordinate section = new SectionCoordinate(dimension, x, y, z);
+        if (!dirtySections.contains(section)) {
+            skyDirtySections.add(section);
+        }
     }
 
     /** Worker-safe registration of meshes whose vertex colors contain baked sky RGB. */
@@ -312,6 +354,9 @@ public final class ClientGameplayLightField {
         if (values == null) {
             values = new char[GameplayLightSectionsPayload.VOXEL_COUNT];
             LOCAL_SECTIONS.put(key, values);
+            // A source added inside the current tick must be visible to the same thread's
+            // propagation reads before finishLocalBatch publishes the next revision.
+            localLookup.remove();
         }
         int index = ((y & 15) << 8) | ((z & 15) << 4) | (x & 15);
         if (values[index] == (char) packed) {
@@ -385,9 +430,9 @@ public final class ClientGameplayLightField {
     }
 
     public static synchronized int localPackedAt(String dimension, int x, int y, int z) {
-        char[] values = LOCAL_SECTIONS.get(new Key(
+        char[] values = localSectionValues(
                 dimension, Math.floorDiv(x, 16), Math.floorDiv(y, 16), Math.floorDiv(z, 16)
-        ));
+        );
         return values == null ? 0 : values[((y & 15) << 8) | ((z & 15) << 4) | (x & 15)];
     }
 
@@ -423,6 +468,8 @@ public final class ClientGameplayLightField {
         finishLocalBatch(changed);
         skyAffectedSections.removeIf(section -> section.dimension.equals(dimension)
                 && section.x == chunkX && section.z == chunkZ);
+        skyDirtySections.removeIf(section -> section.dimension.equals(dimension)
+                && section.x == chunkX && section.z == chunkZ);
         skyRegistryEpoch++;
     }
 
@@ -440,6 +487,40 @@ public final class ClientGameplayLightField {
     }
 
     private record Key(String dimension, int x, int y, int z) {
+    }
+
+    static final class LocalLookup {
+        private String dimension;
+        private int x;
+        private int y;
+        private int z;
+        private long revision = Long.MIN_VALUE;
+        private char[] values;
+
+        int packedAtCurrentDimension(int x, int y, int z) {
+            char[] section = sectionValues(
+                    activeDimension, Math.floorDiv(x, 16), Math.floorDiv(y, 16), Math.floorDiv(z, 16)
+            );
+            return section == null ? 0 : section[((y & 15) << 8) | ((z & 15) << 4) | (x & 15)];
+        }
+
+        int packedAtCurrentDimension(BlockPos pos) {
+            return packedAtCurrentDimension(pos.getX(), pos.getY(), pos.getZ());
+        }
+
+        private char[] sectionValues(String dimension, int x, int y, int z) {
+            long currentRevision = ClientGameplayLightField.revision;
+            if (revision != currentRevision || this.x != x || this.y != y || this.z != z
+                    || !dimension.equals(this.dimension)) {
+                this.dimension = dimension;
+                this.x = x;
+                this.y = y;
+                this.z = z;
+                values = LOCAL_SECTIONS.get(new Key(dimension, x, y, z));
+                revision = currentRevision;
+            }
+            return values;
+        }
     }
 
     private record SkyNote(int epoch, SectionCoordinate section) {

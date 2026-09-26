@@ -4,6 +4,7 @@ import dev.totem.lumen.TotemLumenClient;
 import dev.totem.lumen.material.MaterialRegistry;
 import dev.totem.lumen.render.RendererBootstrap;
 import dev.totem.lumen.render.RendererState;
+import dev.totem.lumen.render.RendererSettings;
 import dev.totem.lumen.scene.FrameSnapshot;
 import dev.totem.lumen.scene.RayScene;
 import dev.totem.lumen.scene.SceneUpdate;
@@ -216,7 +217,9 @@ public final class SceneExtractionBridge {
     }
 
     private static void endExtraction(LevelExtractionContext context) {
-        if (!sceneTrackingEnabled()) {
+        // Native profiles do not consume Totem frame snapshots or CPU voxel extraction. Keep
+        // chunk/block events queued so switching back to Totem can populate the existing scene.
+        if (!RendererSettings.rendererEnabled() || !sceneTrackingEnabled()) {
             return;
         }
 

@@ -32,6 +32,10 @@
       "emission_color": [1.0, 0.18, 0.06]
     },
     {
+      "match": { "contains": "redstone_ore" },
+      "emission_color": [1.0, 0.18, 0.06]
+    },
+    {
       "match": { "contains": "lava" },
       "emission_color": [1.0, 0.32, 0.08]
     },

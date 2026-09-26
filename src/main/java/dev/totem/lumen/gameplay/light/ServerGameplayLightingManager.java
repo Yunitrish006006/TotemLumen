@@ -1,5 +1,7 @@
 package dev.totem.lumen.gameplay.light;
 
+import dev.totem.lumen.config.ServerLightingConfig;
+import dev.totem.lumen.config.ServerLightingConfigStore;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
@@ -77,14 +79,15 @@ public final class ServerGameplayLightingManager {
         }
 
         long start = System.nanoTime();
-        int remainingWork = DEFAULT_SERVER_WORK_BUDGET;
+        ServerLightingConfig config = ServerLightingConfigStore.current();
+        int remainingWork = config.workBudget();
         int remainingEngines = active.size();
         for (ServerGameplayLightEngine candidate : active) {
             if (remainingWork <= 0) {
                 break;
             }
             long elapsed = System.nanoTime() - start;
-            long remainingTime = DEFAULT_SERVER_TIME_BUDGET_NANOS - elapsed;
+            long remainingTime = config.timeBudgetNanos() - elapsed;
             if (remainingTime <= 0L) {
                 break;
             }

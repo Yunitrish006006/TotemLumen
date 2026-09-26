@@ -21,14 +21,21 @@ import java.util.Map;
 import java.util.Set;
 
 /** Loads server-only entity spectral response profiles from world data packs. */
-public final class SpawnLightProfilesReloadListener extends SimpleReloadListener<SpawnLightProfileSet> {
+public final class SpawnLightProfilesReloadListener extends SimpleReloadListener<SpawnLightProfilesReloadListener.Prepared> {
     public static final Identifier ID = Identifier.fromNamespaceAndPath(TotemLumen.MOD_ID, "spawn_light_profiles");
     private static final FileToIdConverter CONVERTER = FileToIdConverter.json("totem_lumen/spawn_light");
     private static volatile SpawnLightProfileSet currentProfiles = SpawnLightProfileSet.EMPTY;
+    private static volatile Set<Identifier> currentDefaultIds = Set.of();
+    private static volatile Map<String, SpawnLightProfileSet> currentPackProfiles = Map.of();
+
+    record Prepared(SpawnLightProfileSet profiles, Set<Identifier> defaultIds,
+                    Map<String, SpawnLightProfileSet> packProfiles) {}
 
     @Override
-    protected SpawnLightProfileSet prepare(SharedState state) {
+    protected Prepared prepare(SharedState state) {
         Map<Identifier, SpawnLightProfile> loaded = new LinkedHashMap<>();
+        Map<String, Map<Identifier, SpawnLightProfile>> byPack = new LinkedHashMap<>();
+        Set<Identifier> defaultIds = new LinkedHashSet<>();
         for (Map.Entry<Identifier, Resource> entry : CONVERTER
                 .listMatchingResources(state.resourceManager())
                 .entrySet()) {
@@ -36,6 +43,9 @@ public final class SpawnLightProfilesReloadListener extends SimpleReloadListener
             Identifier profileId = CONVERTER.fileToId(resourceId);
             try (Reader reader = entry.getValue().openAsReader()) {
                 loaded.put(profileId, parse(profileId, StrictJsonParser.parse(reader)));
+                if (entry.getValue().sourcePackId().equals(TotemLumen.MOD_ID + ":default_lighting")) {
+                    defaultIds.add(profileId);
+                }
             } catch (IOException exception) {
                 throw new IllegalStateException("Failed to read spawn-light profile " + resourceId, exception);
             } catch (JsonParseException | IllegalArgumentException exception) {
@@ -44,22 +54,50 @@ public final class SpawnLightProfilesReloadListener extends SimpleReloadListener
                         exception
                 );
             }
+            for (Resource layer : state.resourceManager().getResourceStack(resourceId)) {
+                try (Reader reader = layer.openAsReader()) {
+                    byPack.computeIfAbsent(layer.sourcePackId(), ignored -> new LinkedHashMap<>())
+                            .put(profileId, parse(profileId, StrictJsonParser.parse(reader)));
+                } catch (IOException | RuntimeException exception) {
+                    TotemLumen.LOGGER.warn("Ignoring shadowed spawn-light profile {} in pack {}: {}",
+                            profileId, layer.sourcePackId(), exception.toString());
+                }
+            }
         }
-        return SpawnLightProfileSet.of(loaded);
+        Map<String, SpawnLightProfileSet> snapshots = new LinkedHashMap<>();
+        byPack.forEach((id, rules) -> snapshots.put(id, SpawnLightProfileSet.of(rules)));
+        return new Prepared(SpawnLightProfileSet.of(loaded), Set.copyOf(defaultIds), Map.copyOf(snapshots));
     }
 
     @Override
-    protected void apply(SpawnLightProfileSet prepared, SharedState state) {
-        currentProfiles = prepared;
-        TotemLumen.LOGGER.info("Loaded {} server spawn-light profile(s)", prepared.size());
+    protected void apply(Prepared prepared, SharedState state) {
+        currentProfiles = prepared.profiles();
+        currentDefaultIds = prepared.defaultIds();
+        currentPackProfiles = prepared.packProfiles();
+        TotemLumen.LOGGER.info("Loaded {} server spawn-light profile(s), including {} default data-pack profile(s)",
+                prepared.profiles().size(), prepared.defaultIds().size());
     }
 
     public static SpawnLightProfileSet currentProfiles() {
         return currentProfiles;
     }
 
+    public static Set<Identifier> currentDefaultIds() {
+        return currentDefaultIds;
+    }
+
+    public static SpawnLightProfileSet profilesForPack(String packId) {
+        return currentPackProfiles.getOrDefault(packId, SpawnLightProfileSet.EMPTY);
+    }
+
+    public static Set<String> currentPackIds() {
+        return Set.copyOf(currentPackProfiles.keySet());
+    }
+
     public static void reset() {
         currentProfiles = SpawnLightProfileSet.EMPTY;
+        currentDefaultIds = Set.of();
+        currentPackProfiles = Map.of();
     }
 
     private static SpawnLightProfile parse(Identifier profileId, JsonElement root) {

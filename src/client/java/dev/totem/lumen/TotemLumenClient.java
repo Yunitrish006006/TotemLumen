@@ -2,16 +2,21 @@ package dev.totem.lumen;
 
 import com.mojang.blaze3d.platform.InputConstants;
 import dev.totem.lumen.gui.TotemLumenVideoSettingsIntegration;
+import dev.totem.lumen.gui.ClientServerLightingViewState;
 import dev.totem.lumen.integration.ClientLightingWorldRules;
 import dev.totem.lumen.integration.ClientGameplayLightField;
 import dev.totem.lumen.integration.ClientGameplayLightPredictor;
+import dev.totem.lumen.integration.ClientHeldLightState;
 import dev.totem.lumen.integration.EntityRenderGeometryCache;
 import dev.totem.lumen.integration.FluidRenderGeometryCache;
 import dev.totem.lumen.integration.LabPbrTextureRegistry;
 import dev.totem.lumen.integration.MinecraftBlockModelMeshResolver;
 import dev.totem.lumen.integration.P13EnvironmentCapture;
 import dev.totem.lumen.integration.SceneExtractionBridge;
+import dev.totem.lumen.integration.VanillaRgbLighting;
 import dev.totem.lumen.network.LightingWorldRulesPayload;
+import dev.totem.lumen.network.HeldLightsPayload;
+import dev.totem.lumen.network.ServerLightingViewPackets;
 import dev.totem.lumen.render.RendererBootstrap;
 import dev.totem.lumen.render.RendererCompileProgressNotifier;
 import dev.totem.lumen.render.RendererSettings;
@@ -59,7 +64,7 @@ public final class TotemLumenClient implements ClientModInitializer {
         lastRenderProfile = RendererSettings.renderProfile();
 
         ClientPlayNetworking.registerGlobalReceiver(LightingWorldRulesPayload.TYPE, (payload, context) -> {
-            if (ClientLightingWorldRules.apply(payload.rules())) {
+            if (ClientLightingWorldRules.apply(payload.rules(), payload.tuning())) {
                 SceneExtractionBridge.refreshLightingWorldRules();
                 ClientGameplayLightPredictor.requestRebuild();
             }
@@ -68,6 +73,13 @@ public final class TotemLumenClient implements ClientModInitializer {
                     payload.rules().size()
             );
         });
+        ClientPlayNetworking.registerGlobalReceiver(HeldLightsPayload.TYPE, (payload, context) ->
+                ClientHeldLightState.apply(payload)
+        );
+        ClientPlayNetworking.registerGlobalReceiver(ServerLightingViewPackets.Summary.TYPE,
+                (payload, context) -> ClientServerLightingViewState.apply(payload));
+        ClientPlayNetworking.registerGlobalReceiver(ServerLightingViewPackets.Page.TYPE,
+                (payload, context) -> ClientServerLightingViewState.apply(payload));
         ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> {
             if (client.level != null) {
                 String dimensionId = client.level.dimension().identifier().toString();
@@ -80,6 +92,8 @@ public final class TotemLumenClient implements ClientModInitializer {
                 LOGGER.info("Cleared server-authoritative lighting world rules after disconnect");
             }
             ClientGameplayLightField.clear();
+            ClientHeldLightState.clear();
+            ClientServerLightingViewState.clear();
             ClientGameplayLightPredictor.clear();
             FluidRenderGeometryCache.clear();
             EntityRenderGeometryCache.clear();
@@ -101,7 +115,7 @@ public final class TotemLumenClient implements ClientModInitializer {
         cycleDebugMode = KeyMappingHelper.registerKeyMapping(
                 new KeyMapping(
                         "key.totem-lumen.cycle_debug_mode",
-                        InputConstants.Type.KEYSYM,
+                        InputConstants.Type.KEYBOARD,
                         InputConstants.KEY_F8,
                         debugCategory
                 )
@@ -109,7 +123,7 @@ public final class TotemLumenClient implements ClientModInitializer {
         cyclePerformanceProbe = KeyMappingHelper.registerKeyMapping(
                 new KeyMapping(
                         "key.totem-lumen.cycle_performance_probe",
-                        InputConstants.Type.KEYSYM,
+                        InputConstants.Type.KEYBOARD,
                         InputConstants.KEY_F9,
                         debugCategory
                 )
@@ -142,6 +156,9 @@ public final class TotemLumenClient implements ClientModInitializer {
                 String dimensionId = client.level.dimension().identifier().toString();
                 ClientGameplayLightField.setActiveDimension(dimensionId);
                 FluidRenderGeometryCache.setActiveDimension(dimensionId);
+                if (renderProfile == RendererSettings.RenderProfile.MINECRAFT_RGB) {
+                    VanillaRgbLighting.updateSkyPalette(client.level);
+                }
                 ClientGameplayLightPredictor.tick(client.level, client.player);
                 for (ClientGameplayLightField.SectionCoordinate section
                         : ClientGameplayLightField.drainDirtySections(dimensionId, 32)) {
@@ -152,7 +169,7 @@ public final class TotemLumenClient implements ClientModInitializer {
                             section.x(), section.y(), section.z()
                     );
                 }
-                if (!RendererSettings.entityRayTracingEnabled()) {
+                if (!RendererSettings.rendererEnabled() || !RendererSettings.entityRayTracingEnabled()) {
                     EntityRenderGeometryCache.clear();
                 }
                 EntityRenderGeometryCache.prune(
@@ -191,6 +208,9 @@ public final class TotemLumenClient implements ClientModInitializer {
         // stay outside LevelRenderer.render(): once world takeover is active that vanilla drawing
         // method is cancelled entirely, while extraction continues every frame.
         LevelExtractionEvents.END_EXTRACTION.register(context -> {
+            var client = net.minecraft.client.Minecraft.getInstance();
+            ClientHeldLightState.capture(client,
+                    client.getDeltaTracker().getGameTimeDeltaPartialTick(true));
             // The old P5 world bootstrap is now a zero-GPU compatibility gate.
             P5WorldDebugComposite.runOnceOnRenderThread();
 

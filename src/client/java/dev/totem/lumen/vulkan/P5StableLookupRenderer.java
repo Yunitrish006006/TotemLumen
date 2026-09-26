@@ -1,19 +1,21 @@
 package dev.totem.lumen.vulkan;
 
-import com.mojang.blaze3d.GpuFormat;
+import com.mojang.renderpearl.api.GpuFormat;
 import com.mojang.blaze3d.pipeline.RenderTarget;
-import com.mojang.blaze3d.systems.RenderPass;
+import com.mojang.renderpearl.api.commands.RenderPass;
 import com.mojang.blaze3d.systems.RenderSystem;
-import com.mojang.blaze3d.textures.FilterMode;
-import com.mojang.blaze3d.textures.GpuTexture;
-import com.mojang.blaze3d.textures.GpuTextureView;
-import com.mojang.blaze3d.vulkan.VulkanDevice;
-import com.mojang.blaze3d.vulkan.VulkanGpuTexture;
+import com.mojang.renderpearl.api.textures.FilterMode;
+import com.mojang.renderpearl.api.textures.GpuTexture;
+import com.mojang.renderpearl.api.textures.GpuTextureView;
+import com.mojang.renderpearl.backend.vulkan.VulkanDevice;
+import com.mojang.renderpearl.backend.vulkan.VulkanGpuTexture;
 import dev.totem.lumen.TotemLumenClient;
 import dev.totem.lumen.gpu.GpuSectionLightLists;
 import dev.totem.lumen.gpu.GpuSectionLookupTable;
 import dev.totem.lumen.gpu.GpuSectionSlotAllocator;
 import dev.totem.lumen.gameplay.light.PackedRgbLight;
+import dev.totem.lumen.gameplay.light.RgbLightAttenuation;
+import dev.totem.lumen.integration.ClientHeldLightState;
 import dev.totem.lumen.integration.ClientGameplayLightField;
 import dev.totem.lumen.integration.LabPbrTextureRegistry;
 import dev.totem.lumen.integration.RendererRuntimeTuningRegistry;
@@ -61,6 +63,11 @@ public final class P5StableLookupRenderer {
     private static final int LIGHT_DATA_BASE_WORD = SECTION_LIGHT_INDEX_BASE_WORD
             + MAX_SECTIONS * GpuSectionLightLists.MAX_LIGHTS_PER_SECTION;
     private static final int LIGHT_WORDS_PER_RECORD = 8;
+    private static final int HELD_LIGHT_BASE_WORD = LIGHT_DATA_BASE_WORD
+            + GpuSectionLightLists.MAX_STATIC_LIGHTS * LIGHT_WORDS_PER_RECORD;
+    private static final long HELD_LIGHT_BYTE_OFFSET = (long) HELD_LIGHT_BASE_WORD * Integer.BYTES;
+    private static final long HELD_LIGHT_COPY_BYTES =
+            (long) GpuSectionLightLists.RESERVED_DYNAMIC_LIGHTS * LIGHT_WORDS_PER_RECORD * Integer.BYTES;
     private static final int MAX_MATERIALS = 4096;
     private static final int MATERIAL_EMISSION_WORDS_PER_RECORD = 16;
     private static final int MATERIAL_EMISSION_BASE_WORD = LIGHT_DATA_BASE_WORD
@@ -98,6 +105,7 @@ public final class P5StableLookupRenderer {
             const uint SECTION_LIGHT_COUNT_BASE = 524896u;
             const uint SECTION_LIGHT_INDEX_BASE = 525024u;
             const uint LIGHT_DATA_BASE = 526048u;
+            const uint MAX_GLOBAL_LIGHTS = 256u;
             const uint MAX_LIGHTS_PER_SECTION = 8u;
             const uint LIGHT_WORDS_PER_RECORD = 8u;
             const uint MATERIAL_EMISSION_BASE = 528096u;
@@ -108,6 +116,7 @@ public final class P5StableLookupRenderer {
             const uint HISTORY_MATERIAL_MASK = 0x0000FFFFu;
             const float GI_MAX_DISTANCE = 48.0;
             const float GI_STRENGTH = 0.65;
+            const float RGB_RADIAL_DISTANCE_SCALE = RGB_RADIAL_DISTANCE_SCALE_VALUE;
             const vec3 DEBUG_LIGHT_DIRECTION = normalize(vec3(0.45, 0.85, 0.30));
             const float SOFT_SHADOW_ANGULAR_RADIUS = 0.055;
             const vec2 SOFT_SHADOW_OFFSETS[4] = vec2[4](
@@ -501,6 +510,36 @@ public final class P5StableLookupRenderer {
                         + axisV * offset.y;
             }
 
+            // The last four global-light records are reserved for server-approved held items.
+            // They are read directly rather than re-binning every section as the player moves.
+            vec3 heldLightRgb(vec3 hitPoint, vec3 surfaceNormal) {
+                vec3 result = vec3(0.0);
+                uint count = min(scene.data[93], 4u);
+                for (uint index = 0u; index < count; index++) {
+                    uint base = LIGHT_DATA_BASE + (MAX_GLOBAL_LIGHTS - 4u + index) * LIGHT_WORDS_PER_RECORD;
+                    vec3 lightPosition = vec3(
+                        uintBitsToFloat(scene.data[base]),
+                        uintBitsToFloat(scene.data[base + 1u]),
+                        uintBitsToFloat(scene.data[base + 2u])
+                    );
+                    float radius = uintBitsToFloat(scene.data[base + 3u]);
+                    vec3 lightColor = vec3(
+                        uintBitsToFloat(scene.data[base + 4u]),
+                        uintBitsToFloat(scene.data[base + 5u]),
+                        uintBitsToFloat(scene.data[base + 6u])
+                    );
+                    float intensity = uintBitsToFloat(scene.data[base + 7u]);
+                    vec3 toLight = lightPosition - hitPoint;
+                    float distanceToLight = length(toLight);
+                    float radialDistance = distanceToLight * RGB_RADIAL_DISTANCE_SCALE;
+                    if (radialDistance <= 0.001 || radialDistance >= radius) continue;
+                    float facing = max(dot(surfaceNormal, toLight / distanceToLight), 0.0);
+                    float range = max(1.0 - radialDistance / radius, 0.0);
+                    result += lightColor * intensity * facing * range * range;
+                }
+                return result * uintBitsToFloat(scene.data[54]);
+            }
+
             uint localLightColor(HitResult hit, vec3 primaryOrigin, vec3 primaryDirection, bool emissiveMode) {
                 int slot = sectionSlotForVoxel(hit.voxel);
                 vec4 surfaceEmission = emissiveMode ? materialEmission(hit.materialId) : vec4(0.0);
@@ -591,6 +630,7 @@ public final class P5StableLookupRenderer {
                     );
                 }
 
+                lighting += heldLightRgb(hitPoint, surfaceNormal);
                 return packRgba(materialColor(hit.materialId) * lighting + emitted, 255u);
             }
 
@@ -903,7 +943,10 @@ public final class P5StableLookupRenderer {
                 uint pixelBase = scene.data[3];
                 scene.data[pixelBase + (height - 1u - pixel.y) * width + pixel.x] = color;
             }
-            """;
+            """.replace(
+                    "RGB_RADIAL_DISTANCE_SCALE_VALUE",
+                    Float.toString(RgbLightAttenuation.RADIAL_DISTANCE_SCALE)
+            );
 
     public enum DebugMode {
         NORMAL(0, "Normal"),
@@ -1159,7 +1202,9 @@ public final class P5StableLookupRenderer {
             entityChanged = P17DynamicEntityGpuUploader.packIfDirty(upload);
             uploadBytes = CAMERA_UPLOAD_WORDS * Integer.BYTES;
         }
+        packHeldLights(upload, ClientHeldLightState.captured());
         r.upload.flush(0, uploadBytes);
+        r.upload.flush(HELD_LIGHT_BYTE_OFFSET, HELD_LIGHT_COPY_BYTES);
 
         if (fullSceneUpload || entityChanged) {
             flushTail(
@@ -1281,8 +1326,8 @@ public final class P5StableLookupRenderer {
                         target.getColorTextureView(),
                         Optional.empty()
                 )) {
-            pass.setPipeline(RenderPipelines.TRACY_BLIT);
-            pass.bindTexture(
+            pass.setPipeline(RenderSystem.getCompiledPipeline(RenderPipelines.TRACY_BLIT));
+            pass.setUniform(
                     "InSampler",
                     r.view,
                     RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST)
@@ -1662,6 +1707,10 @@ public final class P5StableLookupRenderer {
         for (int word = 91; word < HEADER_WORDS; word++) putWord(buffer, word, 0);
         putWord(buffer, 91, RendererSettings.entityRayTracingEnabled() ? 1 : 0);
         putWord(buffer, 92, RendererSettings.localLightQuality().ordinal());
+        putWord(buffer, 93, Math.min(
+                ClientHeldLightState.captured().size(),
+                GpuSectionLightLists.RESERVED_DYNAMIC_LIGHTS
+        ));
     }
 
     private static long currentAnimationTick(FrameSnapshot frame) {
@@ -1798,6 +1847,25 @@ public final class P5StableLookupRenderer {
      * lighting pass. The nearest cells are retained so the field participates in scene lighting
      * without exhausting the existing global-light budget.
      */
+    private static void packHeldLights(ByteBuffer buffer, List<ClientHeldLightState.Light> lights) {
+        for (int index = 0; index < GpuSectionLightLists.RESERVED_DYNAMIC_LIGHTS; index++) {
+            int base = HELD_LIGHT_BASE_WORD + index * LIGHT_WORDS_PER_RECORD;
+            if (index >= lights.size()) {
+                for (int word = 0; word < LIGHT_WORDS_PER_RECORD; word++) putWord(buffer, base + word, 0);
+                continue;
+            }
+            ClientHeldLightState.Light light = lights.get(index);
+            putWord(buffer, base, Float.floatToRawIntBits(light.x()));
+            putWord(buffer, base + 1, Float.floatToRawIntBits(light.y()));
+            putWord(buffer, base + 2, Float.floatToRawIntBits(light.z()));
+            putWord(buffer, base + 3, Float.floatToRawIntBits(light.radius()));
+            putWord(buffer, base + 4, Float.floatToRawIntBits(light.red()));
+            putWord(buffer, base + 5, Float.floatToRawIntBits(light.green()));
+            putWord(buffer, base + 6, Float.floatToRawIntBits(light.blue()));
+            putWord(buffer, base + 7, Float.floatToRawIntBits(1.35f));
+        }
+    }
+
     private static List<GpuSectionLightLists.PointLight> gameplayRgbLights() {
         if (RendererSettings.renderProfile() != RendererSettings.RenderProfile.MINECRAFT_RGB) {
             return List.of();
@@ -1917,6 +1985,11 @@ public final class P5StableLookupRenderer {
             VkBufferCopy.Buffer uploadCopy = VkBufferCopy.calloc(1, stack);
             uploadCopy.get(0).srcOffset(0).dstOffset(0).size(uploadBytes);
             VK10.vkCmdCopyBuffer(commandBuffer, r.upload.vkBuffer(), r.scene.vkBuffer(), uploadCopy);
+
+            // Moving hand lights occupy a tiny dedicated tail; static voxels and per-section
+            // lists remain untouched, avoiding full-scene uploads or temporal-history resets.
+            copyTail(commandBuffer, r.upload.vkBuffer(), r.scene.vkBuffer(),
+                    HELD_LIGHT_BYTE_OFFSET, HELD_LIGHT_COPY_BYTES);
 
             if (P17DynamicEntityGpuUploader.consumeCopyPending()) {
                 copyTail(

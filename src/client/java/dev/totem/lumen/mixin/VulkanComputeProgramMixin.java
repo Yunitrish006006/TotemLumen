@@ -1,6 +1,6 @@
 package dev.totem.lumen.mixin;
 
-import com.mojang.blaze3d.vulkan.VulkanDevice;
+import com.mojang.renderpearl.backend.vulkan.VulkanDevice;
 import dev.totem.lumen.vulkan.P12FullBasePipeline;
 import dev.totem.lumen.vulkan.P5BootstrapShader;
 import dev.totem.lumen.vulkan.ShadercNativeHeap;

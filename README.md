@@ -1,6 +1,6 @@
 # Totem Lumen
 
-Totem Lumen is a Minecraft 26.2 Fabric lighting mod with two deliberately separate systems:
+Totem Lumen is a Minecraft 26.3 Fabric lighting mod with two deliberately separate systems:
 
 - a Vulkan-first, Vulkan-only client renderer for real-time voxel ray tracing, shadows, GI, temporal accumulation, denoising, transmission and composition;
 - server-authoritative gameplay lighting for deterministic RGB light semantics used by spawning and future world rules.
@@ -11,7 +11,7 @@ The server gameplay subsystem never initializes or depends on Vulkan. A dedicate
 
 - Vulkan-only client rendering path. No OpenGL implementation or fallback inside Totem Lumen.
 - Vulkan compute voxel ray tracing is the cross-platform baseline.
-- Apple Silicon is a first-class target through Minecraft 26.2's Vulkan backend and MoltenVK/Metal path.
+- Apple Silicon is a first-class target through Minecraft 26.3's Vulkan backend and MoltenVK/Metal path.
 - Vulkan hardware ray tracing is optional acceleration, never a required baseline.
 - Server-authoritative gameplay lighting must remain deterministic, bounded, and independent of client rendering settings.
 - Player runtime dependencies should remain limited to Fabric Loader, Fabric API, and Totem Lumen.
@@ -19,7 +19,7 @@ The server gameplay subsystem never initializes or depends on Vulkan. A dedicate
 
 ## Current milestone
 
-The current development baseline is **Alpha 59**.
+The current development baseline is **Alpha 60** (Minecraft 26.3 port). The build and ABI checks pass; in-world rendering validation remains pending.
 
 Client renderer state:
 
@@ -38,9 +38,9 @@ The authoritative milestone/status list lives in [docs/ROADMAP.md](docs/ROADMAP.
 
 ## Runtime requirements
 
-- Minecraft Java Edition 26.2
+- Minecraft Java Edition 26.3
 - Fabric Loader 0.19.5 or newer
-- Fabric API for Minecraft 26.2
+- Fabric API for Minecraft 26.3
 - Java 25 (normally provided by the Minecraft launcher/server runtime)
 - A Minecraft-compatible Vulkan backend **only when using the client renderer**
 
@@ -85,7 +85,7 @@ Minecraft client extraction / submission
 Current execution direction:
 
 ```text
-Alpha 59 baseline
+Alpha 60 / Minecraft 26.3 baseline
   -> finish P14D/P14E/P17/P18 runtime and coverage gates
   -> primary-hit/G-buffer + reflection/GI performance architecture
   -> GL4 gameplay-light profiling / GL5 hardening
@@ -94,14 +94,16 @@ Alpha 59 baseline
 
 Development client runs request the Vulkan backend.
 
-Until the Gradle wrapper binary is generated in-repository, use Gradle 9.5.1 locally:
+Until the Gradle wrapper binary is generated in-repository, use Gradle 9.6.1 locally:
 
 ```bash
 gradle build
 gradle runClient
 ```
 
-CI installs Gradle 9.5.1 explicitly.
+CI installs Gradle 9.6.1 explicitly. The development client uses `run/client-26.3`, leaving the earlier 26.2 test worlds untouched.
+
+Stop `runClient` before rebuilding, then start it again. The development client reads `build/classes` directly; compiling while it runs can replace a class between loads and crash the game. A running client does not hot-update to the new mod code.
 
 ## Documentation
 

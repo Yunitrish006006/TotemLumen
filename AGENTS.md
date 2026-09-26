@@ -2,7 +2,7 @@
 
 ## Project direction
 
-Totem Lumen is a Minecraft 26.2 Fabric client rendering mod. The renderer is Vulkan-first and Vulkan-only.
+Totem Lumen is a Minecraft 26.3 Fabric client rendering mod. The renderer is Vulkan-first and Vulkan-only.
 
 ### Hard constraints
 
@@ -14,11 +14,11 @@ Totem Lumen is a Minecraft 26.2 Fabric client rendering mod. The renderer is Vul
 - Do not require players to install Vulkan SDK, MoltenVK, Xcode, shader compilers, RenderDoc, CUDA, DLSS SDK, or other development tooling.
 - Prefer packaged/precompiled shader assets for releases.
 
-## Minecraft 26.2 rules
+## Minecraft 26.3 rules
 
 - Target Java 25.
-- Minecraft 26.2 is unobfuscated; use the `net.fabricmc.fabric-loom` toolchain and current Mojang names.
-- Follow the extraction/render-state direction of the 26.2 rendering pipeline.
+- Minecraft 26.3 is unobfuscated; use the `net.fabricmc.fabric-loom` toolchain and current Mojang names.
+- Follow the extraction/render-state direction of the 26.3 rendering pipeline.
 - Prefer public Blaze3D abstractions when possible.
 - If private Vulkan backend access is required, isolate it behind a minimal bridge/mixin package.
 

@@ -3,7 +3,7 @@
 ## Non-negotiable constraints
 
 1. Totem Lumen's client renderer is Vulkan-only. Do not add an OpenGL implementation or OpenGL fallback.
-2. Apple Silicon is a required client target through Minecraft 26.2's Vulkan backend and MoltenVK/Metal translation path.
+2. Apple Silicon is a required client target through Minecraft 26.3's Vulkan backend and MoltenVK/Metal translation path.
 3. Vulkan compute voxel ray tracing is the compatibility baseline. Hardware RT extensions are optional acceleration only.
 4. Player/runtime dependencies stay limited to Fabric Loader, Fabric API, and Totem Lumen unless explicitly approved.
 5. Do not require players or server operators to install Vulkan SDK, MoltenVK, shader compilers, Xcode, RenderDoc, CUDA, DLSS SDK, or similar developer tooling.
@@ -14,7 +14,7 @@
 ## Top-level split
 
 ```text
-                         Minecraft 26.2
+                         Minecraft 26.3
                               |
               +---------------+----------------+
               |                                |
@@ -60,8 +60,8 @@ The server light field is intentionally not physically rendered light. It is a d
 | --- | --- |
 | Channel range | RGB chroma + intensity A, each `0..15` |
 | Combination | component-wise maximum |
-| Attenuation | at least 1 per block step |
-| Maximum propagation | 15 block steps |
+| Attenuation | shared radial distance with a `1.20` scale, plus block obstruction penalty |
+| Maximum propagation | 15 effective light levels |
 | Visual flicker | stable gameplay representative value |
 | GI / bounce | none |
 | Directional sun shadows | none |
@@ -70,6 +70,11 @@ The server light field is intentionally not physically rendered light. It is a d
 | Backlog safety | dirty sections reject hostile dark-spawn checks |
 
 This subsystem is common/server code only. It must remain runnable on a headless dedicated server.
+
+`RgbLightAttenuation` is the shared rule source for the server-authoritative field and the
+client's local visual predictor: both use the same 18 axial/face-diagonal directions, radial
+distance scale, rounded loss cadence, and obstruction penalty. The server still only calculates
+gameplay data; it does not render frames or initialize Vulkan.
 
 ## Client extraction/rendering boundary
 

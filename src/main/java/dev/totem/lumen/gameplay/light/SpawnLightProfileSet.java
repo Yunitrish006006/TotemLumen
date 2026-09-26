@@ -13,8 +13,10 @@ public final class SpawnLightProfileSet {
     public static final SpawnLightProfileSet EMPTY = new SpawnLightProfileSet(Map.of());
 
     private final List<Entry> ordered;
+    private final Map<Identifier, SpawnLightProfile> profiles;
 
     private SpawnLightProfileSet(Map<Identifier, SpawnLightProfile> profiles) {
+        this.profiles = Map.copyOf(profiles);
         List<Entry> entries = new ArrayList<>();
         profiles.forEach((id, profile) -> entries.add(new Entry(id, profile)));
         entries.sort(Comparator
@@ -39,6 +41,10 @@ public final class SpawnLightProfileSet {
 
     public int size() {
         return ordered.size();
+    }
+
+    public Map<Identifier, SpawnLightProfile> profiles() {
+        return profiles;
     }
 
     private record Entry(Identifier id, SpawnLightProfile profile) {

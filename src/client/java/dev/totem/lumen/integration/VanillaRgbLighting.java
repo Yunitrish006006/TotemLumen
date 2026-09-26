@@ -14,6 +14,7 @@ import net.minecraft.core.Direction;
 import net.minecraft.world.level.LightLayer;
 import dev.totem.lumen.gameplay.light.PackedRgbLight;
 import com.mojang.blaze3d.vertex.QuadInstance;
+import org.joml.Vector3f;
 import net.minecraft.util.ARGB;
 import net.minecraft.util.LightCoordsUtil;
 import net.fabricmc.fabric.api.client.renderer.v1.mesh.MutableQuadView;
@@ -24,6 +25,9 @@ public final class VanillaRgbLighting {
     private static final AtomicInteger DIAGNOSTIC_LOGS = new AtomicInteger();
     private static final AtomicInteger INDIGO_DIAGNOSTIC_LOGS = new AtomicInteger();
     private static final ThreadLocal<float[]> RGB_SAMPLE = ThreadLocal.withInitial(() -> new float[3]);
+    private static final Direction[] SAMPLE_DIRECTIONS = Direction.values();
+    /** Immutable per-tick snapshot read by parallel terrain-mesh workers. */
+    private static volatile SkyPalette skyPalette = new SkyPalette(0.92f, 0.96f, 1.0f, 1.0f, 0.04f);
     private VanillaRgbLighting() {
     }
 
@@ -132,15 +136,16 @@ public final class VanillaRgbLighting {
         // Sky light is part of the RGB source model as well. It is not a second white overlay:
         // daylight and moonlight contribute their own colour to the same surface tint as local
         // RGB emitters.
-        float skyWeight = skyWeight(world, skyLight);
-        float[] skyColor = skyLightColor(world);
-        float skyRed = skyColor[0] * skyWeight;
-        float skyGreen = skyColor[1] * skyWeight;
-        float skyBlue = skyColor[2] * skyWeight;
-        red = blockRed + skyRed;
-        green = blockGreen + skyGreen;
-        blue = blockBlue + skyBlue;
-        float ambient = ambientFloor();
+        SkyPalette palette = skyPalette;
+        float skyWeight = skyLight / 15.0f * palette.timeFactor();
+        float skyRed = palette.red() * skyWeight;
+        float skyGreen = palette.green() * skyWeight;
+        float skyBlue = palette.blue() * skyWeight;
+        float blockGain = ClientLightingWorldRules.tuning().brightnessMultiplier();
+        red = blockRed * blockGain + skyRed;
+        green = blockGreen * blockGain + skyGreen;
+        blue = blockBlue * blockGain + skyBlue;
+        float ambient = palette.ambient();
         int rgbLightmap = LightCoordsUtil.FULL_BRIGHT;
         if (DIAGNOSTIC_LOGS.get() < 8) {
             int logIndex = DIAGNOSTIC_LOGS.getAndIncrement();
@@ -180,7 +185,8 @@ public final class VanillaRgbLighting {
         if (RendererSettings.renderProfile() != RendererSettings.RenderProfile.MINECRAFT_RGB) {
             return;
         }
-        int packed = smoothedPackedAt(pos, faceDirection);
+        ClientGameplayLightField.LocalLookup light = ClientGameplayLightField.localSampler();
+        int packed = smoothedPackedAt(pos, faceDirection, light);
         int skyLight = world.getBrightness(LightLayer.SKY, pos);
         if (faceDirection != null) {
             BlockPos neighbour = new BlockPos(
@@ -207,9 +213,10 @@ public final class VanillaRgbLighting {
             fallbackGreen = color.green() * emission;
             fallbackBlue = color.blue() * emission;
         }
-        float skyWeight = skyWeight(world, skyLight);
-        float[] skyColor = skyLightColor(world);
-        float ambient = ambientFloor();
+        SkyPalette palette = skyPalette;
+        float skyWeight = skyLight / 15.0f * palette.timeFactor();
+        float ambient = palette.ambient();
+        float blockGain = ClientLightingWorldRules.tuning().brightnessMultiplier();
         if (INDIGO_DIAGNOSTIC_LOGS.get() < 4 && INDIGO_DIAGNOSTIC_LOGS.getAndIncrement() < 4) {
             dev.totem.lumen.TotemLumenClient.LOGGER.info(
                     "RGB Indigo terrain active: pos={}, packed=0x{}, sky={}, vertexSampling={}",
@@ -220,8 +227,8 @@ public final class VanillaRgbLighting {
         boolean smooth = Minecraft.getInstance().options.ambientOcclusion().get();
         float[] blockRgb = RGB_SAMPLE.get();
         if (!smooth) {
-            int center = ClientGameplayLightField.packedAtCurrentDimension(pos);
-            int outside = faceDirection == null ? 0 : ClientGameplayLightField.packedAtCurrentDimension(
+            int center = light.packedAtCurrentDimension(pos);
+            int outside = faceDirection == null ? 0 : light.packedAtCurrentDimension(
                     pos.getX() + faceDirection.getStepX(),
                     pos.getY() + faceDirection.getStepY(),
                     pos.getZ() + faceDirection.getStepZ()
@@ -237,7 +244,7 @@ public final class VanillaRgbLighting {
                         pos.getX() + quad.x(vertex),
                         pos.getY() + quad.y(vertex),
                         pos.getZ() + quad.z(vertex),
-                        faceDirection, blockRgb
+                        faceDirection, light, blockRgb
                 );
             }
             float blockRed = blockRgb[0];
@@ -252,9 +259,9 @@ public final class VanillaRgbLighting {
             int source = quad.color(vertex);
             quad.color(vertex, ARGB.color(
                     ARGB.alpha(source),
-                    litChannel(ARGB.red(source), ambient + blockRed + skyColor[0] * skyWeight),
-                    litChannel(ARGB.green(source), ambient + blockGreen + skyColor[1] * skyWeight),
-                    litChannel(ARGB.blue(source), ambient + blockBlue + skyColor[2] * skyWeight)
+                    litChannel(ARGB.red(source), ambient + blockRed * blockGain + palette.red() * skyWeight),
+                    litChannel(ARGB.green(source), ambient + blockGreen * blockGain + palette.green() * skyWeight),
+                    litChannel(ARGB.blue(source), ambient + blockBlue * blockGain + palette.blue() * skyWeight)
             ));
             quad.lightmap(vertex, LightCoordsUtil.FULL_BRIGHT);
         }
@@ -263,7 +270,7 @@ public final class VanillaRgbLighting {
     /** Samples RGB light at a surface vertex, interpolating effective channels without repacking. */
     private static void sampleRgbAt(
             float worldX, float worldY, float worldZ, Direction face,
-            float[] out
+            ClientGameplayLightField.LocalLookup light, float[] out
     ) {
         float offsetX = face == null ? 0.0f : face.getStepX() * 0.5f;
         float offsetY = face == null ? 0.0f : face.getStepY() * 0.5f;
@@ -290,7 +297,7 @@ public final class VanillaRgbLighting {
                     float weightX = dx == 0 ? 1.0f - fractionX : fractionX;
                     float weight = weightX * weightY * weightZ;
                     if (weight <= 0.0f) continue;
-                    int packed = ClientGameplayLightField.packedAtCurrentDimension(
+                    int packed = light.packedAtCurrentDimension(
                             baseX + dx, baseY + dy, baseZ + dz
                     );
                     out[0] += weight * PackedRgbLight.red(packed) / 15.0f;
@@ -309,22 +316,45 @@ public final class VanillaRgbLighting {
         return Math.max(0, Math.min(255, Math.round(source * Math.min(1.0f, illumination))));
     }
 
-    private static float ambientFloor() {
+    public static void updateSkyPalette(ClientLevel level) {
         double gamma = Minecraft.getInstance().options.gamma().get();
-        return 0.04f + 0.16f * (float) Math.max(0.0, Math.min(1.0, gamma));
+        float ambient = 0.04f + 0.16f * (float) Math.max(0.0, Math.min(1.0, gamma));
+        float timeFactor = Math.max(0.0f, (15.0f - level.getSkyDarken()) / 15.0f);
+        String dimension = level.dimension().identifier().toString();
+        if ("minecraft:the_nether".equals(dimension)) {
+            skyPalette = new SkyPalette(1.0f, 0.34f, 0.16f, timeFactor, ambient);
+        } else if ("minecraft:the_end".equals(dimension)) {
+            skyPalette = new SkyPalette(0.58f, 0.48f, 1.0f, timeFactor, ambient);
+        } else {
+            float daylight = daylight(level);
+            float night = 1.0f - daylight;
+            skyPalette = new SkyPalette(
+                    0.28f * night + 1.00f * daylight,
+                    0.38f * night + 0.93f * daylight,
+                    0.82f * night + 0.78f * daylight,
+                    timeFactor,
+                    ambient
+            );
+        }
     }
 
-    private static float skyWeight(BlockAndTintGetter world, int skyLight) {
-        ClientLevel level = clientLevel(world);
-        float timeFactor = level == null ? 1.0f
-                : Math.max(0.0f, (15.0f - level.getSkyDarken()) / 15.0f);
-        return skyLight / 15.0f * timeFactor;
+    /** RGB terrain's unlit baseline at a sky level, shared with the moving-light composite. */
+    static Vector3f skyAndAmbientAt(float skyLight) {
+        SkyPalette palette = skyPalette;
+        float skyWeight = Math.max(0, Math.min(15, skyLight)) / 15.0f * palette.timeFactor();
+        return new Vector3f(
+                palette.ambient() + palette.red() * skyWeight,
+                palette.ambient() + palette.green() * skyWeight,
+                palette.ambient() + palette.blue() * skyWeight
+        );
     }
 
     /** Uses the same user-facing ambient-occlusion toggle as vanilla smooth lighting. */
-    private static int smoothedPackedAt(BlockPos pos, Direction faceDirection) {
-        int center = ClientGameplayLightField.packedAtCurrentDimension(pos);
-        int face = faceDirection == null ? 0 : ClientGameplayLightField.packedAtCurrentDimension(
+    private static int smoothedPackedAt(
+            BlockPos pos, Direction faceDirection, ClientGameplayLightField.LocalLookup light
+    ) {
+        int center = light.packedAtCurrentDimension(pos);
+        int face = faceDirection == null ? 0 : light.packedAtCurrentDimension(
                 pos.getX() + faceDirection.getStepX(),
                 pos.getY() + faceDirection.getStepY(),
                 pos.getZ() + faceDirection.getStepZ()
@@ -337,8 +367,8 @@ public final class VanillaRgbLighting {
         int green = PackedRgbLight.green(center) * 3;
         int blue = PackedRgbLight.blue(center) * 3;
         int samples = 3;
-        for (Direction direction : Direction.values()) {
-            int sample = ClientGameplayLightField.packedAtCurrentDimension(
+        for (Direction direction : SAMPLE_DIRECTIONS) {
+            int sample = light.packedAtCurrentDimension(
                     pos.getX() + direction.getStepX(),
                     pos.getY() + direction.getStepY(),
                     pos.getZ() + direction.getStepZ()
@@ -364,28 +394,6 @@ public final class VanillaRgbLighting {
         );
     }
 
-    private static float[] skyLightColor(BlockAndTintGetter world) {
-        ClientLevel level = clientLevel(world);
-        if (level == null) {
-            return new float[]{0.92f, 0.96f, 1.0f};
-        }
-        String dimension = level.dimension().identifier().toString();
-        if ("minecraft:the_nether".equals(dimension)) {
-            return new float[]{1.0f, 0.34f, 0.16f};
-        }
-        if ("minecraft:the_end".equals(dimension)) {
-            return new float[]{0.58f, 0.48f, 1.0f};
-        }
-
-        float daylight = daylight(level);
-        float night = 1.0f - daylight;
-        return new float[]{
-                0.28f * night + 1.00f * daylight,
-                0.38f * night + 0.93f * daylight,
-                0.82f * night + 0.78f * daylight
-        };
-    }
-
     /** A coarse sky epoch for the RGB terrain mesh; ordinary ticks do not remesh the world. */
     public static int skyRefreshKey(ClientLevel level) {
         if (!"minecraft:overworld".equals(level.dimension().identifier().toString())) {
@@ -401,8 +409,7 @@ public final class VanillaRgbLighting {
         return (float) Math.max(0.0, Math.cos(sunAngle));
     }
 
-    private static ClientLevel clientLevel(BlockAndTintGetter world) {
-        return world instanceof ClientLevel level ? level : Minecraft.getInstance().level;
+    private record SkyPalette(float red, float green, float blue, float timeFactor, float ambient) {
     }
 
     private static int toChannel(int value, int maximum) {

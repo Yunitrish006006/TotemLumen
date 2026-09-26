@@ -1,16 +1,19 @@
 package dev.totem.lumen.geometry;
 
-import com.mojang.blaze3d.buffers.GpuBufferSlice;
+import com.mojang.renderpearl.api.buffers.GpuBufferSlice;
+import com.mojang.renderpearl.backend.api.GpuDeviceBackend;
+import com.mojang.renderpearl.frontend.FrontendGpuDevice;
 import com.mojang.blaze3d.resource.GraphicsResourceAllocator;
 import com.mojang.blaze3d.vertex.PoseStack;
 import dev.totem.lumen.mixin.EntityRenderDispatcherMixin;
 import dev.totem.lumen.mixin.EntityRendererStateMixin;
+import dev.totem.lumen.mixin.GpuDeviceAccessor;
 import dev.totem.lumen.mixin.LevelRendererTakeoverMixin;
 import dev.totem.lumen.mixin.SubmitNodeCollectionBlockEntityMixin;
 import dev.totem.lumen.mixin.SubmitNodeCollectionItemMixin;
+import dev.totem.lumen.mixin.VanillaRgbOverlayMixin;
 import dev.totem.lumen.mixin.VideoSettingsRenderProfileMixin;
 import dev.totem.lumen.mixin.SubmitNodeStorageBlockEntityMixin;
-import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.OptionInstance;
 import net.minecraft.client.Options;
 import net.minecraft.client.gui.screens.options.VideoSettingsScreen;
@@ -22,18 +25,22 @@ import net.minecraft.client.renderer.SubmitNodeStorage;
 import net.minecraft.client.renderer.entity.EntityRenderDispatcher;
 import net.minecraft.client.renderer.entity.EntityRenderer;
 import net.minecraft.client.renderer.entity.state.EntityRenderState;
-import net.minecraft.client.renderer.feature.ModelFeatureRenderer;
 import net.minecraft.client.renderer.rendertype.RenderType;
 import net.minecraft.client.renderer.state.level.CameraRenderState;
-import net.minecraft.client.renderer.texture.TextureAtlasSprite;
+import net.minecraft.client.renderer.texture.UvMapping;
 import net.minecraft.client.renderer.item.ItemStackRenderState;
+import net.minecraft.client.resources.model.geometry.ItemQuads;
 import net.minecraft.world.item.ItemDisplayContext;
 import net.minecraft.world.entity.Entity;
-import org.joml.Matrix4fc;
 import org.joml.Vector4f;
+import org.objectweb.asm.ClassReader;
+import org.objectweb.asm.Type;
+import org.objectweb.asm.tree.ClassNode;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
+import org.spongepowered.asm.mixin.gen.Accessor;
 
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.Arrays;
 import java.util.List;
@@ -41,13 +48,13 @@ import java.util.List;
 /**
  * Build-time regression gate for Minecraft-facing render-submission mixins used by P14D/P17.
  *
- * <p>These signatures are intentionally checked against the actual Minecraft 26.2 classes on the
+ * <p>These signatures are intentionally checked against the actual Minecraft 26.3 classes on the
  * client runtime classpath. A source-compatible mixin can still fail at game startup when its
  * callback descriptor no longer matches the transformed target, so this verifier keeps that ABI
  * mismatch inside CI instead of deferring it to an in-game crash.</p>
  */
 public final class P14DMixinDescriptorVerifier {
-    private static final Class<?>[] SUBMIT_MODEL_26_2 = {
+    private static final Class<?>[] SUBMIT_MODEL_26_3 = {
             Model.class,
             Object.class,
             PoseStack.class,
@@ -55,12 +62,11 @@ public final class P14DMixinDescriptorVerifier {
             int.class,
             int.class,
             int.class,
-            TextureAtlasSprite.class,
-            int.class,
-            ModelFeatureRenderer.CrumblingOverlay.class
+            UvMapping.class,
+            int.class
     };
 
-    private static final Class<?>[] ENTITY_SUBMIT_26_2 = {
+    private static final Class<?>[] ENTITY_SUBMIT_26_3 = {
             EntityRenderState.class,
             CameraRenderState.class,
             double.class,
@@ -70,25 +76,24 @@ public final class P14DMixinDescriptorVerifier {
             SubmitNodeCollector.class
     };
 
-    private static final Class<?>[] LEVEL_RENDER_26_2 = {
+    private static final Class<?>[] LEVEL_RENDER_26_3 = {
             GraphicsResourceAllocator.class,
-            DeltaTracker.class,
             boolean.class,
             CameraRenderState.class,
-            Matrix4fc.class,
             GpuBufferSlice.class,
             Vector4f.class,
+            boolean.class,
             boolean.class
     };
 
-    private static final Class<?>[] SUBMIT_ITEM_26_2 = {
+    private static final Class<?>[] SUBMIT_ITEM_26_3 = {
             PoseStack.class,
             ItemDisplayContext.class,
             int.class,
             int.class,
             int.class,
             int[].class,
-            List.class,
+            ItemQuads.class,
             ItemStackRenderState.FoilType.class
     };
 
@@ -96,6 +101,7 @@ public final class P14DMixinDescriptorVerifier {
     }
 
     public static void main(String[] args) throws Exception {
+        verifyGpuDeviceBackendAccessor();
         verifySubmitModel(
                 SubmitNodeStorage.class,
                 SubmitNodeStorageBlockEntityMixin.class
@@ -108,42 +114,74 @@ public final class P14DMixinDescriptorVerifier {
         verifyEntitySubmit();
         verifyItemSubmit();
         verifyLevelRenderTakeover();
+        verifyHeldLightRenderHook();
         verifyVideoSettingsProfileHooks();
         System.out.println(
-                "P14D/P17 mixin descriptor verification PASS: minecraft=26.2, "
-                        + "submitModel=Model+Object+PoseStack+RenderType+III+TextureAtlasSprite+I+CrumblingOverlay, "
+                "P14D/P17 mixin descriptor verification PASS: minecraft=26.3, "
+                        + "gpuBackend=FrontendGpuDevice.backend, "
+                        + "submitModel=Model+Object+PoseStack+RenderType+III+UvMapping+I, "
                         + "createRenderState=Entity+F->EntityRenderState, "
                         + "entitySubmit=EntityRenderState+CameraRenderState+DDD+PoseStack+SubmitNodeCollector, "
-                        + "itemSubmit=PoseStack+ItemDisplayContext+III+int[]+List<BakedQuad>+FoilType, "
-                        + "levelRender=GraphicsResourceAllocator+DeltaTracker+Z+CameraRenderState+Matrix4fc+GpuBufferSlice+Vector4f+Z, "
+                        + "itemSubmit=PoseStack+ItemDisplayContext+III+int[]+ItemQuads+FoilType, "
+                        + "levelRender=GraphicsResourceAllocator+Z+CameraRenderState+GpuBufferSlice+Vector4f+ZZ, "
                         + "videoSettings=qualityOptions/displayOptions/preferenceOptions/addOptions"
         );
     }
 
+    private static void verifyGpuDeviceBackendAccessor() throws Exception {
+        ClassNode accessorClass = new ClassNode();
+        try (var bytecode = GpuDeviceAccessor.class.getResourceAsStream("GpuDeviceAccessor.class")) {
+            if (bytecode == null) {
+                throw new IllegalStateException("GPU backend accessor class file is missing");
+            }
+            new ClassReader(bytecode).accept(accessorClass, ClassReader.SKIP_CODE);
+        }
+        boolean targetsFrontend = accessorClass.invisibleAnnotations != null
+                && accessorClass.invisibleAnnotations.stream()
+                .filter(annotation -> annotation.desc.equals("Lorg/spongepowered/asm/mixin/Mixin;"))
+                .map(annotation -> annotation.values)
+                .filter(values -> values != null)
+                .anyMatch(values -> values.stream()
+                        .anyMatch(value -> value instanceof List<?> targets
+                                && targets.contains(Type.getType(FrontendGpuDevice.class))));
+        if (!targetsFrontend) {
+            throw new IllegalStateException("GPU backend accessor must target FrontendGpuDevice");
+        }
+        Field backend = FrontendGpuDevice.class.getDeclaredField("backend");
+        Method accessor = GpuDeviceAccessor.class.getDeclaredMethod("totemLumen$getBackend");
+        Accessor annotation = accessor.getAnnotation(Accessor.class);
+        if (backend.getType() != GpuDeviceBackend.class
+                || accessor.getReturnType() != GpuDeviceBackend.class
+                || annotation == null
+                || !annotation.value().equals("backend")) {
+            throw new IllegalStateException("FrontendGpuDevice backend accessor descriptor mismatch");
+        }
+    }
+
     private static void verifySubmitModel(Class<?> targetClass, Class<?> mixinClass) throws Exception {
-        Method target = targetClass.getDeclaredMethod("submitModel", SUBMIT_MODEL_26_2);
+        Method target = targetClass.getDeclaredMethod("submitModel", SUBMIT_MODEL_26_3);
         if (target.getReturnType() != void.class) {
             throw new IllegalStateException(targetClass.getName() + ".submitModel must return void");
         }
 
         Method handler = Arrays.stream(mixinClass.getDeclaredMethods())
-                .filter(method -> method.getName().equals("totemLumen$captureModelWithSprite"))
+                .filter(method -> method.getName().equals("totemLumen$captureModelWithUvMapping"))
                 .findFirst()
                 .orElseThrow(() -> new IllegalStateException(
                         "Missing P14D/P17 submitModel callback in " + mixinClass.getName()
                 ));
 
         Class<?>[] callback = handler.getParameterTypes();
-        if (callback.length != SUBMIT_MODEL_26_2.length + 1) {
+        if (callback.length != SUBMIT_MODEL_26_3.length + 1) {
             throw new IllegalStateException(
                     mixinClass.getName() + " callback parameter count mismatch: " + callback.length
             );
         }
-        for (int i = 0; i < SUBMIT_MODEL_26_2.length; i++) {
-            if (callback[i] != SUBMIT_MODEL_26_2[i]) {
+        for (int i = 0; i < SUBMIT_MODEL_26_3.length; i++) {
+            if (callback[i] != SUBMIT_MODEL_26_3[i]) {
                 throw new IllegalStateException(
                         mixinClass.getName() + " callback parameter " + i + " mismatch: expected "
-                                + SUBMIT_MODEL_26_2[i].getName() + " but found " + callback[i].getName()
+                                + SUBMIT_MODEL_26_3[i].getName() + " but found " + callback[i].getName()
                 );
             }
         }
@@ -193,7 +231,7 @@ public final class P14DMixinDescriptorVerifier {
     }
 
     private static void verifyEntitySubmit() throws Exception {
-        Method target = EntityRenderDispatcher.class.getDeclaredMethod("submit", ENTITY_SUBMIT_26_2);
+        Method target = EntityRenderDispatcher.class.getDeclaredMethod("submit", ENTITY_SUBMIT_26_3);
         if (target.getReturnType() != void.class) {
             throw new IllegalStateException("EntityRenderDispatcher.submit must return void");
         }
@@ -203,7 +241,7 @@ public final class P14DMixinDescriptorVerifier {
     }
 
     private static void verifyItemSubmit() throws Exception {
-        Method target = SubmitNodeCollection.class.getDeclaredMethod("submitItem", SUBMIT_ITEM_26_2);
+        Method target = SubmitNodeCollection.class.getDeclaredMethod("submitItem", SUBMIT_ITEM_26_3);
         if (target.getReturnType() != void.class) {
             throw new IllegalStateException("SubmitNodeCollection.submitItem must return void");
         }
@@ -215,16 +253,16 @@ public final class P14DMixinDescriptorVerifier {
                         "Missing P17 item-renderer submit callback"
                 ));
         Class<?>[] callback = handler.getParameterTypes();
-        if (callback.length != SUBMIT_ITEM_26_2.length + 1) {
+        if (callback.length != SUBMIT_ITEM_26_3.length + 1) {
             throw new IllegalStateException(
                     "P17 item callback parameter count mismatch: " + callback.length
             );
         }
-        for (int i = 0; i < SUBMIT_ITEM_26_2.length; i++) {
-            if (callback[i] != SUBMIT_ITEM_26_2[i]) {
+        for (int i = 0; i < SUBMIT_ITEM_26_3.length; i++) {
+            if (callback[i] != SUBMIT_ITEM_26_3[i]) {
                 throw new IllegalStateException(
                         "P17 item callback parameter " + i + " mismatch: expected "
-                                + SUBMIT_ITEM_26_2[i].getName() + " but found " + callback[i].getName()
+                                + SUBMIT_ITEM_26_3[i].getName() + " but found " + callback[i].getName()
                 );
             }
         }
@@ -232,13 +270,13 @@ public final class P14DMixinDescriptorVerifier {
             throw new IllegalStateException("P17 item callback must end with CallbackInfo");
         }
 
-        if (!List.class.isAssignableFrom(callback[6])) {
-            throw new IllegalStateException("P17 item callback must receive the resolved quad list");
+        if (callback[6] != ItemQuads.class) {
+            throw new IllegalStateException("P17 item callback must receive ItemQuads");
         }
     }
 
     private static void verifyLevelRenderTakeover() throws Exception {
-        Method target = LevelRenderer.class.getDeclaredMethod("render", LEVEL_RENDER_26_2);
+        Method target = LevelRenderer.class.getDeclaredMethod("render", LEVEL_RENDER_26_3);
         if (target.getReturnType() != void.class) {
             throw new IllegalStateException("LevelRenderer.render must return void");
         }
@@ -251,17 +289,17 @@ public final class P14DMixinDescriptorVerifier {
                 ));
 
         Class<?>[] callback = handler.getParameterTypes();
-        if (callback.length != LEVEL_RENDER_26_2.length + 1) {
+        if (callback.length != LEVEL_RENDER_26_3.length + 1) {
             throw new IllegalStateException(
                     "LevelRenderer takeover callback parameter count mismatch: "
                             + callback.length
             );
         }
-        for (int i = 0; i < LEVEL_RENDER_26_2.length; i++) {
-            if (callback[i] != LEVEL_RENDER_26_2[i]) {
+        for (int i = 0; i < LEVEL_RENDER_26_3.length; i++) {
+            if (callback[i] != LEVEL_RENDER_26_3[i]) {
                 throw new IllegalStateException(
                         "LevelRenderer takeover callback parameter " + i + " mismatch: expected "
-                                + LEVEL_RENDER_26_2[i].getName() + " but found "
+                                + LEVEL_RENDER_26_3[i].getName() + " but found "
                                 + callback[i].getName()
                 );
             }
@@ -270,6 +308,25 @@ public final class P14DMixinDescriptorVerifier {
             throw new IllegalStateException(
                     "LevelRenderer takeover callback must end with CallbackInfo"
             );
+        }
+    }
+
+    private static void verifyHeldLightRenderHook() {
+        Method handler = Arrays.stream(VanillaRgbOverlayMixin.class.getDeclaredMethods())
+                .filter(method -> method.getName().equals("totemLumen$drawHeldLight"))
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException("Missing held-light LevelRenderer callback"));
+        Class<?>[] callback = handler.getParameterTypes();
+        if (callback.length != LEVEL_RENDER_26_3.length + 1) {
+            throw new IllegalStateException("Held-light callback parameter count mismatch");
+        }
+        for (int i = 0; i < LEVEL_RENDER_26_3.length; i++) {
+            if (callback[i] != LEVEL_RENDER_26_3[i]) {
+                throw new IllegalStateException("Held-light callback parameter " + i + " mismatch");
+            }
+        }
+        if (callback[callback.length - 1] != CallbackInfo.class) {
+            throw new IllegalStateException("Held-light callback must end with CallbackInfo");
         }
     }
 
@@ -333,16 +390,16 @@ public final class P14DMixinDescriptorVerifier {
                 ));
 
         Class<?>[] callback = handler.getParameterTypes();
-        if (callback.length != ENTITY_SUBMIT_26_2.length + 1) {
+        if (callback.length != ENTITY_SUBMIT_26_3.length + 1) {
             throw new IllegalStateException(
                     methodName + " callback parameter count mismatch: " + callback.length
             );
         }
-        for (int i = 0; i < ENTITY_SUBMIT_26_2.length; i++) {
-            if (callback[i] != ENTITY_SUBMIT_26_2[i]) {
+        for (int i = 0; i < ENTITY_SUBMIT_26_3.length; i++) {
+            if (callback[i] != ENTITY_SUBMIT_26_3[i]) {
                 throw new IllegalStateException(
                         methodName + " callback parameter " + i + " mismatch: expected "
-                                + ENTITY_SUBMIT_26_2[i].getName() + " but found " + callback[i].getName()
+                                + ENTITY_SUBMIT_26_3[i].getName() + " but found " + callback[i].getName()
                 );
             }
         }

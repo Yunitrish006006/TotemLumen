@@ -1,6 +1,6 @@
 package dev.totem.lumen.vulkan;
 
-import com.mojang.blaze3d.vulkan.VulkanDevice;
+import com.mojang.renderpearl.backend.vulkan.VulkanDevice;
 import dev.totem.lumen.TotemLumenClient;
 import net.fabricmc.loader.api.FabricLoader;
 import org.lwjgl.PointerBuffer;

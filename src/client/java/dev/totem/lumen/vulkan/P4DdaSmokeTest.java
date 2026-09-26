@@ -284,7 +284,7 @@ public final class P4DdaSmokeTest {
             FrameSnapshot frame,
             List<SectionSnapshot> sections,
             Probe probe,
-            com.mojang.blaze3d.vulkan.VulkanDevice device,
+            com.mojang.renderpearl.backend.vulkan.VulkanDevice device,
             VulkanCapabilities capabilities
     ) {
         int sectionCount = sections.size();
