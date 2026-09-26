@@ -7,6 +7,9 @@ public final class RgbHotPathVerifier {
 
     public static void main(String[] args) {
         ClientGameplayLightPredictor.verifySourceIndex();
+        ClientGameplayLightPredictor.verifyScanScheduling();
+        ClientGameplayLightPredictor.verifyRebuildOverlap();
+        ClientGameplayLightPredictor.verifyDiscoveredSourceFastPath();
 
         String dimension = "minecraft:overworld";
         ClientGameplayLightField.clear();
@@ -30,6 +33,6 @@ public final class RgbHotPathVerifier {
         } finally {
             ClientGameplayLightField.clear();
         }
-        System.out.println("RGB hot-path verification PASS: localSources=true, negativeSections=true, lookupInvalidation=true");
+        System.out.println("RGB hot-path verification PASS: localSources=true, negativeSections=true, lookupInvalidation=true, scanScheduling=true, rebuildOverlap=true, discoveredSourceFastPath=true");
     }
 }

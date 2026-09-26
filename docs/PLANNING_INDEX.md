@@ -17,6 +17,7 @@ This file is the repository index for design plans and decision tables. Architec
 | P17 dynamic entities | [`P17_DYNAMIC_ENTITIES.md`](P17_DYNAMIC_ENTITIES.md) | Player/LivingEntity renderer capture, section/global broad phase, generic material ABI, upload optimizations, runtime coverage and remaining renderer families |
 | P18 resource-pack / LabPBR | [`P18_RESOURCE_PACK_LABPBR.md`](P18_RESOURCE_PACK_LABPBR.md) | renderer-resolved texture identity, LabPBR decode/shading, animated PBR textures, alpha coverage and P18D fidelity follow-ups |
 | Renderer settings / render profiles | [`RENDERER_SETTINGS.md`](RENDERER_SETTINGS.md) | Alpha 59 Video Settings integration, Quality & Performance render profile UI, current quality ranges and runtime ABI |
+| Lumen profile performance experiments | [`LUMEN_PROFILE_PERFORMANCE_PLAN.md`](LUMEN_PROFILE_PERFORMANCE_PLAN.md) | Alpha 60 Apple M4 baseline, reproducible measurements, lookup/lifecycle gates, primary-hit reuse, GI follow-up and conditional rasterized-primary prototype |
 | Server gameplay-light phases | [`GAMEPLAY_LIGHTING_ROADMAP.md`](GAMEPLAY_LIGHTING_ROADMAP.md) | GL0–GL5 implementation/validation roadmap |
 | Authoritative gameplay-light design | [`SERVER_GAMEPLAY_LIGHTING.md`](SERVER_GAMEPLAY_LIGHTING.md) | storage, propagation, spawn policy, sky/environment, budgets, resource estimates, validation matrix |
 | Data-pack block lighting | [`LIGHTING_WORLD_RULES.md`](LIGHTING_WORLD_RULES.md) | `emission_color`, `gameplay_strength`, reload/sync semantics |
