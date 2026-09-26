@@ -6,6 +6,7 @@ import dev.totem.lumen.config.ServerLightingConfigStore;
 import dev.totem.lumen.network.ServerLightingViewPackets;
 import dev.totem.lumen.world.EffectiveLightingRules;
 import dev.totem.lumen.world.LightingWorldRule;
+import dev.totem.lumen.world.LightingWorldRuleSet;
 import dev.totem.lumen.world.LightingWorldRulesReloadListener;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -163,31 +164,19 @@ public final class ServerLightingViewService {
         return result;
     }
 
-    private static List<ServerLightingViewPackets.Entry> blockEntries(String packId) {
+    static List<ServerLightingViewPackets.Entry> blockEntries(String packId) {
         EffectiveLightingRules.Snapshot snapshot = EffectiveLightingRules.current();
         List<ServerLightingViewPackets.Entry> result = new ArrayList<>();
-        List<SourceBlock> sources;
-        if (packId.isEmpty()) {
-            sources = blockSources();
-        } else {
-            sources = LightingWorldRulesReloadListener.rulesForPack(packId).rules().keySet().stream()
-                    .sorted(Comparator.comparing(Identifier::toString))
-                    .limit(8_192)
-                    .map(id -> {
-                        Block block = BuiltInRegistries.BLOCK.getValue(id);
-                        int emission = block == null ? 0 : block.getStateDefinition().getPossibleStates()
-                                .stream().mapToInt(state -> state.getLightEmission()).max().orElse(0);
-                        return new SourceBlock(id, emission,
-                                block != null && block.defaultBlockState().getLightEmission() > 0);
-                    }).toList();
-        }
-        for (SourceBlock source : sources) {
-            LightingWorldRule rule = packId.isEmpty() ? snapshot.rules().ruleFor(source.id())
-                    : LightingWorldRulesReloadListener.rulesForPack(packId).ruleFor(source.id());
+        LightingWorldRuleSet selectedRules = packId.isEmpty() ? LightingWorldRuleSet.EMPTY
+                : LightingWorldRulesReloadListener.rulesForPack(packId);
+        // Include sources without a rule in the selected pack so the editor can add them there.
+        for (SourceBlock source : blockSources()) {
+            LightingWorldRule selectedRule = selectedRules.ruleFor(source.id());
+            LightingWorldRule rule = selectedRule == null ? snapshot.rules().ruleFor(source.id()) : selectedRule;
             EmissionColor color = rule == null
                     ? DefaultEmissionColors.forBlock(source.id().toString(), source.emission())
                     : new EmissionColor(rule.emissionR(), rule.emissionG(), rule.emissionB());
-            int origin = !packId.isEmpty() && snapshot.origins().get(source.id())
+            int origin = selectedRule != null && snapshot.origins().get(source.id())
                     != EffectiveLightingRules.Origin.SERVER_CONFIG
                     ? ("totem-lumen:default_lighting".equals(packId) ? 3 : 1)
                     : switch (snapshot.origins().get(source.id())) {
@@ -199,7 +188,8 @@ public final class ServerLightingViewService {
             result.add(new ServerLightingViewPackets.Entry(source.id(), blockIcon(source.id()), origin,
                     color.red(), color.green(), color.blue(), 0, 0, 0,
                     rule == null ? -1 : rule.gameplayStrength(), source.defaultEmits(),
-                    source.emission() == 0 ? "non_emissive" : ""));
+                    !packId.isEmpty() && selectedRule == null ? "not_in_pack"
+                            : source.emission() == 0 ? "non_emissive" : ""));
         }
         return result;
     }
@@ -250,10 +240,13 @@ public final class ServerLightingViewService {
         return BuiltInRegistries.ITEM.getKey(item);
     }
 
-    private static Identifier blockIcon(Identifier id) {
+    static Identifier blockIcon(Identifier id) {
         Block block = BuiltInRegistries.BLOCK.getValue(id);
         Item item = block == null ? Items.AIR : block.asItem();
         if (item != Items.AIR) return itemId(item);
+        if (id.getPath().equals("candle_cake") || id.getPath().endsWith("_candle_cake")) {
+            return itemId(Items.CAKE);
+        }
         item = switch (id.getPath()) {
             case "wall_torch" -> Items.TORCH;
             case "soul_wall_torch" -> Items.SOUL_TORCH;
@@ -262,7 +255,6 @@ public final class ServerLightingViewService {
             case "fire" -> Items.FLINT_AND_STEEL;
             case "soul_fire" -> Items.SOUL_TORCH;
             case "cave_vines", "cave_vines_plant" -> Items.GLOW_BERRIES;
-            case "candle_cake" -> Items.CANDLE;
             case "nether_portal" -> Items.OBSIDIAN;
             case "end_portal", "end_gateway" -> Items.ENDER_EYE;
             default -> Items.GLOWSTONE_DUST;

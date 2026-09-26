@@ -10,7 +10,7 @@ import net.minecraft.network.chat.Component;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Read-only server-reported enabled packs; no selection means the effective composition. */
+/** Server-reported enabled packs; selection also chooses the local edit destination. */
 public final class ServerLightingPackSelectionScreen extends Screen {
     private final ServerLightingPreviewScreen parent;
     private final List<Button> rows = new ArrayList<>();

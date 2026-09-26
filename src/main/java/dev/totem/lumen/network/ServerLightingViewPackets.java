@@ -10,8 +10,9 @@ import java.util.List;
 
 /** Versioned, bounded, read-only server-lighting preview protocol. */
 public final class ServerLightingViewPackets {
-    public static final int VERSION = 3;
-    public static final int PAGE_SIZE = 24;
+    public static final int VERSION = 4;
+    public static final int PAGE_SIZE = 96;
+    public static final int MAX_PAGE_INDEX = (8_192 - 1) / PAGE_SIZE;
     public static final int MAX_PACKS = 128;
     public static final int BLOCKS = 0;
     public static final int SPAWN = 1;
@@ -117,7 +118,7 @@ public final class ServerLightingViewPackets {
 
         public PageRequest {
             if (revision < 0 || category < BLOCKS || category > DIMENSIONS || page < 0
-                    || page > 341 || query == null || query.length() > 64
+                    || page > MAX_PAGE_INDEX || query == null || query.length() > 64
                     || packId == null || packId.length() > 256) {
                 throw new IllegalArgumentException("invalid lighting preview page request");
             }
@@ -151,7 +152,7 @@ public final class ServerLightingViewPackets {
 
         public Page {
             if (revision < 0 || category < BLOCKS || category > DIMENSIONS || page < 0
-                    || page > 341 || query == null || query.length() > 64
+                    || page > MAX_PAGE_INDEX || query == null || query.length() > 64
                     || packId == null || packId.length() > 256
                     || total < 0 || total > 8_192 || entries == null
                     || entries.size() > PAGE_SIZE) {

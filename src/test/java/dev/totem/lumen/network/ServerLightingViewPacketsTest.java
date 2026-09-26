@@ -26,7 +26,8 @@ final class ServerLightingViewPacketsTest {
         assertThrows(IllegalArgumentException.class,
                 () -> new ServerLightingViewPackets.PackInfo("test", "Test", true, Float.NaN, 1));
         assertThrows(IllegalArgumentException.class,
-                () -> new ServerLightingViewPackets.PageRequest(1, 0, 342, "", ""));
+                () -> new ServerLightingViewPackets.PageRequest(1, 0,
+                        ServerLightingViewPackets.MAX_PAGE_INDEX + 1, "", ""));
         assertThrows(IllegalArgumentException.class,
                 () -> new ServerLightingViewPackets.PageRequest(1, 0, 0, "x".repeat(65), ""));
         assertThrows(IllegalArgumentException.class,
@@ -45,8 +46,9 @@ final class ServerLightingViewPacketsTest {
         assertEquals("totem-lumen:default_lighting", page.packId());
         assertThrows(UnsupportedOperationException.class, () -> page.entries().add(entry));
         assertThrows(IllegalArgumentException.class,
-                () -> new ServerLightingViewPackets.Page(1, 0, 0, "", "", 25,
-                        Collections.nCopies(25, entry)));
+                () -> new ServerLightingViewPackets.Page(1, 0, 0, "", "",
+                        ServerLightingViewPackets.PAGE_SIZE + 1,
+                        Collections.nCopies(ServerLightingViewPackets.PAGE_SIZE + 1, entry)));
         assertThrows(IllegalArgumentException.class,
                 () -> new ServerLightingViewPackets.Entry(entry.id(), entry.iconItemId(), 0,
                         Float.NaN, 0, 0, 0, 0, 0, -1, false, ""));

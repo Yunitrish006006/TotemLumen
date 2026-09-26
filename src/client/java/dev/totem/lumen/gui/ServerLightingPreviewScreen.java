@@ -7,6 +7,7 @@ import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
@@ -24,6 +25,10 @@ import java.util.Map;
 public final class ServerLightingPreviewScreen extends Screen {
     private final Screen parent;
     private final List<Button> rows = new ArrayList<>();
+    private final List<Button> gridCells = new ArrayList<>();
+    private static final int GRID_STEP = 24;
+    private static final int GRID_CELL_SIZE = 22;
+    private static final int SCROLLBAR_WIDTH = 6;
     private EditBox search;
     private Button previous;
     private Button next;
@@ -40,6 +45,13 @@ public final class ServerLightingPreviewScreen extends Screen {
     private int category = ServerLightingViewPackets.BLOCKS;
     private int pageNumber;
     private int scroll;
+    private int gridScrollRow;
+    private int gridColumns;
+    private int gridVisibleRows;
+    private int gridX;
+    private int scrollbarX;
+    private boolean draggingScrollbar;
+    private double scrollbarGrabY;
     private int left;
     private int panelWidth;
     private int listY;
@@ -59,6 +71,7 @@ public final class ServerLightingPreviewScreen extends Screen {
     @Override
     protected void init() {
         rows.clear();
+        gridCells.clear();
         panelWidth = Math.min(460, Math.max(200, this.width - 24));
         left = (this.width - panelWidth) / 2;
         int gap = 4;
@@ -89,12 +102,27 @@ public final class ServerLightingPreviewScreen extends Screen {
             query = value;
             pageNumber = 0;
             scroll = 0;
+            gridScrollRow = 0;
             selected = null;
             pendingSearchTicks = 6;
         });
         this.addRenderableWidget(search);
 
         listY = tabsY + 49;
+        gridColumns = Math.max(1, Math.min(14, (panelWidth - 14) / GRID_STEP));
+        gridVisibleRows = Math.max(1, Math.min(6, (height - listY - 175) / GRID_STEP));
+        int gridWidth = gridColumns * GRID_STEP + SCROLLBAR_WIDTH + 4;
+        gridX = left + (panelWidth - gridWidth) / 2;
+        scrollbarX = gridX + gridColumns * GRID_STEP + 4;
+        for (int slot = 0; slot < gridColumns * gridVisibleRows; slot++) {
+            final int cellSlot = slot;
+            Button cell = this.addRenderableWidget(Button.builder(Component.empty(), ignored -> selectGrid(cellSlot))
+                    .createNarration(ignored -> gridCellNarration(cellSlot))
+                    .bounds(gridX + slot % gridColumns * GRID_STEP,
+                            listY + slot / gridColumns * GRID_STEP, GRID_CELL_SIZE, GRID_CELL_SIZE)
+                    .build());
+            gridCells.add(cell);
+        }
         int visibleRows = Math.max(1, Math.min(8, (this.height - listY - 73) / 22));
         for (int index = 0; index < visibleRows; index++) {
             final int slot = index;
@@ -125,7 +153,7 @@ public final class ServerLightingPreviewScreen extends Screen {
                 Component.translatable("screen.totem-lumen.server_preview.save_all"), ignored -> {
                     if (!drafts.isEmpty() && !staleDrafts) {
                         minecraft.gui.setScreen(new LightingRuleBatchSaveScreen(this, List.copyOf(drafts.values()),
-                                draftRevision));
+                                draftRevision, selectedPackId));
                     }
                 }).bounds(left + bottomThird + 4, this.height - 28, bottomThird, 20).build());
         this.addRenderableWidget(Button.builder(Component.translatable("gui.done"),
@@ -158,6 +186,7 @@ public final class ServerLightingPreviewScreen extends Screen {
                     .noneMatch(pack -> pack.id().equals(selectedPackId))) selectedPackId = "";
             pageNumber = 0;
             scroll = 0;
+            gridScrollRow = 0;
             selected = null;
             requestPage();
         }
@@ -171,6 +200,7 @@ public final class ServerLightingPreviewScreen extends Screen {
         if (fresh != displayed) {
             displayed = fresh;
             scroll = 0;
+            gridScrollRow = 0;
             updateRows();
         }
     }
@@ -181,14 +211,16 @@ public final class ServerLightingPreviewScreen extends Screen {
         category = nextCategory;
         pageNumber = 0;
         scroll = 0;
+        gridScrollRow = 0;
         selected = null;
         requestPage();
     }
 
     private void movePage(int delta) {
         cancelCloseWarning();
-        pageNumber = Math.max(0, Math.min(341, pageNumber + delta));
+        pageNumber = Math.max(0, Math.min(ServerLightingViewPackets.MAX_PAGE_INDEX, pageNumber + delta));
         scroll = 0;
+        gridScrollRow = 0;
         selected = null;
         requestPage();
     }
@@ -210,57 +242,177 @@ public final class ServerLightingPreviewScreen extends Screen {
         }
     }
 
+    private void selectGrid(int slot) {
+        if (displayed == null) return;
+        cancelCloseWarning();
+        int index = (gridScrollRow + slot / gridColumns) * gridColumns + slot % gridColumns;
+        if (index < displayed.entries().size()) {
+            selected = displayed.entries().get(index);
+            updateRows();
+        }
+    }
+
     private void moveScroll(int delta) {
         if (displayed == null) return;
         cancelCloseWarning();
-        scroll = Math.max(0, Math.min(Math.max(0, displayed.entries().size() - rows.size()), scroll + delta));
+        if (category == ServerLightingViewPackets.BLOCKS) {
+            gridScrollRow = Math.max(0, Math.min(maxGridScrollRow(), gridScrollRow + delta));
+        } else {
+            scroll = Math.max(0, Math.min(Math.max(0, displayed.entries().size() - rows.size()), scroll + delta));
+        }
         updateRows();
     }
 
+    private int maxGridScrollRow() {
+        if (displayed == null) return 0;
+        return Math.max(0, (displayed.entries().size() + gridColumns - 1) / gridColumns - gridVisibleRows);
+    }
+
+    private net.minecraft.network.chat.MutableComponent gridCellNarration(int slot) {
+        int index = (gridScrollRow + slot / gridColumns) * gridColumns + slot % gridColumns;
+        if (displayed == null || index >= displayed.entries().size()) return Component.empty();
+        ServerLightingViewPackets.Entry entry = displayed.entries().get(index);
+        return blockName(entry).copy().append(Component.literal(" " + entry.id()));
+    }
+
+    private int scrollbarHeight() {
+        int trackHeight = gridVisibleRows * GRID_STEP;
+        int totalRows = gridVisibleRows + maxGridScrollRow();
+        return Math.max(12, trackHeight * gridVisibleRows / Math.max(1, totalRows));
+    }
+
+    private int scrollbarThumbY() {
+        int travel = gridVisibleRows * GRID_STEP - scrollbarHeight();
+        return listY + (maxGridScrollRow() == 0 ? 0 : travel * gridScrollRow / maxGridScrollRow());
+    }
+
+    private void setScrollbarFromMouse(double mouseY) {
+        int travel = gridVisibleRows * GRID_STEP - scrollbarHeight();
+        int offset = (int) Math.round(mouseY - scrollbarGrabY - listY);
+        gridScrollRow = travel <= 0 ? 0 : Math.max(0, Math.min(maxGridScrollRow(),
+                (int) Math.round((double) offset * maxGridScrollRow() / travel)));
+        updateRows();
+    }
+
+    @Override
+    public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
+        if (event.button() == 0 && category == ServerLightingViewPackets.BLOCKS
+                && maxGridScrollRow() > 0 && event.x() >= scrollbarX - 2
+                && event.x() < scrollbarX + SCROLLBAR_WIDTH + 2
+                && event.y() >= listY && event.y() < listY + gridVisibleRows * GRID_STEP) {
+            draggingScrollbar = true;
+            int thumbY = scrollbarThumbY();
+            scrollbarGrabY = event.y() >= thumbY && event.y() < thumbY + scrollbarHeight()
+                    ? event.y() - thumbY : scrollbarHeight() / 2.0;
+            setScrollbarFromMouse(event.y());
+            return true;
+        }
+        return super.mouseClicked(event, doubleClick);
+    }
+
+    @Override
+    public boolean mouseDragged(MouseButtonEvent event, double dragX, double dragY) {
+        if (draggingScrollbar) {
+            setScrollbarFromMouse(event.y());
+            return true;
+        }
+        return super.mouseDragged(event, dragX, dragY);
+    }
+
+    @Override
+    public boolean mouseReleased(MouseButtonEvent event) {
+        if (draggingScrollbar && event.button() == 0) {
+            draggingScrollbar = false;
+            return true;
+        }
+        return super.mouseReleased(event);
+    }
+
+    @Override
+    public boolean mouseScrolled(double mouseX, double mouseY, double horizontal, double vertical) {
+        if (category == ServerLightingViewPackets.BLOCKS && displayed != null
+                && mouseX >= gridX && mouseX < scrollbarX + SCROLLBAR_WIDTH + 2
+                && mouseY >= listY && mouseY < listY + gridVisibleRows * GRID_STEP
+                && vertical != 0) {
+            moveScroll(vertical > 0 ? -1 : 1);
+            return true;
+        }
+        return super.mouseScrolled(mouseX, mouseY, horizontal, vertical);
+    }
+
+    private void drawGridScrollbar(GuiGraphicsExtractor graphics) {
+        if (maxGridScrollRow() == 0) return;
+        int bottom = listY + gridVisibleRows * GRID_STEP;
+        graphics.fill(scrollbarX, listY, scrollbarX + SCROLLBAR_WIDTH, bottom, 0xFF202020);
+        int thumbY = scrollbarThumbY();
+        graphics.fill(scrollbarX, thumbY, scrollbarX + SCROLLBAR_WIDTH,
+                thumbY + scrollbarHeight(), draggingScrollbar ? 0xFFFFFFFF : 0xFFAAAAAA);
+    }
+
     private void updateRows() {
+        boolean blocks = category == ServerLightingViewPackets.BLOCKS;
+        for (int slot = 0; slot < gridCells.size(); slot++) {
+            Button cell = gridCells.get(slot);
+            int entryIndex = (gridScrollRow + slot / gridColumns) * gridColumns + slot % gridColumns;
+            boolean available = blocks && displayed != null && entryIndex < displayed.entries().size();
+            cell.visible = available;
+            cell.active = available;
+            if (available) {
+                ServerLightingViewPackets.Entry entry = displayed.entries().get(entryIndex);
+                Component name = blockName(entry);
+                var tooltip = name.copy().append(Component.literal("\n" + entry.id()));
+                if (entry.detail().equals("not_in_pack")) {
+                    tooltip.append(Component.literal("\n"))
+                            .append(Component.translatable("screen.totem-lumen.server_preview.not_in_pack"));
+                }
+                if (drafts.containsKey(entry.id())) {
+                    tooltip.append(Component.literal("\n"))
+                            .append(Component.translatable("screen.totem-lumen.server_preview.pending_tooltip",
+                                    entry.id()).withStyle(ChatFormatting.YELLOW));
+                }
+                cell.setTooltip(Tooltip.create(tooltip));
+            }
+        }
         for (int index = 0; index < rows.size(); index++) {
             Button row = rows.get(index);
             int entryIndex = scroll + index;
-            boolean available = displayed != null && entryIndex < displayed.entries().size();
+            boolean available = !blocks && displayed != null && entryIndex < displayed.entries().size();
             row.visible = available;
             row.active = available;
             if (available) {
                 ServerLightingViewPackets.Entry entry = displayed.entries().get(entryIndex);
-                Component label = category == ServerLightingViewPackets.BLOCKS
-                        ? Component.literal(blockName(entry) + " · " + entry.id())
-                        : Component.literal(entry.id().toString());
-                boolean pending = category == ServerLightingViewPackets.BLOCKS
-                        && drafts.containsKey(entry.id());
-                row.setMessage(pending
-                        ? Component.literal("* ").withStyle(ChatFormatting.YELLOW)
-                                .append(label.copy().withStyle(ChatFormatting.YELLOW))
-                        : label);
-                row.setTooltip(Tooltip.create(pending
-                        ? Component.translatable("screen.totem-lumen.server_preview.pending_tooltip", entry.id())
-                        : Component.literal(entry.id().toString())));
+                row.setMessage(Component.literal(entry.id().toString()));
+                row.setTooltip(Tooltip.create(Component.literal(entry.id().toString())));
             }
         }
         if (previous != null) previous.active = pageNumber > 0;
         if (next != null) next.active = displayed != null
                 && (pageNumber + 1) * ServerLightingViewPackets.PAGE_SIZE < displayed.total();
-        if (scrollUp != null) scrollUp.active = scroll > 0;
+        if (scrollUp != null) scrollUp.visible = !blocks;
+        if (scrollDown != null) scrollDown.visible = !blocks;
+        if (scrollUp != null) scrollUp.active = !blocks && scroll > 0;
         if (scrollDown != null) scrollDown.active = displayed != null
-                && scroll + rows.size() < displayed.entries().size();
+                && !blocks && scroll + rows.size() < displayed.entries().size();
         if (editRule != null) editRule.active = selected != null
                 && category == ServerLightingViewPackets.BLOCKS
                 && selected.origin() != 2 && !staleDrafts
+                && editableSelection()
                 && ClientLightingPackManager.canManage(minecraft);
         if (saveAll != null) saveAll.active = !drafts.isEmpty() && !staleDrafts
+                && editableSelection()
                 && ClientLightingPackManager.canManage(minecraft);
         if (choosePack != null) {
             choosePack.setMessage(packLabel());
+            choosePack.active = drafts.isEmpty();
             ServerLightingViewPackets.Summary summary = ClientServerLightingViewState.summary();
             if (summary != null) {
                 String names = summary.enabledPacks().stream().limit(8)
                         .map(ServerLightingViewPackets.PackInfo::title)
                         .collect(java.util.stream.Collectors.joining("\n"));
                 if (summary.enabledPackCount() > 8) names += "\n…";
-                choosePack.setTooltip(Tooltip.create(Component.literal(names)));
+                choosePack.setTooltip(Tooltip.create(drafts.isEmpty()
+                        ? Component.literal(names)
+                        : Component.translatable("screen.totem-lumen.server_preview.pack_locked")));
             }
         }
     }
@@ -275,8 +427,6 @@ public final class ServerLightingPreviewScreen extends Screen {
                     width / 2, 48, 0xFFFFAA66);
             return;
         }
-        graphics.text(font, Component.translatable("screen.totem-lumen.server_preview.revision",
-                summary.revision()), left, 29, 0xFFAADDDD);
         int half = panelWidth / 2;
         boolean compact = panelWidth < 380;
         boolean shortScreen = height < 300;
@@ -320,6 +470,29 @@ public final class ServerLightingPreviewScreen extends Screen {
         if (displayed == null) {
             graphics.text(font, Component.translatable("screen.totem-lumen.server_preview.loading"),
                     left, listY + 5, 0xFFAAAAAA);
+        } else if (category == ServerLightingViewPackets.BLOCKS) {
+            for (int slot = 0; slot < gridCells.size(); slot++) {
+                int entryIndex = (gridScrollRow + slot / gridColumns) * gridColumns + slot % gridColumns;
+                if (entryIndex >= displayed.entries().size()) continue;
+                ServerLightingViewPackets.Entry entry = displayed.entries().get(entryIndex);
+                Button cell = gridCells.get(slot);
+                int x = cell.getX();
+                int y = cell.getY();
+                if (entry == selected || drafts.containsKey(entry.id())) {
+                    int color = entry == selected ? 0xFFB0E8FF : 0xFFFFD450;
+                    graphics.fill(x, y, x + GRID_CELL_SIZE, y + 1, color);
+                    graphics.fill(x, y + GRID_CELL_SIZE - 1, x + GRID_CELL_SIZE, y + GRID_CELL_SIZE, color);
+                    graphics.fill(x, y, x + 1, y + GRID_CELL_SIZE, color);
+                    graphics.fill(x + GRID_CELL_SIZE - 1, y, x + GRID_CELL_SIZE, y + GRID_CELL_SIZE, color);
+                }
+                graphics.item(icon(entry), x + 3, y + 3);
+            }
+            drawGridScrollbar(graphics);
+            graphics.text(font, Component.translatable("screen.totem-lumen.server_preview.page",
+                    pageNumber + 1,
+                    Math.max(1, (displayed.total() + ServerLightingViewPackets.PAGE_SIZE - 1)
+                            / ServerLightingViewPackets.PAGE_SIZE), displayed.total()),
+                    left, height - 77, 0xFFAAAAAA);
         } else {
             for (int index = 0; index < rows.size(); index++) {
                 int entryIndex = scroll + index;
@@ -328,21 +501,25 @@ public final class ServerLightingPreviewScreen extends Screen {
                         listY + index * 22 + 2);
             }
             graphics.text(font, Component.translatable("screen.totem-lumen.server_preview.page",
-                    pageNumber + 1, Math.max(1, (displayed.total() + 23) / 24), displayed.total()),
+                    pageNumber + 1,
+                    Math.max(1, (displayed.total() + ServerLightingViewPackets.PAGE_SIZE - 1)
+                            / ServerLightingViewPackets.PAGE_SIZE), displayed.total()),
                     left, height - 77, 0xFFAAAAAA);
         }
         if (!drafts.isEmpty()) {
-            graphics.text(font, Component.translatable("screen.totem-lumen.server_preview.pending_count",
-                    drafts.size()), left, height - 94, 0xFFFFFF55);
+            graphics.textWithWordWrap(font, Component.translatable(
+                    "screen.totem-lumen.server_preview.pending_target", drafts.size(), editingPackTitle()),
+                    left, height - 101, panelWidth, 0xFFFFFF55);
         }
         if (!status.getString().isEmpty()) {
-            graphics.textWithWordWrap(font, status, left, height - 108, panelWidth, 0xFFFFFF55);
+            graphics.textWithWordWrap(font, status, left, height - 124, panelWidth, 0xFFFFFF55);
         }
         if (selected != null) drawDetails(graphics, selected);
     }
 
     private void drawDetails(GuiGraphicsExtractor graphics, ServerLightingViewPackets.Entry entry) {
-        int y = listY + rows.size() * 22 + 4;
+        int y = listY + (category == ServerLightingViewPackets.BLOCKS
+                ? gridVisibleRows * GRID_STEP : rows.size() * 22) + 4;
         if (y + 29 > height - 77) return;
         LightingRuleDraft pending = category == ServerLightingViewPackets.BLOCKS
                 ? drafts.get(entry.id()) : null;
@@ -374,6 +551,11 @@ public final class ServerLightingPreviewScreen extends Screen {
         graphics.text(font, detail, left, y + 16, pending == null ? 0xFFCCCCCC : 0xFFFFFF55);
         if (y + 42 < height - 77) {
             if (category == ServerLightingViewPackets.BLOCKS
+                    && entry.detail().equals("not_in_pack")) {
+                graphics.text(font,
+                        Component.translatable("screen.totem-lumen.server_preview.not_in_pack"),
+                        left, y + 29, 0xFFAAAAAA);
+            } else if (category == ServerLightingViewPackets.BLOCKS
                     && entry.detail().equals("non_emissive")) {
                 graphics.text(font,
                         Component.translatable("screen.totem-lumen.server_preview.non_emissive"),
@@ -412,10 +594,9 @@ public final class ServerLightingPreviewScreen extends Screen {
         });
     }
 
-    private String blockName(ServerLightingViewPackets.Entry entry) {
+    private Component blockName(ServerLightingViewPackets.Entry entry) {
         Block block = BuiltInRegistries.BLOCK.getValue(entry.id());
-        if (block == null || block.asItem() == Items.AIR) return entry.id().toString();
-        return new ItemStack(block.asItem()).getHoverName().getString();
+        return block == null ? Component.literal(entry.id().toString()) : block.getName();
     }
 
     private ItemStack icon(ServerLightingViewPackets.Entry entry) {
@@ -442,18 +623,22 @@ public final class ServerLightingPreviewScreen extends Screen {
         } else {
             drafts.remove(draft.id());
         }
-        if (drafts.isEmpty()) draftRevision = -1L;
+        if (drafts.isEmpty()) {
+            draftRevision = -1L;
+        }
         closePending = false;
         status = Component.empty();
         updateRows();
     }
 
-    void saved() {
+    void saved(boolean createdNew) {
         drafts.clear();
         draftRevision = -1L;
         staleDrafts = false;
         closePending = false;
-        status = Component.translatable("screen.totem-lumen.server_preview.saved");
+        status = Component.translatable(createdNew
+                ? "screen.totem-lumen.server_preview.saved"
+                : "screen.totem-lumen.server_preview.updated");
         requestPage();
     }
 
@@ -461,24 +646,50 @@ public final class ServerLightingPreviewScreen extends Screen {
         ServerLightingViewPackets.Summary summary = ClientServerLightingViewState.summary();
         if (summary == null || (!packId.isEmpty() && summary.enabledPacks().stream()
                 .noneMatch(pack -> pack.id().equals(packId)))) return;
+        if (!drafts.isEmpty()) {
+            status = Component.translatable("screen.totem-lumen.server_preview.pack_locked");
+            return;
+        }
         if (selectedPackId.equals(packId)) return;
         selectedPackId = packId;
         pageNumber = 0;
         scroll = 0;
+        gridScrollRow = 0;
         selected = null;
         cancelCloseWarning();
+        status = editableSelection() ? Component.empty()
+                : Component.translatable("screen.totem-lumen.server_preview.pack_read_only");
         requestPage();
+    }
+
+    private boolean editableSelection() {
+        return selectedPackId.isEmpty() || ClientLightingPackManager.canManage(minecraft)
+                && ClientLightingPackManager.canEditExisting(selectedPackId);
     }
 
     private Component packLabel() {
         ServerLightingViewPackets.Summary summary = ClientServerLightingViewState.summary();
         if (selectedPackId.isEmpty() || summary == null) {
-            return Component.translatable("screen.totem-lumen.server_preview.pack_combined");
+            return Component.translatable(ClientLightingPackManager.canManage(minecraft)
+                    ? "screen.totem-lumen.server_preview.pack_combined"
+                    : "screen.totem-lumen.server_preview.pack_combined_read_only");
         }
         return summary.enabledPacks().stream().filter(pack -> pack.id().equals(selectedPackId))
                 .findFirst().<Component>map(pack -> Component.translatable(
-                        "screen.totem-lumen.server_preview.pack_selected", pack.title()))
+                        editableSelection() ? "screen.totem-lumen.server_preview.pack_editing"
+                                : "screen.totem-lumen.server_preview.pack_selected", pack.title()))
                 .orElseGet(() -> Component.translatable("screen.totem-lumen.server_preview.pack_combined"));
+    }
+
+    private Component editingPackTitle() {
+        if (selectedPackId.isEmpty()) {
+            return Component.translatable("screen.totem-lumen.batch_save.new_pack");
+        }
+        ServerLightingViewPackets.Summary summary = ClientServerLightingViewState.summary();
+        if (summary == null) return Component.literal(selectedPackId);
+        return summary.enabledPacks().stream().filter(pack -> pack.id().equals(selectedPackId))
+                .findFirst().<Component>map(pack -> Component.literal(pack.title()))
+                .orElseGet(() -> Component.literal(selectedPackId));
     }
 
     private void cancelCloseWarning() {

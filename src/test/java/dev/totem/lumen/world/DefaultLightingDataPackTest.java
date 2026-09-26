@@ -12,7 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 final class DefaultLightingDataPackTest {
     @Test
-    void bundledPackContainsMetadataAndDefaultPalette() throws Exception {
+    void bundledPackContainsMetadataPaletteAndBrightnessTuning() throws Exception {
         String root = "resourcepacks/default_lighting/";
         try (var metadataStream = getClass().getClassLoader().getResourceAsStream(root + "pack.mcmeta")) {
             assertNotNull(metadataStream);
@@ -28,6 +28,14 @@ final class DefaultLightingDataPackTest {
                     StandardCharsets.UTF_8)).getAsJsonObject();
             assertEquals(3, palette.getAsJsonArray("fallback").size());
             assertTrue(palette.getAsJsonArray("matchers").size() > 10);
+        }
+        try (var tuningStream = getClass().getClassLoader().getResourceAsStream(
+                root + "data/totem-lumen/totem_lumen/light_tuning.json")) {
+            assertNotNull(tuningStream);
+            var tuning = JsonParser.parseReader(new InputStreamReader(tuningStream,
+                    StandardCharsets.UTF_8)).getAsJsonObject();
+            assertEquals(2.0f, tuning.get("brightness_multiplier").getAsFloat());
+            assertEquals(1.0f, tuning.get("attenuation_multiplier").getAsFloat());
         }
         try (var spawnStream = getClass().getClassLoader().getResourceAsStream(
                 root + "data/totem-lumen/totem_lumen/spawn_light/nether_mobs.json")) {
