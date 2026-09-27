@@ -14,6 +14,7 @@ import dev.totem.lumen.integration.MinecraftBlockModelMeshResolver;
 import dev.totem.lumen.integration.P13EnvironmentCapture;
 import dev.totem.lumen.integration.SceneExtractionBridge;
 import dev.totem.lumen.integration.VanillaRgbLighting;
+import dev.totem.lumen.network.GameplayLightSectionsPayload;
 import dev.totem.lumen.network.LightingWorldRulesPayload;
 import dev.totem.lumen.network.HeldLightsPayload;
 import dev.totem.lumen.network.ServerLightingViewPackets;
@@ -75,6 +76,9 @@ public final class TotemLumenClient implements ClientModInitializer {
         });
         ClientPlayNetworking.registerGlobalReceiver(HeldLightsPayload.TYPE, (payload, context) ->
                 ClientHeldLightState.apply(payload)
+        );
+        ClientPlayNetworking.registerGlobalReceiver(GameplayLightSectionsPayload.TYPE, (payload, context) ->
+                ClientGameplayLightField.apply(payload)
         );
         ClientPlayNetworking.registerGlobalReceiver(ServerLightingViewPackets.Summary.TYPE,
                 (payload, context) -> ClientServerLightingViewState.apply(payload));
