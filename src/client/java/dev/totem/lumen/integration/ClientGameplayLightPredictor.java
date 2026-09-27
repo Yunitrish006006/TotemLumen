@@ -620,6 +620,109 @@ public final class ClientGameplayLightPredictor {
         return affected;
     }
 
+    private static Character putSource(BlockKey key, char packed) {
+        Character previous = sources.put(key, packed);
+        sourcesBySection.computeIfAbsent(
+                SectionKey.fromBlock(key.x, key.y, key.z), ignored -> new HashSet<>()
+        ).add(key);
+        return previous;
+    }
+
+    private static Character removeSource(BlockKey key) {
+        Character previous = sources.remove(key);
+        if (previous != null) {
+            unindexSource(key);
+        }
+        return previous;
+    }
+
+    private static void unindexSource(BlockKey key) {
+        SectionKey section = SectionKey.fromBlock(key.x, key.y, key.z);
+        Set<BlockKey> entries = sourcesBySection.get(section);
+        if (entries != null && entries.remove(key) && entries.isEmpty()) {
+            sourcesBySection.remove(section);
+        }
+    }
+
+    private static List<RebuildTask.Source> sourcesIn(Region region) {
+        List<RebuildTask.Source> result = new ArrayList<>();
+        for (int sectionY = Math.floorDiv(region.minY, 16); sectionY <= Math.floorDiv(region.maxY, 16); sectionY++) {
+            for (int sectionZ = Math.floorDiv(region.minZ, 16); sectionZ <= Math.floorDiv(region.maxZ, 16); sectionZ++) {
+                for (int sectionX = Math.floorDiv(region.minX, 16); sectionX <= Math.floorDiv(region.maxX, 16); sectionX++) {
+                    Set<BlockKey> entries = sourcesBySection.get(new SectionKey(sectionX, sectionY, sectionZ));
+                    if (entries == null) continue;
+                    for (BlockKey key : entries) {
+                        if (region.contains(key.x, key.y, key.z)) {
+                            Character packed = sources.get(key);
+                            if (packed != null) result.add(new RebuildTask.Source(key, packed));
+                        }
+                    }
+                }
+            }
+        }
+        result.sort(Comparator
+                .comparingInt((RebuildTask.Source source) -> source.position.y)
+                .thenComparingInt(source -> source.position.z)
+                .thenComparingInt(source -> source.position.x));
+        return result;
+    }
+
+    /** Deterministic build-time guard for negative-section indexing and source removal. */
+    static void verifySourceIndex() {
+        if (!sources.isEmpty() || !sourcesBySection.isEmpty()) {
+            throw new IllegalStateException("RGB source index verifier requires an unused predictor");
+        }
+        BlockKey left = new BlockKey(-17, 64, 3);
+        BlockKey right = new BlockKey(-16, 64, 3);
+        BlockKey distant = new BlockKey(160, 64, 3);
+        Region nearby = new Region(-20, 60, 0, -15, 70, 7);
+        try {
+            putSource(left, (char) 0xF321);
+            putSource(right, (char) 0xF456);
+            putSource(distant, (char) 0xF789);
+            if (sourcesIn(nearby).size() != 2) {
+                throw new IllegalStateException("RGB index must return only sources inside the region");
+            }
+            putSource(right, (char) 0xFABC);
+            if (sourcesIn(nearby).stream().noneMatch(source -> source.position.equals(right)
+                    && source.packed == (char) 0xFABC)) {
+                throw new IllegalStateException("RGB index must reflect source color changes");
+            }
+            removeSource(left);
+            if (sourcesIn(nearby).size() != 1 || sourcesBySection.containsKey(
+                    SectionKey.fromBlock(left.x, left.y, left.z))) {
+                throw new IllegalStateException("RGB index must remove obsolete source sections");
+            }
+        } finally {
+            sources.clear();
+            sourcesBySection.clear();
+        }
+    }
+
+    private static int refreshOverlappingRebuilds(List<Region> changedInfluences) {
+        if (changedInfluences.isEmpty()) {
+            return 0;
+        }
+        Set<SectionKey> stale = new HashSet<>();
+        pendingRebuilds.removeIf(task -> {
+            boolean overlaps = false;
+            for (Region influence : changedInfluences) {
+                if (task.region.intersects(influence)) {
+                    overlaps = true;
+                    break;
+                }
+            }
+            if (!overlaps) {
+                return false;
+            }
+            stale.add(task.anchor);
+            queuedRebuilds.remove(task.anchor);
+            return true;
+        });
+        stale.forEach(ClientGameplayLightPredictor::rescheduleCoreRebuild);
+        return stale.size();
+    }
+
     private static void scheduleInfluence(Region influence) {
         if (activeLevel == null) {
             return;
