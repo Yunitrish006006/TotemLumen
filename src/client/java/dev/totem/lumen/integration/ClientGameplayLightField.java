@@ -372,7 +372,6 @@ public final class ClientGameplayLightField {
             // propagation reads before finishLocalBatch publishes the next revision.
             localLookup.remove();
         }
-        int index = ((y & 15) << 8) | ((z & 15) << 4) | (x & 15);
         if (values[index] == (char) packed) {
             return false;
         }
