@@ -744,6 +744,7 @@ public final class ServerGameplayLightEngine {
         private final LevelChunkSection[] chunkSections;
         private final List<ServerSectionKey> dirtyMarks = new ArrayList<>();
         private final Set<ServerSectionKey> sourceAnchors = new LinkedHashSet<>();
+        private final Set<ServerBlockKey> observedEmitters = new HashSet<>();
         private int sectionIndex;
         private int voxelIndex;
         private boolean cancelled;
@@ -791,6 +792,7 @@ public final class ServerGameplayLightEngine {
                         int worldZ = (chunkKey.z << 4) + localZ;
                         char packed = sourceForState(state);
                         ServerBlockKey sourcePos = new ServerBlockKey(worldX, worldY, worldZ);
+                        observedEmitters.add(sourcePos);
                         updateIndexedSource(sourcePos, packed, true);
                         if (packed != 0) {
                             sourceAnchors.add(ServerSectionKey.fromBlock(worldX, worldY, worldZ));
@@ -816,8 +818,45 @@ public final class ServerGameplayLightEngine {
                 return;
             }
 
-            // Source anchors initialize their own 15-block influence volume.
+            // The persisted source index is only a warm hint. Reconcile it against the
+            // live chunk snapshot so offline world edits or a cache written before a crash cannot
+            // leave phantom emitters in the authoritative source index.
+            Set<ServerSectionKey> removedSourceAnchors = new LinkedHashSet<>();
+            Iterator<Map.Entry<ServerSectionKey, Map<ServerBlockKey, Character>>> sourceIterator =
+                    sources.entrySet().iterator();
+            while (sourceIterator.hasNext()) {
+                Map.Entry<ServerSectionKey, Map<ServerBlockKey, Character>> entry = sourceIterator.next();
+                ServerSectionKey sectionKey = entry.getKey();
+                if (sectionKey.x() != chunkKey.x || sectionKey.z() != chunkKey.z) {
+                    continue;
+                }
+                Iterator<Map.Entry<ServerBlockKey, Character>> bucketIterator =
+                        entry.getValue().entrySet().iterator();
+                while (bucketIterator.hasNext()) {
+                    Map.Entry<ServerBlockKey, Character> sourceEntry = bucketIterator.next();
+                    if (observedEmitters.contains(sourceEntry.getKey())) {
+                        continue;
+                    }
+                    if (sourceEntry.getValue() != 0) {
+                        removedSourceAnchors.add(ServerSectionKey.fromBlock(
+                                sourceEntry.getKey().x(),
+                                sourceEntry.getKey().y(),
+                                sourceEntry.getKey().z()
+                        ));
+                    }
+                    bucketIterator.remove();
+                }
+                if (entry.getValue().isEmpty()) {
+                    sourceIterator.remove();
+                }
+            }
+
+            // Current and removed source anchors both invalidate every output core in their
+            // 15-block influence. This also replaces provisional warm light from stale sources.
             for (ServerSectionKey anchor : sourceAnchors) {
+                scheduleRebuild(anchor);
+            }
+            for (ServerSectionKey anchor : removedSourceAnchors) {
                 scheduleRebuild(anchor);
             }
 
