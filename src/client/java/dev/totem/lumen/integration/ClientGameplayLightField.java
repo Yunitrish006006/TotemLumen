@@ -18,6 +18,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 public final class ClientGameplayLightField {
     private static final AtomicInteger DIAGNOSTIC_LOGS = new AtomicInteger();
     private static final Map<Key, char[]> SECTIONS = new ConcurrentHashMap<>();
+    private static final Map<String, Long> SERVER_REVISIONS = new ConcurrentHashMap<>();
     /** Local prediction is preferred until the matching stable server section arrives. */
     private static final Map<Key, char[]> LOCAL_SECTIONS = new ConcurrentHashMap<>();
     private static volatile String activeDimension = "minecraft:overworld";
@@ -48,12 +49,17 @@ public final class ClientGameplayLightField {
 
     public static synchronized void apply(GameplayLightSectionsPayload payload) {
         String dimension = payload.dimension().toString();
+        long previousRevision = SERVER_REVISIONS.getOrDefault(dimension, -1L);
+        if (payload.revision() < previousRevision) {
+            return;
+        }
+        SERVER_REVISIONS.put(dimension, payload.revision());
         if (DIAGNOSTIC_LOGS.get() < 4) {
             int logIndex = DIAGNOSTIC_LOGS.getAndIncrement();
             if (logIndex < 4) {
                 dev.totem.lumen.TotemLumenClient.LOGGER.info(
-                        "RGB field packet: dimension={}, sections={}, fullSync={}",
-                        dimension, payload.sections().size(), payload.fullSync()
+                        "RGB field packet: dimension={}, revision={}, sections={}, fullSync={}",
+                        dimension, payload.revision(), payload.sections().size(), payload.fullSync()
                 );
             }
         }
@@ -118,11 +124,14 @@ public final class ClientGameplayLightField {
 
     /** Immutable section snapshot identity for bounded client-only GPU light-field updates. */
     static char[] localSectionReference(int sectionX, int sectionY, int sectionZ) {
-        return LOCAL_SECTIONS.get(new Key(activeDimension, sectionX, sectionY, sectionZ));
+        Key key = new Key(activeDimension, sectionX, sectionY, sectionZ);
+        char[] local = LOCAL_SECTIONS.get(key);
+        return local != null ? local : SECTIONS.get(key);
     }
 
     public static synchronized void clear() {
         SECTIONS.clear();
+        SERVER_REVISIONS.clear();
         LOCAL_SECTIONS.clear();
         activeDimension = "minecraft:overworld";
         dirtySections.clear();
@@ -138,6 +147,7 @@ public final class ClientGameplayLightField {
 
     public static synchronized void clearDimension(String dimension) {
         SECTIONS.keySet().removeIf(key -> key.dimension.equals(dimension));
+        SERVER_REVISIONS.remove(dimension);
         LOCAL_SECTIONS.keySet().removeIf(key -> key.dimension.equals(dimension));
         dirtySections.removeIf(section -> section.dimension.equals(dimension));
         skyDirtySections.removeIf(section -> section.dimension.equals(dimension));
@@ -326,13 +336,18 @@ public final class ClientGameplayLightField {
     /** Writes one predicted cell without blocking the client tick on a full GPU snapshot rebuild. */
     public static synchronized boolean setLocalPacked(String dimension, int x, int y, int z, int packed) {
         Key key = new Key(dimension, Math.floorDiv(x, 16), Math.floorDiv(y, 16), Math.floorDiv(z, 16));
+        int index = ((y & 15) << 8) | ((z & 15) << 4) | (x & 15);
         char[] values = LOCAL_SECTIONS.get(key);
-        if (packed == 0) {
-            if (values == null) {
-                return false;
+        if (values == null) {
+            char[] authoritative = SECTIONS.get(key);
+            if (authoritative != null) {
+                values = authoritative.clone();
+                LOCAL_SECTIONS.put(key, values);
+                localLookup.remove();
             }
-            int index = ((y & 15) << 8) | ((z & 15) << 4) | (x & 15);
-            if (values[index] == 0) {
+        }
+        if (packed == 0) {
+            if (values == null || values[index] == 0) {
                 return false;
             }
             values[index] = 0;
@@ -343,9 +358,8 @@ public final class ClientGameplayLightField {
                     break;
                 }
             }
-            if (!any) {
-                // There is no server-field fallback. Release empty sections instead of keeping
-                // a permanent 8 KiB mask for every light that has been removed.
+            if (!any && !SECTIONS.containsKey(key)) {
+                // Without an authoritative fallback, release an empty prediction section.
                 LOCAL_SECTIONS.remove(key);
             }
             markAffectedMeshes(dimension, x, y, z);
@@ -397,9 +411,13 @@ public final class ClientGameplayLightField {
                 for (int sectionX = Math.floorDiv(minX, 16); sectionX <= Math.floorDiv(maxX, 16); sectionX++) {
                     Key key = new Key(dimension, sectionX, sectionY, sectionZ);
                     char[] previous = LOCAL_SECTIONS.get(key);
+                    char[] authoritative = SECTIONS.get(key);
                     char[] replacement = staged.get(new SectionCoordinate(dimension, sectionX, sectionY, sectionZ));
-                    if (previous == null && replacement == null) continue;
-                    char[] next = previous == null ? new char[GameplayLightSectionsPayload.VOXEL_COUNT] : previous.clone();
+                    char[] base = previous != null ? previous : authoritative;
+                    if (base == null && replacement == null) continue;
+                    char[] next = base == null
+                            ? new char[GameplayLightSectionsPayload.VOXEL_COUNT]
+                            : base.clone();
                     boolean sectionChanged = false;
                     for (int y = Math.max(minY, sectionY * 16); y <= Math.min(maxY, sectionY * 16 + 15); y++) {
                         for (int z = Math.max(minZ, sectionZ * 16); z <= Math.min(maxZ, sectionZ * 16 + 15); z++) {
@@ -419,7 +437,7 @@ public final class ClientGameplayLightField {
                     for (char value : next) {
                         if (value != 0) { any = true; break; }
                     }
-                    if (any) LOCAL_SECTIONS.put(key, next);
+                    if (any || authoritative != null) LOCAL_SECTIONS.put(key, next);
                     else LOCAL_SECTIONS.remove(key);
                     changed = true;
                 }
@@ -516,7 +534,11 @@ public final class ClientGameplayLightField {
                 this.x = x;
                 this.y = y;
                 this.z = z;
-                values = LOCAL_SECTIONS.get(new Key(dimension, x, y, z));
+                Key key = new Key(dimension, x, y, z);
+                values = LOCAL_SECTIONS.get(key);
+                if (values == null) {
+                    values = SECTIONS.get(key);
+                }
                 revision = currentRevision;
             }
             return values;
