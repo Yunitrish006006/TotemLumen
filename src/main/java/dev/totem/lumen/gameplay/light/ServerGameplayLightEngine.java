@@ -867,7 +867,7 @@ public final class ServerGameplayLightEngine {
             mutablePos.set(x, y, z);
             int candidate = GameplayLightSource.attenuate(fromPacked, level.getBlockState(mutablePos));
             if (candidate != 0 && setPackedMax(x, y, z, candidate)) {
-                queue.add(PackedServerPos.pack(x, y, z), candidate, 0.0f, 0, 0L, false);
+                queue.add(PackedServerPos.pack(x, y, z), candidate);
             }
         }
 
