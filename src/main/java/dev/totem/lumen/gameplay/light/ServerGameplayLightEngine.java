@@ -43,6 +43,8 @@ public final class ServerGameplayLightEngine {
 
     private final ArrayDeque<ChunkScanTask> pendingScans = new ArrayDeque<>();
     private final Map<ChunkKey, ChunkScanTask> scansByChunk = new HashMap<>();
+    private final Map<ChunkKey, ChunkSourceState> chunkSourceStates = new HashMap<>();
+    private final Map<ChunkKey, Long> chunkGenerations = new HashMap<>();
 
     private LightRebuildTask activeRebuild;
     private long ticks;
@@ -144,6 +146,8 @@ public final class ServerGameplayLightEngine {
     /** Queue a budgeted source scan for a newly loaded chunk. */
     public void onChunkLoaded(LevelChunk chunk) {
         ChunkKey key = new ChunkKey(chunk.getPos().x(), chunk.getPos().z());
+        bumpChunkGeneration(key);
+        chunkSourceStates.put(key, ChunkSourceState.SCANNING);
         ChunkScanTask old = scansByChunk.remove(key);
         if (old != null) {
             old.cancel();
@@ -160,6 +164,8 @@ public final class ServerGameplayLightEngine {
         int chunkX = chunk.getPos().x();
         int chunkZ = chunk.getPos().z();
         ChunkKey chunkKey = new ChunkKey(chunkX, chunkZ);
+        bumpChunkGeneration(chunkKey);
+        chunkSourceStates.remove(chunkKey);
 
         ChunkScanTask scan = scansByChunk.remove(chunkKey);
         if (scan != null) {
@@ -198,6 +204,11 @@ public final class ServerGameplayLightEngine {
         if (!level.isInsideBuildHeight(pos.getY())) {
             return;
         }
+
+        bumpChunkGeneration(new ChunkKey(
+                Math.floorDiv(pos.getX(), 16),
+                Math.floorDiv(pos.getZ(), 16)
+        ));
 
         boolean previousEmitter = oldState.getLightEmission() > 0;
         boolean nextEmitter = newState.getLightEmission() > 0;
@@ -342,6 +353,8 @@ public final class ServerGameplayLightEngine {
         }
         pendingScans.clear();
         scansByChunk.clear();
+        chunkSourceStates.clear();
+        chunkGenerations.clear();
         activeRebuild = null;
     }
 
@@ -360,64 +373,81 @@ public final class ServerGameplayLightEngine {
     private void finishScan(ChunkScanTask scan) {
         pendingScans.removeFirstOccurrence(scan);
         scansByChunk.remove(scan.chunkKey(), scan);
+        chunkSourceStates.put(scan.chunkKey(), ChunkSourceState.READY);
+        bumpChunkGeneration(scan.chunkKey());
         scan.finish();
     }
 
     private void beginNextRebuild() {
-        while (!pendingAnchors.isEmpty()) {
+        int attempts = pendingAnchors.size();
+        while (attempts-- > 0 && !pendingAnchors.isEmpty()) {
             ServerSectionKey anchor = pendingAnchors.removeFirst();
-            pendingAnchorSet.remove(anchor);
             LightRebuildRegion region = LightRebuildRegion.around(level, anchor);
-            activeRebuild = new LightRebuildTask(anchor, region, snapshotSources(region));
+            if (!chunkSourcesReady(region)) {
+                pendingAnchors.addLast(anchor);
+                continue;
+            }
+            pendingAnchorSet.remove(anchor);
+            activeRebuild = new LightRebuildTask(
+                    anchor,
+                    region,
+                    snapshotSources(region),
+                    captureChunkInputs(region)
+            );
             return;
         }
     }
 
     private void finishActiveRebuild() {
-        ServerSectionKey anchor = activeRebuild.anchor;
-        LightRebuildRegion region = activeRebuild.region;
-        pruneEmptySections(region);
-        markDirty(region, -1);
+        LightRebuildTask finished = activeRebuild;
+        ServerSectionKey anchor = finished.anchor;
+        boolean inputsCurrent = finished.inputsCurrent();
+        if (inputsCurrent) {
+            finished.publishCore();
+        }
+        markSectionDirty(anchor, -1);
         activeRebuild = null;
 
-        if (rerunAnchors.remove(anchor)) {
-            pendingAnchorSet.add(anchor);
-            pendingAnchors.addLast(anchor);
-            // The rerun acquired its dirty-region reference when it was requested.
+        boolean explicitRerun = rerunAnchors.remove(anchor);
+        if (explicitRerun) {
+            if (pendingAnchorSet.add(anchor)) {
+                pendingAnchors.addLast(anchor);
+                // The rerun acquired its dirty-section reference when it was requested.
+            }
+        } else if (!inputsCurrent) {
+            scheduleCoreRebuild(anchor);
         }
     }
 
-    private void scheduleRebuild(ServerSectionKey anchor) {
-        LightRebuildRegion region = LightRebuildRegion.around(level, anchor);
+    /**
+     * A change in one section can affect cores up to one section away because gameplay RGB has
+     * a hard 15-block maximum propagation distance. Queue every affected output core separately;
+     * each job reads a 15-block halo but commits only its own 16^3 core.
+     */
+    private void scheduleRebuild(ServerSectionKey changedAnchor) {
+        LightRebuildRegion affected = LightRebuildRegion.around(level, changedAnchor);
+        for (int sectionY = affected.minSectionY(); sectionY <= affected.maxSectionY(); sectionY++) {
+            for (int sectionZ = affected.minSectionZ(); sectionZ <= affected.maxSectionZ(); sectionZ++) {
+                for (int sectionX = affected.minSectionX(); sectionX <= affected.maxSectionX(); sectionX++) {
+                    scheduleCoreRebuild(new ServerSectionKey(sectionX, sectionY, sectionZ));
+                }
+            }
+        }
+    }
+
+    private void scheduleCoreRebuild(ServerSectionKey anchor) {
+        if (!loaded(anchor.minBlockX(), anchor.minBlockZ())) {
+            return;
+        }
         if (activeRebuild != null && activeRebuild.anchor.equals(anchor)) {
             if (rerunAnchors.add(anchor)) {
-                markDirty(region, 1);
+                markSectionDirty(anchor, 1);
             }
             return;
         }
         if (pendingAnchorSet.add(anchor)) {
             pendingAnchors.addLast(anchor);
-            markDirty(region, 1);
-        }
-    }
-
-    private void markDirty(LightRebuildRegion region, int delta) {
-        for (int sectionY = region.minSectionY(); sectionY <= region.maxSectionY(); sectionY++) {
-            for (int sectionZ = region.minSectionZ(); sectionZ <= region.maxSectionZ(); sectionZ++) {
-                for (int sectionX = region.minSectionX(); sectionX <= region.maxSectionX(); sectionX++) {
-                    ServerSectionKey key = new ServerSectionKey(sectionX, sectionY, sectionZ);
-                    if (delta > 0) {
-                        dirtySections.merge(key, delta, Integer::sum);
-                    } else {
-                        Integer count = dirtySections.get(key);
-                        if (count == null || count <= 1) {
-                            dirtySections.remove(key);
-                        } else {
-                            dirtySections.put(key, count - 1);
-                        }
-                    }
-                }
-            }
+            markSectionDirty(anchor, 1);
         }
     }
 
@@ -432,6 +462,57 @@ public final class ServerGameplayLightEngine {
         } else {
             dirtySections.put(key, count - 1);
         }
+    }
+
+    private boolean chunkSourcesReady(LightRebuildRegion region) {
+        for (int chunkZ = Math.floorDiv(region.minZ(), 16); chunkZ <= Math.floorDiv(region.maxZ(), 16); chunkZ++) {
+            for (int chunkX = Math.floorDiv(region.minX(), 16); chunkX <= Math.floorDiv(region.maxX(), 16); chunkX++) {
+                if (!loaded(chunkX << 4, chunkZ << 4)) {
+                    continue;
+                }
+                if (chunkSourceStates.get(new ChunkKey(chunkX, chunkZ)) != ChunkSourceState.READY) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    private Map<ChunkKey, ChunkInputStamp> captureChunkInputs(LightRebuildRegion region) {
+        Map<ChunkKey, ChunkInputStamp> result = new HashMap<>();
+        for (int chunkZ = Math.floorDiv(region.minZ(), 16); chunkZ <= Math.floorDiv(region.maxZ(), 16); chunkZ++) {
+            for (int chunkX = Math.floorDiv(region.minX(), 16); chunkX <= Math.floorDiv(region.maxX(), 16); chunkX++) {
+                ChunkKey key = new ChunkKey(chunkX, chunkZ);
+                boolean loaded = loaded(chunkX << 4, chunkZ << 4);
+                result.put(key, new ChunkInputStamp(
+                        chunkGenerations.getOrDefault(key, 0L),
+                        loaded,
+                        chunkSourceStates.get(key)
+                ));
+            }
+        }
+        return result;
+    }
+
+    private boolean chunkInputsCurrent(Map<ChunkKey, ChunkInputStamp> snapshot) {
+        for (Map.Entry<ChunkKey, ChunkInputStamp> entry : snapshot.entrySet()) {
+            ChunkKey key = entry.getKey();
+            ChunkInputStamp expected = entry.getValue();
+            boolean loaded = loaded(key.x << 4, key.z << 4);
+            ChunkInputStamp current = new ChunkInputStamp(
+                    chunkGenerations.getOrDefault(key, 0L),
+                    loaded,
+                    chunkSourceStates.get(key)
+            );
+            if (!current.equals(expected)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private void bumpChunkGeneration(ChunkKey key) {
+        chunkGenerations.merge(key, 1L, Long::sum);
     }
 
     private List<LightSource> snapshotSources(LightRebuildRegion region) {
@@ -623,7 +704,7 @@ public final class ServerGameplayLightEngine {
             // when this chunk contains no source of its own.
             for (ServerSectionKey key : dirtyMarks) {
                 if (hasLitNeighborSection(key)) {
-                    scheduleRebuild(key);
+                    scheduleCoreRebuild(key);
                 }
             }
             releaseDirtyMarks();
@@ -671,88 +752,47 @@ public final class ServerGameplayLightEngine {
     }
 
     private final class LightRebuildTask {
-        private static final int CLEAR = 0;
-        private static final int SEED_SOURCES = 1;
-        private static final int SEED_BOUNDARY = 2;
-        private static final int PROPAGATE = 3;
-        private static final int DONE = 4;
+        private static final int SEED_SOURCES = 0;
+        private static final int PROPAGATE = 1;
+        private static final int DONE = 2;
 
         private final ServerSectionKey anchor;
         private final LightRebuildRegion region;
         private final List<LightSource> sourceSnapshot;
+        private final Map<ChunkKey, ChunkInputStamp> inputSnapshot;
         private final RgbPropagationQueue queue = new RgbPropagationQueue();
+        private final Map<ServerSectionKey, char[]> staged = new HashMap<>();
         private final BlockPos.MutableBlockPos mutablePos = new BlockPos.MutableBlockPos();
 
-        private int phase = CLEAR;
-        private long clearCursor;
+        private int phase = SEED_SOURCES;
         private int sourceCursor;
-        private long boundaryCursor;
 
         LightRebuildTask(
                 ServerSectionKey anchor,
                 LightRebuildRegion region,
-                List<LightSource> sourceSnapshot
+                List<LightSource> sourceSnapshot,
+                Map<ChunkKey, ChunkInputStamp> inputSnapshot
         ) {
             this.anchor = anchor;
             this.region = region;
             this.sourceSnapshot = sourceSnapshot;
+            this.inputSnapshot = inputSnapshot;
         }
 
         int process(int budget) {
             int consumed = 0;
             while (consumed < budget && phase != DONE) {
-                if (phase == CLEAR) {
-                    int used = processClear(budget - consumed);
-                    consumed += used;
-                    if (clearCursor >= region.volume()) {
-                        phase = SEED_SOURCES;
-                    }
-                    continue;
-                }
                 if (phase == SEED_SOURCES) {
-                    int used = processSources(budget - consumed);
-                    consumed += used;
+                    consumed += processSources(budget - consumed);
                     if (sourceCursor >= sourceSnapshot.size()) {
-                        phase = SEED_BOUNDARY;
-                    }
-                    continue;
-                }
-                if (phase == SEED_BOUNDARY) {
-                    int used = processBoundary(budget - consumed);
-                    consumed += used;
-                    if (boundaryCursor >= boundaryCellCount()) {
                         phase = PROPAGATE;
                     }
                     continue;
                 }
-                if (phase == PROPAGATE) {
-                    int used = processPropagation(budget - consumed);
-                    consumed += used;
-                    if (queue.isEmpty()) {
-                        phase = DONE;
-                    }
+                consumed += processPropagation(budget - consumed);
+                if (queue.isEmpty()) {
+                    phase = DONE;
                 }
-            }
-            return consumed;
-        }
-
-        private int processClear(int budget) {
-            int consumed = 0;
-            long volume = region.volume();
-            int sizeX = region.sizeX();
-            int sizeZ = region.sizeZ();
-            long horizontal = (long) sizeX * sizeZ;
-            while (clearCursor < volume && consumed < budget) {
-                long cursor = clearCursor++;
-                int localY = (int) (cursor / horizontal);
-                long horizontalIndex = cursor - (long) localY * horizontal;
-                int localZ = (int) (horizontalIndex / sizeX);
-                int localX = (int) (horizontalIndex - (long) localZ * sizeX);
-                int x = region.minX() + localX;
-                int y = region.minY() + localY;
-                int z = region.minZ() + localZ;
-                setPacked(x, y, z, 0);
-                consumed++;
             }
             return consumed;
         }
@@ -762,81 +802,13 @@ public final class ServerGameplayLightEngine {
             while (sourceCursor < sourceSnapshot.size() && consumed < budget) {
                 LightSource source = sourceSnapshot.get(sourceCursor++);
                 ServerBlockKey pos = source.position();
-                if (loaded(pos.x(), pos.z()) && setPackedMax(pos.x(), pos.y(), pos.z(), source.packedRgb())) {
-                    long packed = PackedServerPos.pack(pos.x(), pos.y(), pos.z());
-                    queue.add(packed, source.packedRgb());
+                if (loaded(pos.x(), pos.z())
+                        && setStagedMax(pos.x(), pos.y(), pos.z(), source.packedRgb())) {
+                    queue.add(PackedServerPos.pack(pos.x(), pos.y(), pos.z()), source.packedRgb());
                 }
                 consumed++;
             }
             return consumed;
-        }
-
-        private int processBoundary(int budget) {
-            int consumed = 0;
-            long count = boundaryCellCount();
-            while (boundaryCursor < count && consumed < budget) {
-                seedBoundaryCell(boundaryCursor++);
-                consumed++;
-            }
-            return consumed;
-        }
-
-        private long boundaryCellCount() {
-            return 2L * region.sizeY() * region.sizeZ()
-                    + 2L * region.sizeX() * region.sizeZ()
-                    + 2L * region.sizeX() * region.sizeY();
-        }
-
-        private void seedBoundaryCell(long cursor) {
-            long segment = (long) region.sizeY() * region.sizeZ();
-            if (cursor < segment * 2L) {
-                boolean maxFace = cursor >= segment;
-                long index = cursor % segment;
-                int y = region.minY() + (int) (index / region.sizeZ());
-                int z = region.minZ() + (int) (index % region.sizeZ());
-                int x = maxFace ? region.maxX() : region.minX();
-                seedFromOutside(x, y, z, maxFace ? x + 1 : x - 1, y, z);
-                return;
-            }
-            cursor -= segment * 2L;
-
-            segment = (long) region.sizeX() * region.sizeZ();
-            if (cursor < segment * 2L) {
-                boolean maxFace = cursor >= segment;
-                long index = cursor % segment;
-                int x = region.minX() + (int) (index % region.sizeX());
-                int z = region.minZ() + (int) (index / region.sizeX());
-                int y = maxFace ? region.maxY() : region.minY();
-                seedFromOutside(x, y, z, x, maxFace ? y + 1 : y - 1, z);
-                return;
-            }
-            cursor -= segment * 2L;
-
-            segment = (long) region.sizeX() * region.sizeY();
-            boolean maxFace = cursor >= segment;
-            long index = cursor % segment;
-            int x = region.minX() + (int) (index % region.sizeX());
-            int y = region.minY() + (int) (index / region.sizeX());
-            int z = maxFace ? region.maxZ() : region.minZ();
-            seedFromOutside(x, y, z, x, y, maxFace ? z + 1 : z - 1);
-        }
-
-        private void seedFromOutside(int x, int y, int z, int outsideX, int outsideY, int outsideZ) {
-            if (!level.isInsideBuildHeight(y)
-                    || !level.isInsideBuildHeight(outsideY)
-                    || !loaded(x, z)
-                    || !loaded(outsideX, outsideZ)) {
-                return;
-            }
-            int outside = getPacked(outsideX, outsideY, outsideZ);
-            if (outside == 0) {
-                return;
-            }
-            mutablePos.set(x, y, z);
-            int incoming = GameplayLightSource.attenuate(outside, level.getBlockState(mutablePos));
-            if (incoming != 0 && setPackedMax(x, y, z, incoming)) {
-                queue.add(PackedServerPos.pack(x, y, z), incoming);
-            }
         }
 
         private int processPropagation(int budget) {
@@ -866,20 +838,64 @@ public final class ServerGameplayLightEngine {
             }
             mutablePos.set(x, y, z);
             int candidate = GameplayLightSource.attenuate(fromPacked, level.getBlockState(mutablePos));
-            if (candidate != 0 && setPackedMax(x, y, z, candidate)) {
+            if (candidate != 0 && setStagedMax(x, y, z, candidate)) {
                 queue.add(PackedServerPos.pack(x, y, z), candidate);
             }
         }
 
-        private boolean setPackedMax(int x, int y, int z, int candidate) {
-            int previous = getPacked(x, y, z);
+        private int stagedAt(int x, int y, int z) {
+            char[] values = staged.get(ServerSectionKey.fromBlock(x, y, z));
+            return values == null ? 0 : values[ServerLightSection.index(x, y, z)];
+        }
+
+        private boolean setStaged(int x, int y, int z, int packed) {
+            ServerSectionKey key = ServerSectionKey.fromBlock(x, y, z);
+            char[] values = staged.computeIfAbsent(key, ignored -> new char[ServerLightSection.VOXEL_COUNT]);
+            int index = ServerLightSection.index(x, y, z);
+            if (values[index] == (char) packed) {
+                return false;
+            }
+            values[index] = (char) packed;
+            return true;
+        }
+
+        private boolean setStagedMax(int x, int y, int z, int candidate) {
+            int previous = stagedAt(x, y, z);
             int next = PackedRgbLight.componentMax(previous, candidate);
-            return next != previous && setPacked(x, y, z, next);
+            return next != previous && setStaged(x, y, z, next);
+        }
+
+        boolean inputsCurrent() {
+            return chunkInputsCurrent(inputSnapshot);
+        }
+
+        void publishCore() {
+            int minY = Math.max(level.getMinY(), anchor.minBlockY());
+            int maxY = Math.min(level.getMaxY() - 1, anchor.maxBlockY());
+            for (int y = minY; y <= maxY; y++) {
+                for (int z = anchor.minBlockZ(); z <= anchor.maxBlockZ(); z++) {
+                    for (int x = anchor.minBlockX(); x <= anchor.maxBlockX(); x++) {
+                        setPacked(x, y, z, stagedAt(x, y, z));
+                    }
+                }
+            }
+            ServerLightSection section = sections.get(anchor);
+            if (section != null && section.isEmpty()) {
+                sections.remove(anchor);
+            }
         }
 
         boolean isComplete() {
             return phase == DONE;
         }
+    }
+
+    private enum ChunkSourceState {
+        SCANNING,
+        READY
+    }
+
+    private record ChunkInputStamp(long generation, boolean loaded, ChunkSourceState state) {
     }
 
     private record ChunkKey(int x, int z) {
