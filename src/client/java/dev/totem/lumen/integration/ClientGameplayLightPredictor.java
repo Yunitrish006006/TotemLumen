@@ -861,9 +861,8 @@ public final class ClientGameplayLightPredictor {
 
     private static final class RebuildTask {
         private static final int SOURCES = 0;
-        private static final int BOUNDARY = 1;
-        private static final int PROPAGATE = 2;
-        private static final int DONE = 3;
+        private static final int PROPAGATE = 1;
+        private static final int DONE = 2;
 
         private final SectionKey anchor;
         private final Region region;
@@ -874,7 +873,6 @@ public final class ClientGameplayLightPredictor {
         private final Map<ClientGameplayLightField.SectionCoordinate, char[]> staged = new HashMap<>();
         private int phase = SOURCES;
         private int sourceCursor;
-        private long boundaryCursor;
 
         private RebuildTask(SectionKey anchor, Region region) {
             this.anchor = anchor;
@@ -908,14 +906,7 @@ public final class ClientGameplayLightPredictor {
                         }
                         consumed++;
                     }
-                    if (sourceCursor >= sourceSnapshot.size()) phase = BOUNDARY;
-                } else if (phase == BOUNDARY) {
-                    long count = boundaryCount();
-                    while (boundaryCursor < count && consumed < budget) {
-                        seedBoundary(boundaryCursor++);
-                        consumed++;
-                    }
-                    if (boundaryCursor >= count) phase = PROPAGATE;
+                    if (sourceCursor >= sourceSnapshot.size()) phase = PROPAGATE;
                 } else {
                     while (!queue.isEmpty() && consumed < budget) {
                         PropagationNode current = queue.removeFirst();
@@ -970,58 +961,6 @@ public final class ClientGameplayLightPredictor {
                     staged
             );
             return true;
-        }
-
-        private long boundaryCount() {
-            return 2L * region.sizeY() * region.sizeZ()
-                    + 2L * region.sizeX() * region.sizeZ()
-                    + 2L * region.sizeX() * region.sizeY();
-        }
-
-        private void seedBoundary(long cursor) {
-            long segment = (long) region.sizeY() * region.sizeZ();
-            if (cursor < segment * 2) {
-                boolean max = cursor >= segment;
-                long index = cursor % segment;
-                int y = region.minY + (int) (index / region.sizeZ());
-                int z = region.minZ + (int) (index % region.sizeZ());
-                int x = max ? region.maxX : region.minX;
-                seedFromOutside(x, y, z, max ? x + 1 : x - 1, y, z);
-                return;
-            }
-            cursor -= segment * 2;
-            segment = (long) region.sizeX() * region.sizeZ();
-            if (cursor < segment * 2) {
-                boolean max = cursor >= segment;
-                long index = cursor % segment;
-                int x = region.minX + (int) (index % region.sizeX());
-                int z = region.minZ + (int) (index / region.sizeX());
-                int y = max ? region.maxY : region.minY;
-                seedFromOutside(x, y, z, x, max ? y + 1 : y - 1, z);
-                return;
-            }
-            cursor -= segment * 2;
-            segment = (long) region.sizeX() * region.sizeY();
-            boolean max = cursor >= segment;
-            long index = cursor % segment;
-            int x = region.minX + (int) (index % region.sizeX());
-            int y = region.minY + (int) (index / region.sizeX());
-            int z = max ? region.maxZ : region.minZ;
-            seedFromOutside(x, y, z, x, y, max ? z + 1 : z - 1);
-        }
-
-        private void seedFromOutside(int x, int y, int z, int outsideX, int outsideY, int outsideZ) {
-            if (!activeLevel.isInsideBuildHeight(y) || !activeLevel.isInsideBuildHeight(outsideY)
-                    || !loaded(x, z) || !loaded(outsideX, outsideZ)) {
-                return;
-            }
-            int outside = getPacked(outsideX, outsideY, outsideZ);
-            if (outside == 0) return;
-            mutablePos.set(x, y, z);
-            int incoming = ClientRgbVisualLightSource.attenuate(outside, activeLevel.getBlockState(mutablePos));
-            if (incoming != 0 && setMax(x, y, z, incoming)) {
-                queue.add(new PropagationNode(new BlockKey(x, y, z), incoming));
-            }
         }
 
         private void propagate(PropagationNode from, int dx, int dy, int dz) {
