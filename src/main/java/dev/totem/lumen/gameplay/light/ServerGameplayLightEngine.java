@@ -47,6 +47,7 @@ public final class ServerGameplayLightEngine {
     private final Map<ChunkKey, Long> chunkGenerations = new HashMap<>();
 
     private LightRebuildTask activeRebuild;
+    private long fieldRevision;
     private long ticks;
     private long accumulatedTickNanos;
     private long maxTickNanos;
@@ -100,6 +101,10 @@ public final class ServerGameplayLightEngine {
         return dirtySections.size();
     }
 
+    public long fieldRevision() {
+        return fieldRevision;
+    }
+
     /** Returns the current RGB field for every allocated section, used for an initial client sync. */
     public List<SectionSnapshot> snapshotSections() {
         List<SectionSnapshot> result = new ArrayList<>(sections.size());
@@ -109,6 +114,10 @@ public final class ServerGameplayLightEngine {
             }
             result.add(snapshot(entry.getKey(), entry.getValue()));
         }
+        result.sort(Comparator
+                .comparingInt(SectionSnapshot::x)
+                .thenComparingInt(SectionSnapshot::y)
+                .thenComparingInt(SectionSnapshot::z));
         return result;
     }
 
@@ -121,9 +130,8 @@ public final class ServerGameplayLightEngine {
         Iterator<ServerSectionKey> iterator = changedSections.iterator();
         while (iterator.hasNext()) {
             ServerSectionKey key = iterator.next();
-            // A rebuild clears and reseeds a region incrementally. Do not publish its transient
-            // empty/intermediate values; otherwise the client briefly loses RGB, then receives
-            // it again when propagation reaches the same section. Publish only stable sections.
+            // Core/halo rebuilds are staged off-field. Still publish only sections whose output
+            // core is no longer dirty so a client never observes an obsolete revision.
             if (dirtySections.containsKey(key)) {
                 continue;
             }
@@ -192,6 +200,9 @@ public final class ServerGameplayLightEngine {
                 .collect(java.util.stream.Collectors.toSet());
         changedSections.addAll(removedSections);
         sections.keySet().removeAll(removedSections);
+        if (!removedSections.isEmpty()) {
+            fieldRevision++;
+        }
         dirtySections.keySet().removeIf(key -> key.x() == chunkX && key.z() == chunkZ);
 
         for (ServerSectionKey key : removedSourceSections) {
@@ -356,6 +367,7 @@ public final class ServerGameplayLightEngine {
         chunkSourceStates.clear();
         chunkGenerations.clear();
         activeRebuild = null;
+        fieldRevision = 0L;
     }
 
     private ChunkScanTask nextScan() {
@@ -402,8 +414,8 @@ public final class ServerGameplayLightEngine {
         LightRebuildTask finished = activeRebuild;
         ServerSectionKey anchor = finished.anchor;
         boolean inputsCurrent = finished.inputsCurrent();
-        if (inputsCurrent) {
-            finished.publishCore();
+        if (inputsCurrent && finished.publishCore()) {
+            fieldRevision++;
         }
         markSectionDirty(anchor, -1);
         activeRebuild = null;
@@ -869,13 +881,14 @@ public final class ServerGameplayLightEngine {
             return chunkInputsCurrent(inputSnapshot);
         }
 
-        void publishCore() {
+        boolean publishCore() {
+            boolean changed = false;
             int minY = Math.max(level.getMinY(), anchor.minBlockY());
             int maxY = Math.min(level.getMaxY() - 1, anchor.maxBlockY());
             for (int y = minY; y <= maxY; y++) {
                 for (int z = anchor.minBlockZ(); z <= anchor.maxBlockZ(); z++) {
                     for (int x = anchor.minBlockX(); x <= anchor.maxBlockX(); x++) {
-                        setPacked(x, y, z, stagedAt(x, y, z));
+                        changed |= setPacked(x, y, z, stagedAt(x, y, z));
                     }
                 }
             }
@@ -883,6 +896,7 @@ public final class ServerGameplayLightEngine {
             if (section != null && section.isEmpty()) {
                 sections.remove(anchor);
             }
+            return changed;
         }
 
         boolean isComplete() {
