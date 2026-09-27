@@ -104,6 +104,10 @@ public final class TotemLumen implements ModInitializer {
             ServerLightingViewService.sendSummary(listener.getPlayer());
         });
 
+        ServerLifecycleEvents.BEFORE_SAVE.register((server, flush, force) ->
+                ServerGameplayLightingManager.saveWarmState(server)
+        );
+
         ServerLifecycleEvents.END_DATA_PACK_RELOAD.register((server, resourceManager, success) -> {
             if (!success) {
                 return;
