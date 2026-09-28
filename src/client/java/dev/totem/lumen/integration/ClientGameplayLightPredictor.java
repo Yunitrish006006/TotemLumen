@@ -186,9 +186,7 @@ public final class ClientGameplayLightPredictor {
                 );
                 ClientGameplayLightField.finishLocalBatch(true);
                 ClientGameplayLightField.requestImmediateUpload();
-                immediatePropagations.addLast(new ImmediatePropagationTask(
-                        new BlockKey(pos.getX(), pos.getY(), pos.getZ()), nextSource
-                ));
+                queueImmediatePropagation(key, nextSource, true);
             } else {
                 immediatePropagations.removeIf(task -> task.source.equals(key));
                 // Keep the last complete field visible until the replacement is ready.
@@ -484,6 +482,24 @@ public final class ClientGameplayLightPredictor {
         }
     }
 
+    /** Build-time guard: a newly placed source must not wait behind loaded-world emitters. */
+    static void verifyLocalSourcePriority() {
+        if (activeLevel != null || !immediatePropagations.isEmpty()) {
+            throw new IllegalStateException("RGB source-priority verifier requires an unused predictor");
+        }
+        BlockKey discovered = new BlockKey(0, 64, 0);
+        BlockKey placed = new BlockKey(1, 64, 0);
+        try {
+            queueImmediatePropagation(discovered, (char) 0xF321, false);
+            queueImmediatePropagation(placed, (char) 0xF321, true);
+            if (!immediatePropagations.peekFirst().source.equals(placed)) {
+                throw new IllegalStateException("Local RGB edits must precede background emitters");
+            }
+        } finally {
+            immediatePropagations.clear();
+        }
+    }
+
     private static void activate(ClientLevel level) {
         String dimension = level.dimension().identifier().toString();
         if (activeLevel == level && dimension.equals(activeDimension)) {
@@ -679,7 +695,16 @@ public final class ClientGameplayLightPredictor {
     private static void publishDiscoveredSource(BlockKey source, char packed) {
         int oldPacked = getLocalPacked(source.x, source.y, source.z);
         setPacked(source.x, source.y, source.z, PackedRgbLight.componentMax(oldPacked, packed));
-        immediatePropagations.addLast(new ImmediatePropagationTask(source, packed));
+        queueImmediatePropagation(source, packed, false);
+    }
+
+    private static void queueImmediatePropagation(BlockKey source, char packed, boolean localEdit) {
+        ImmediatePropagationTask task = new ImmediatePropagationTask(source, packed);
+        if (localEdit) {
+            immediatePropagations.addFirst(task);
+        } else {
+            immediatePropagations.addLast(task);
+        }
     }
 
     private static List<RemovedSource> removeSourcesInChunk(ChunkKey chunk) {

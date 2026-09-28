@@ -365,7 +365,7 @@ public final class ServerGameplayLightEngine {
         if (previousSource != nextSource
                 || previousEmitter != nextEmitter
                 || previousDampening != nextDampening) {
-            scheduleRebuild(ServerSectionKey.fromBlock(pos));
+            scheduleRebuild(ServerSectionKey.fromBlock(pos), true);
         }
     }
 
@@ -592,17 +592,40 @@ public final class ServerGameplayLightEngine {
      * each job reads a 15-block halo but commits only its own 16^3 core.
      */
     private void scheduleRebuild(ServerSectionKey changedAnchor) {
+        scheduleRebuild(changedAnchor, false);
+    }
+
+    private void scheduleRebuild(ServerSectionKey changedAnchor, boolean playerEdit) {
         LightRebuildRegion affected = LightRebuildRegion.around(level, changedAnchor);
+        if (playerEdit) {
+            // A placed or removed light cannot wait behind the entire initial world scan.
+            // Promote only the already-queued chunk scans required by these cores' halos.
+            int halo = PackedRgbLight.MAX_CHANNEL;
+            for (int z = Math.floorDiv(affected.minZ() - halo, 16);
+                    z <= Math.floorDiv(affected.maxZ() + halo, 16); z++) {
+                for (int x = Math.floorDiv(affected.minX() - halo, 16);
+                        x <= Math.floorDiv(affected.maxX() + halo, 16); x++) {
+                    ChunkScanTask scan = scansByChunk.get(new ChunkKey(x, z));
+                    if (scan != null && pendingScans.remove(scan)) {
+                        pendingScans.addFirst(scan);
+                    }
+                }
+            }
+        }
         for (int sectionY = affected.minSectionY(); sectionY <= affected.maxSectionY(); sectionY++) {
             for (int sectionZ = affected.minSectionZ(); sectionZ <= affected.maxSectionZ(); sectionZ++) {
                 for (int sectionX = affected.minSectionX(); sectionX <= affected.maxSectionX(); sectionX++) {
-                    scheduleCoreRebuild(new ServerSectionKey(sectionX, sectionY, sectionZ));
+                    scheduleCoreRebuild(new ServerSectionKey(sectionX, sectionY, sectionZ), playerEdit);
                 }
             }
         }
     }
 
     private void scheduleCoreRebuild(ServerSectionKey anchor) {
+        scheduleCoreRebuild(anchor, false);
+    }
+
+    private void scheduleCoreRebuild(ServerSectionKey anchor, boolean playerEdit) {
         if (!loaded(anchor.minBlockX(), anchor.minBlockZ())) {
             return;
         }
@@ -613,8 +636,11 @@ public final class ServerGameplayLightEngine {
             return;
         }
         if (pendingAnchorSet.add(anchor)) {
-            pendingAnchors.addLast(anchor);
+            if (playerEdit) pendingAnchors.addFirst(anchor);
+            else pendingAnchors.addLast(anchor);
             markSectionDirty(anchor, 1);
+        } else if (playerEdit && pendingAnchors.remove(anchor)) {
+            pendingAnchors.addFirst(anchor);
         }
     }
 
