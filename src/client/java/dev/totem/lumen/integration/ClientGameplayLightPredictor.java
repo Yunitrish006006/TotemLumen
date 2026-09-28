@@ -313,6 +313,7 @@ public final class ClientGameplayLightPredictor {
     }
 
     public static void tick(ClientLevel level, LocalPlayer player) {
+        long diagnosticStart = System.nanoTime();
         activate(level);
         ClientGameplayLightField.advancePredictionTick();
         if (RendererSettings.renderProfile() == RendererSettings.RenderProfile.MINECRAFT_RGB) {
@@ -389,6 +390,13 @@ public final class ClientGameplayLightPredictor {
             remaining -= used;
         }
         ClientGameplayLightField.finishLocalBatch(changedThisTick);
+        RgbLatencyDiagnostics.recordPredictor(
+                System.nanoTime() - diagnosticStart,
+                WORK_BUDGET - remaining,
+                scans.size(),
+                pendingRebuilds.size(),
+                immediatePropagations.size()
+        );
     }
 
     private static boolean scanBeforeRebuild(boolean hasScan, boolean hasRebuild, boolean scanTurn) {

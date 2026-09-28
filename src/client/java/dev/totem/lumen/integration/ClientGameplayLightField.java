@@ -237,6 +237,14 @@ public final class ClientGameplayLightField {
         return drainDirtySections(dimension, limit, SKY_SECTIONS_PER_TICK);
     }
 
+    public static synchronized int pendingDirtySectionCount() {
+        return dirtySections.size();
+    }
+
+    public static synchronized int pendingSkyDirtySectionCount() {
+        return skyDirtySections.size();
+    }
+
     private static List<SectionCoordinate> drainDirtySections(String dimension, int limit, int skyLimit) {
         List<SectionCoordinate> result = new ArrayList<>();
         var iterator = dirtySections.iterator();
