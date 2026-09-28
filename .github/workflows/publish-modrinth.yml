@@ -1,0 +1,52 @@
+name: Publish Modrinth
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Validate the release artifact without publishing
+        type: boolean
+        default: true
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - name: Set up Gradle 9.6.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.6.1'
+
+      - name: Build and verify
+        run: gradle clean build --stacktrace
+
+      - name: Validate release metadata
+        run: node scripts/publish-modrinth.mjs --dry-run
+
+      - name: Publish and verify Modrinth
+        if: inputs.dry_run == false
+        env:
+          MODRINTH_TOKEN: ${{ secrets.MODRINTH_TOKEN }}
+        run: node scripts/publish-modrinth.mjs --publish
+
+      - name: Upload publication marker
+        if: inputs.dry_run == false
+        uses: actions/upload-artifact@v4
+        with:
+          name: modrinth-publication-${{ github.sha }}
+          path: build/modrinth-published-*.json
+          if-no-files-found: error
