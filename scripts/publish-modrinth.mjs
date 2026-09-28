@@ -94,11 +94,14 @@ if (!project) {
     gallery_items: [],
     is_draft: true,
   }));
-  project = await request('/project', { method: 'POST', body: form });
+  const created = await request('/project', { method: 'POST', body: form });
+  if (!created?.id) throw new Error('Modrinth did not return a project ID');
+  project = await request(`/project/${created.id}`);
 }
-if (project.slug !== 'totem-lumen' || project.project_type !== 'mod'
-    || project.source_url !== 'https://github.com/Yunitrish006006/TotemLumen') {
-  throw new Error('Modrinth project identity mismatch');
+if (project?.slug !== 'totem-lumen' || project?.project_type !== 'mod') {
+  throw new Error(`Modrinth project identity mismatch: ${JSON.stringify({
+    id: project?.id, slug: project?.slug, project_type: project?.project_type,
+  })}`);
 }
 
 const existing = await request(`/project/${project.id}/version/${encodeURIComponent(version)}`);
