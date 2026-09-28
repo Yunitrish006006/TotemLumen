@@ -178,3 +178,29 @@ The roof was then removed; the game log confirmed 289 blocks placed and 289
 removed, and a final screenshot showed open sky again. These screenshots are
 qualitative checks of this scene. A natural cave with mixed block geometry,
 numerical luminance comparison, and frame-time measurement remain untested.
+
+## September 29 manual sweep and smooth sky-light follow-up
+
+The player reported all six requested manual checks as visually OK in the
+Minecraft RGB test-world copy: torch add/remove, repeated world re-entry,
+chunk/section boundaries, approaching across chunk edges, sky-versus-torch
+scenes, and perceived response/performance. These are player observations;
+settled RGB equality, actual chunk load order, and frame time still require
+instrumented comparison before the broader runtime matrix can close.
+
+The remaining reported defect was that enabling Minecraft's smooth lighting
+did not smooth sky illumination. Terrain RGB already sampled block light per
+vertex, but read one sky-light level for the entire quad. Both Indigo's active
+terrain hook and Minecraft's vanilla quad hook now read the sky component from
+each vertex's already prepared lightmap before replacing that lightmap with
+full bright. Emissive quads use the world sky lookup so their forced-bright
+lightmap cannot create false daylight in a cave. Sky-lit surface tracking now
+accounts for any lit vertex. The daylight-balance verifier covers fractional
+smoothed sky levels, the resulting vertex gradient, and emissive fallback;
+`gradle check` passed.
+
+The corrected development client loaded the copied world with
+`MINECRAFT_RGB` and Indigo `vertexSampling=true`. With smooth lighting enabled,
+the player then checked the affected edge and reported a normal gradual
+transition with the hard edge gone. This is a user-observed scene check, not a
+pixel or luminance measurement across other materials and geometry.

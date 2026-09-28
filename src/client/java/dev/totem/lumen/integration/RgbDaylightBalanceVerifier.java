@@ -1,6 +1,7 @@
 package dev.totem.lumen.integration;
 
 import dev.totem.lumen.gameplay.light.PackedRgbLight;
+import net.minecraft.util.LightCoordsUtil;
 
 /** Checks the reported noon-versus-torch regression without starting a client. */
 public final class RgbDaylightBalanceVerifier {
@@ -8,6 +9,7 @@ public final class RgbDaylightBalanceVerifier {
     }
 
     public static void main(String[] args) {
+        verifySmoothedSkyVertices();
         int torch = PackedRgbLight.packRgba(15, 10, 5, 14);
         float[] channels = {
                 PackedRgbLight.red(torch) / 15.0f,
@@ -39,6 +41,27 @@ public final class RgbDaylightBalanceVerifier {
             if (rainyNoonSky != rainyNoonWithTorch) {
                 throw new AssertionError("A torch brightened a sky-lit rainy noon surface");
             }
+        }
+    }
+
+    private static void verifySmoothedSkyVertices() {
+        int shaded = LightCoordsUtil.smoothPack(0, 0);
+        int halfSky = LightCoordsUtil.smoothPack(0, 120);
+        int fullSky = LightCoordsUtil.pack(0, 15);
+        float shadedLevel = RgbSkyLightMath.vertexSkyLevel(shaded, 15, false);
+        float halfLevel = RgbSkyLightMath.vertexSkyLevel(halfSky, 15, false);
+        float fullLevel = RgbSkyLightMath.vertexSkyLevel(fullSky, 0, false);
+        if (shadedLevel != 0.0f || halfLevel != 7.5f || fullLevel != 15.0f) {
+            throw new AssertionError("RGB sky must retain Minecraft's per-vertex smooth light values");
+        }
+        if (RgbSkyLightMath.vertexSkyLevel(LightCoordsUtil.FULL_BRIGHT, 0, true) != 0.0f) {
+            throw new AssertionError("An emissive quad must not create sky light in a cave");
+        }
+        float shadedBrightness = RgbSurfaceLightMath.illumination(0.04f, 0.0f, shadedLevel / 15.0f, 1.0f, 2.0f);
+        float halfBrightness = RgbSurfaceLightMath.illumination(0.04f, 0.0f, halfLevel / 15.0f, 1.0f, 2.0f);
+        float fullBrightness = RgbSurfaceLightMath.illumination(0.04f, 0.0f, fullLevel / 15.0f, 1.0f, 2.0f);
+        if (!(shadedBrightness < halfBrightness && halfBrightness < fullBrightness)) {
+            throw new AssertionError("Sky-lit terrain vertices lost their smooth brightness gradient");
         }
     }
 }
