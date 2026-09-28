@@ -5,8 +5,10 @@
 Minecraft 26.3, Java 25, Gradle 9.6.1, `MINECRAFT_RGB`, an isolated copy of an
 existing large single-player world, and the development client were used. The
 world copy contains many pre-existing emitters. The original world was not
-modified. These observations are from runtime debug counters and source
-inspection; no GPU frame-time or screenshot comparison was captured.
+modified. The performance observations below are from runtime debug counters
+and source inspection. A later AppleScript-assisted, independent client run
+also captured before/after desktop screenshots of one torch removal and
+restoration. No GPU frame-time measurement was captured.
 
 The first run used the local server-authority correction on top of PR #62. The
 second run added five-second client counters. Later runs tested the
@@ -51,6 +53,16 @@ benchmark.
   `d5af` in five open face neighbors, and nonzero light five blocks along two
   open directions, again without a restart. This is saved server-field
   evidence, not a rendered-frame or client/server parity check.
+- In a separate development-client run in the copied world, the Minecraft RGB
+  profile was active and the time was set to midnight. AppleScript targeted the
+  Java development-client window and entered `/setblock` commands at
+  (-1093, 70, 2670). The game log confirmed the torch removal and subsequent
+  restoration. Screenshots of the same view showed the nearby sand and wall
+  darken to blue after removal, then return to bright yellow/white when the
+  torch was restored. The torch was at the left edge of the restored frame.
+  This directly verifies visible surrounding-surface response in that scene;
+  it does not measure propagation delay, rule out other nearby emitters, or
+  establish client/server RGB value parity.
 - The same world under near-player prediction had no persistent client scan
   and rebuild backlog. On the final restart, the first five-second window
   averaged 0.85 ms per tick, with at most 24 scans and 332 rebuilds; the next
@@ -116,7 +128,9 @@ settled-value comparison over repeated reloads; both chunk loading orders;
 x/z/y and four-chunk boundaries; post-fix source add/remove and immediate save;
 `/reload`; offline emitter removal; and dedicated server/client parity.
 One post-fix torch placement visibly lit surrounding surfaces according to
-the player, and a separate saved-field probe confirmed nearby propagation.
+the player, a separate saved-field probe confirmed nearby propagation, and
+the development-client remove/restore sequence independently showed nearby
+surfaces darken and brighten.
 One dedicated-server source remove/add case passed after the event-hook fix.
-Broader visual behavior and frame time remain unconfirmed. Repeated cache
-read/write counts are confirmed; settled RGB equality is not.
+Broader visual behavior, response latency, and frame time remain unconfirmed.
+Repeated cache read/write counts are confirmed; settled RGB equality is not.
