@@ -36,12 +36,14 @@ public final class ServerGameplayLightingManager {
     }
 
     public static void onLevelLoaded(ServerLevel level) {
-        engine(level);
+        ServerGameplayLightEngine engine = engine(level);
+        ServerGameplayLightPersistence.load(level).ifPresent(engine::installWarmState);
     }
 
     public static void onLevelUnloaded(ServerLevel level) {
         ServerGameplayLightEngine removed = ENGINES.remove(level);
         if (removed != null) {
+            ServerGameplayLightPersistence.save(level, removed.snapshotWarmState());
             removed.clear();
         }
     }
@@ -174,6 +176,17 @@ public final class ServerGameplayLightingManager {
                         .toList(),
                 fullSync
         );
+    }
+
+    public static void saveWarmState(MinecraftServer server) {
+        for (Map.Entry<ServerLevel, ServerGameplayLightEngine> entry : ENGINES.entrySet()) {
+            if (entry.getKey().getServer() == server) {
+                ServerGameplayLightPersistence.save(
+                        entry.getKey(),
+                        entry.getValue().snapshotWarmState()
+                );
+            }
+        }
     }
 
     public static void refreshWorldRules(MinecraftServer server) {

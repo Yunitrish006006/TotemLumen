@@ -45,6 +45,9 @@ public final class ServerGameplayLightEngine {
     private final Map<ChunkKey, ChunkScanTask> scansByChunk = new HashMap<>();
     private final Map<ChunkKey, ChunkSourceState> chunkSourceStates = new HashMap<>();
     private final Map<ChunkKey, Long> chunkGenerations = new HashMap<>();
+    private final Map<ChunkKey, List<SourceSnapshot>> warmSourcesByChunk = new HashMap<>();
+    private final Map<ChunkKey, List<SectionSnapshot>> warmSectionsByChunk = new HashMap<>();
+    private final Set<ServerSectionKey> provisionalWarmSections = new HashSet<>();
 
     private LightRebuildTask activeRebuild;
     private long fieldRevision;
@@ -109,7 +112,8 @@ public final class ServerGameplayLightEngine {
     public List<SectionSnapshot> snapshotSections() {
         List<SectionSnapshot> result = new ArrayList<>(sections.size());
         for (Map.Entry<ServerSectionKey, ServerLightSection> entry : sections.entrySet()) {
-            if (dirtySections.containsKey(entry.getKey())) {
+            if (dirtySections.containsKey(entry.getKey())
+                    && !provisionalWarmSections.contains(entry.getKey())) {
                 continue;
             }
             result.add(snapshot(entry.getKey(), entry.getValue()));
@@ -132,7 +136,7 @@ public final class ServerGameplayLightEngine {
             ServerSectionKey key = iterator.next();
             // Core/halo rebuilds are staged off-field. Still publish only sections whose output
             // core is no longer dirty so a client never observes an obsolete revision.
-            if (dirtySections.containsKey(key)) {
+            if (dirtySections.containsKey(key) && !provisionalWarmSections.contains(key)) {
                 continue;
             }
             ServerLightSection section = sections.get(key);
@@ -140,6 +144,7 @@ public final class ServerGameplayLightEngine {
                     key.x(), key.y(), key.z(), section == null ? new char[ServerLightSection.VOXEL_COUNT] : section.copyValues()
             ));
             iterator.remove();
+            provisionalWarmSections.remove(key);
         }
         return result;
     }
@@ -149,11 +154,66 @@ public final class ServerGameplayLightEngine {
     }
 
     public record SectionSnapshot(int x, int y, int z, char[] values) {
+        public SectionSnapshot {
+            if (values == null || values.length != ServerLightSection.VOXEL_COUNT) {
+                throw new IllegalArgumentException("gameplay light section must contain 4096 cells");
+            }
+            values = values.clone();
+        }
+    }
+
+    public record SourceSnapshot(int x, int y, int z, char packedRgb) {
+    }
+
+    public record WarmState(long revision, List<SourceSnapshot> sources, List<SectionSnapshot> sections) {
+        public WarmState {
+            if (revision < 0L || sources == null || sections == null) {
+                throw new IllegalArgumentException("invalid gameplay-light warm state");
+            }
+            sources = List.copyOf(sources);
+            sections = List.copyOf(sections);
+        }
+    }
+
+    public WarmState snapshotWarmState() {
+        List<SourceSnapshot> sourceSnapshots = new ArrayList<>();
+        for (Map<ServerBlockKey, Character> bucket : sources.values()) {
+            for (Map.Entry<ServerBlockKey, Character> entry : bucket.entrySet()) {
+                ServerBlockKey pos = entry.getKey();
+                sourceSnapshots.add(new SourceSnapshot(
+                        pos.x(), pos.y(), pos.z(), entry.getValue()
+                ));
+            }
+        }
+        sourceSnapshots.sort(Comparator
+                .comparingInt(SourceSnapshot::y)
+                .thenComparingInt(SourceSnapshot::z)
+                .thenComparingInt(SourceSnapshot::x));
+        return new WarmState(fieldRevision, sourceSnapshots, snapshotSections());
+    }
+
+    public void installWarmState(WarmState state) {
+        warmSourcesByChunk.clear();
+        warmSectionsByChunk.clear();
+        provisionalWarmSections.clear();
+        fieldRevision = Math.max(fieldRevision, state.revision());
+        for (SourceSnapshot source : state.sources()) {
+            ChunkKey chunk = new ChunkKey(
+                    Math.floorDiv(source.x(), 16),
+                    Math.floorDiv(source.z(), 16)
+            );
+            warmSourcesByChunk.computeIfAbsent(chunk, ignored -> new ArrayList<>()).add(source);
+        }
+        for (SectionSnapshot section : state.sections()) {
+            ChunkKey chunk = new ChunkKey(section.x(), section.z());
+            warmSectionsByChunk.computeIfAbsent(chunk, ignored -> new ArrayList<>()).add(section);
+        }
     }
 
     /** Queue a budgeted source scan for a newly loaded chunk. */
     public void onChunkLoaded(LevelChunk chunk) {
         ChunkKey key = new ChunkKey(chunk.getPos().x(), chunk.getPos().z());
+        applyWarmChunk(key);
         bumpChunkGeneration(key);
         chunkSourceStates.put(key, ChunkSourceState.SCANNING);
         ChunkScanTask old = scansByChunk.remove(key);
@@ -174,6 +234,9 @@ public final class ServerGameplayLightEngine {
         ChunkKey chunkKey = new ChunkKey(chunkX, chunkZ);
         bumpChunkGeneration(chunkKey);
         chunkSourceStates.remove(chunkKey);
+        warmSourcesByChunk.remove(chunkKey);
+        warmSectionsByChunk.remove(chunkKey);
+        provisionalWarmSections.removeIf(key -> key.x() == chunkX && key.z() == chunkZ);
 
         ChunkScanTask scan = scansByChunk.remove(chunkKey);
         if (scan != null) {
@@ -366,6 +429,9 @@ public final class ServerGameplayLightEngine {
         scansByChunk.clear();
         chunkSourceStates.clear();
         chunkGenerations.clear();
+        warmSourcesByChunk.clear();
+        warmSectionsByChunk.clear();
+        provisionalWarmSections.clear();
         activeRebuild = null;
         fieldRevision = 0L;
     }
@@ -414,8 +480,13 @@ public final class ServerGameplayLightEngine {
         LightRebuildTask finished = activeRebuild;
         ServerSectionKey anchor = finished.anchor;
         boolean inputsCurrent = finished.inputsCurrent();
-        if (inputsCurrent && finished.publishCore()) {
-            fieldRevision++;
+        boolean changed = false;
+        if (inputsCurrent) {
+            changed = finished.publishCore();
+            provisionalWarmSections.remove(anchor);
+            if (changed) {
+                fieldRevision++;
+            }
         }
         markSectionDirty(anchor, -1);
         activeRebuild = null;
@@ -473,6 +544,44 @@ public final class ServerGameplayLightEngine {
             dirtySections.remove(key);
         } else {
             dirtySections.put(key, count - 1);
+        }
+    }
+
+    private void applyWarmChunk(ChunkKey chunk) {
+        List<SourceSnapshot> warmSources = warmSourcesByChunk.remove(chunk);
+        if (warmSources != null) {
+            for (SourceSnapshot source : warmSources) {
+                updateIndexedSource(
+                        new ServerBlockKey(source.x(), source.y(), source.z()),
+                        source.packedRgb(),
+                        true
+                );
+            }
+        }
+
+        List<SectionSnapshot> warmSections = warmSectionsByChunk.remove(chunk);
+        if (warmSections == null) {
+            return;
+        }
+        for (SectionSnapshot snapshot : warmSections) {
+            ServerSectionKey key = new ServerSectionKey(snapshot.x(), snapshot.y(), snapshot.z());
+            ServerLightSection section = new ServerLightSection();
+            char[] values = snapshot.values();
+            for (int index = 0; index < values.length; index++) {
+                char value = values[index];
+                if (value == 0) {
+                    continue;
+                }
+                int localX = index & 15;
+                int localZ = (index >>> 4) & 15;
+                int localY = (index >>> 8) & 15;
+                section.set(localX, localY, localZ, value);
+            }
+            if (!section.isEmpty()) {
+                sections.put(key, section);
+                provisionalWarmSections.add(key);
+                changedSections.add(key);
+            }
         }
     }
 
@@ -635,6 +744,7 @@ public final class ServerGameplayLightEngine {
         private final LevelChunkSection[] chunkSections;
         private final List<ServerSectionKey> dirtyMarks = new ArrayList<>();
         private final Set<ServerSectionKey> sourceAnchors = new LinkedHashSet<>();
+        private final Set<ServerBlockKey> observedEmitters = new HashSet<>();
         private int sectionIndex;
         private int voxelIndex;
         private boolean cancelled;
@@ -682,6 +792,7 @@ public final class ServerGameplayLightEngine {
                         int worldZ = (chunkKey.z << 4) + localZ;
                         char packed = sourceForState(state);
                         ServerBlockKey sourcePos = new ServerBlockKey(worldX, worldY, worldZ);
+                        observedEmitters.add(sourcePos);
                         updateIndexedSource(sourcePos, packed, true);
                         if (packed != 0) {
                             sourceAnchors.add(ServerSectionKey.fromBlock(worldX, worldY, worldZ));
@@ -707,8 +818,45 @@ public final class ServerGameplayLightEngine {
                 return;
             }
 
-            // Source anchors initialize their own 15-block influence volume.
+            // The persisted source index is only a warm hint. Reconcile it against the
+            // live chunk snapshot so offline world edits or a cache written before a crash cannot
+            // leave phantom emitters in the authoritative source index.
+            Set<ServerSectionKey> removedSourceAnchors = new LinkedHashSet<>();
+            Iterator<Map.Entry<ServerSectionKey, Map<ServerBlockKey, Character>>> sourceIterator =
+                    sources.entrySet().iterator();
+            while (sourceIterator.hasNext()) {
+                Map.Entry<ServerSectionKey, Map<ServerBlockKey, Character>> entry = sourceIterator.next();
+                ServerSectionKey sectionKey = entry.getKey();
+                if (sectionKey.x() != chunkKey.x || sectionKey.z() != chunkKey.z) {
+                    continue;
+                }
+                Iterator<Map.Entry<ServerBlockKey, Character>> bucketIterator =
+                        entry.getValue().entrySet().iterator();
+                while (bucketIterator.hasNext()) {
+                    Map.Entry<ServerBlockKey, Character> sourceEntry = bucketIterator.next();
+                    if (observedEmitters.contains(sourceEntry.getKey())) {
+                        continue;
+                    }
+                    if (sourceEntry.getValue() != 0) {
+                        removedSourceAnchors.add(ServerSectionKey.fromBlock(
+                                sourceEntry.getKey().x(),
+                                sourceEntry.getKey().y(),
+                                sourceEntry.getKey().z()
+                        ));
+                    }
+                    bucketIterator.remove();
+                }
+                if (entry.getValue().isEmpty()) {
+                    sourceIterator.remove();
+                }
+            }
+
+            // Current and removed source anchors both invalidate every output core in their
+            // 15-block influence. This also replaces provisional warm light from stale sources.
             for (ServerSectionKey anchor : sourceAnchors) {
+                scheduleRebuild(anchor);
+            }
+            for (ServerSectionKey anchor : removedSourceAnchors) {
                 scheduleRebuild(anchor);
             }
 
