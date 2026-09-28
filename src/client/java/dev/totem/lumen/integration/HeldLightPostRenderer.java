@@ -107,10 +107,10 @@ public final class HeldLightPostRenderer {
                         zeroToOne ? 1.0f : 0.0f, 0.0f, RgbLightAttenuation.RADIAL_DISTANCE_SCALE
                 ));
                 if (rgbProfile) {
-                    Vector3f baseline = VanillaRgbLighting.skyAndAmbientAt(
-                            smoothedSkyLevel(client.level, light.x(), light.y(), light.z())
-                    );
-                    metadata.setColumn(1, new Vector4f(baseline, 1.0f));
+                    float skyLevel = smoothedSkyLevel(client.level, light.x(), light.y(), light.z());
+                    Vector3f baseline = VanillaRgbLighting.skyAndAmbientAt(skyLevel);
+                    metadata.setColumn(1, new Vector4f(baseline,
+                            VanillaRgbLighting.daylightCoverageAt(skyLevel)));
                     int slot = count - 1;
                     metadata.setColumn(2, new Vector4f(
                             HeldLightFieldAtlas.originX(slot), HeldLightFieldAtlas.originY(slot),

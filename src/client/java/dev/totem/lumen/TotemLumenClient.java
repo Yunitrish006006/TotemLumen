@@ -12,6 +12,7 @@ import dev.totem.lumen.integration.FluidRenderGeometryCache;
 import dev.totem.lumen.integration.LabPbrTextureRegistry;
 import dev.totem.lumen.integration.MinecraftBlockModelMeshResolver;
 import dev.totem.lumen.integration.P13EnvironmentCapture;
+import dev.totem.lumen.integration.RgbLatencyDiagnostics;
 import dev.totem.lumen.integration.SceneExtractionBridge;
 import dev.totem.lumen.integration.VanillaRgbLighting;
 import dev.totem.lumen.network.GameplayLightSectionsPayload;
@@ -164,8 +165,9 @@ public final class TotemLumenClient implements ClientModInitializer {
                     VanillaRgbLighting.updateSkyPalette(client.level);
                 }
                 ClientGameplayLightPredictor.tick(client.level, client.player);
-                for (ClientGameplayLightField.SectionCoordinate section
-                        : ClientGameplayLightField.drainDirtySections(dimensionId, 32)) {
+                long dirtyEnqueueStart = System.nanoTime();
+                var sectionsToRefresh = ClientGameplayLightField.drainDirtySections(dimensionId, 32);
+                for (ClientGameplayLightField.SectionCoordinate section : sectionsToRefresh) {
                     // Re-extract only sections touched by RGB propagation. This updates the
                     // vanilla surface tint without invalidating the entire compiled world.
                     client.level.setSectionRangeDirty(
@@ -173,6 +175,12 @@ public final class TotemLumenClient implements ClientModInitializer {
                             section.x(), section.y(), section.z()
                     );
                 }
+                RgbLatencyDiagnostics.recordDirtyDrain(
+                        sectionsToRefresh.size(),
+                        ClientGameplayLightField.pendingDirtySectionCount(),
+                        ClientGameplayLightField.pendingSkyDirtySectionCount(),
+                        System.nanoTime() - dirtyEnqueueStart
+                );
                 if (!RendererSettings.rendererEnabled() || !RendererSettings.entityRayTracingEnabled()) {
                     EntityRenderGeometryCache.clear();
                 }

@@ -3,7 +3,7 @@
   "package": "dev.totem.lumen.mixin",
   "mixins": [
     "MonsterSpawnLightingMixin",
-    "ServerLevelBlockUpdateMixin"
+    "LevelBlockChangeMixin"
   ],
   "injectors": {
     "defaultRequire": 1

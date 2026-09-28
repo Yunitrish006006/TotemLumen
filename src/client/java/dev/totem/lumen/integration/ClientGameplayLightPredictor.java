@@ -55,6 +55,7 @@ public final class ClientGameplayLightPredictor {
     private static int centerChunkX;
     private static int centerChunkZ;
     private static boolean centerKnown;
+    private static boolean serverAuthoritative;
     private static boolean scanTurn = true;
     private static boolean immediateTurn = true;
     private static boolean changedThisTick;
@@ -84,6 +85,7 @@ public final class ClientGameplayLightPredictor {
         loggedInitialScans = 0;
         loggedRebuildInvalidations = 0;
         centerKnown = false;
+        serverAuthoritative = false;
         scanTurn = true;
         immediateTurn = true;
         lastSkyRefreshKey = Integer.MIN_VALUE;
@@ -94,7 +96,13 @@ public final class ClientGameplayLightPredictor {
 
     public static void onChunkLoaded(ClientLevel level, LevelChunk chunk) {
         activate(level);
-        enqueueScan(level, chunk, false);
+        enterServerAuthorityIfAvailable();
+        LocalPlayer player = Minecraft.getInstance().player;
+        if (!serverAuthoritative || (player != null && nearPlayerChunk(
+                chunk.getPos().x(), chunk.getPos().z(), player
+        ))) {
+            enqueueScan(level, chunk, false);
+        }
     }
 
     public static void onChunkUnloaded(ClientLevel level, LevelChunk chunk) {
@@ -125,6 +133,7 @@ public final class ClientGameplayLightPredictor {
             return;
         }
         activate(level);
+        enterServerAuthorityIfAvailable();
         bumpChunkGeneration(new ChunkKey(
                 Math.floorDiv(pos.getX(), 16),
                 Math.floorDiv(pos.getZ(), 16)
@@ -144,6 +153,14 @@ public final class ClientGameplayLightPredictor {
         }
         boolean sourceChanged = oldSource != nextSource;
         boolean propagationChanged = oldState.getLightDampening() != newState.getLightDampening();
+        if (sourceChanged || propagationChanged) {
+            Region influence = Region.aroundBlock(level, pos);
+            ClientGameplayLightField.markSpeculativeRegion(
+                    activeDimension,
+                    influence.minX, influence.minY, influence.minZ,
+                    influence.maxX, influence.maxY, influence.maxZ
+            );
+        }
         if (sourceChanged && loggedSourceEvents++ < 16) {
             TotemLumenClient.LOGGER.info(
                     "RGBA source changed: pos={}, oldA={}, newA={}, newHue=({},{},{})",
@@ -169,9 +186,7 @@ public final class ClientGameplayLightPredictor {
                 );
                 ClientGameplayLightField.finishLocalBatch(true);
                 ClientGameplayLightField.requestImmediateUpload();
-                immediatePropagations.addLast(new ImmediatePropagationTask(
-                        new BlockKey(pos.getX(), pos.getY(), pos.getZ()), nextSource
-                ));
+                queueImmediatePropagation(key, nextSource, true);
             } else {
                 immediatePropagations.removeIf(task -> task.source.equals(key));
                 // Keep the last complete field visible until the replacement is ready.
@@ -186,6 +201,13 @@ public final class ClientGameplayLightPredictor {
 
     public static void requestRebuild() {
         if (activeLevel == null) {
+            return;
+        }
+        enterServerAuthorityIfAvailable();
+        if (serverAuthoritative) {
+            // The server will rebuild from the new rules and stream stable sections. Any old
+            // local work uses the previous rules and must not overlay those sections later.
+            clearPredictionWork();
             return;
         }
         // World-rule snapshots can arrive after the chunk scan. Re-evaluate the live states
@@ -209,7 +231,13 @@ public final class ClientGameplayLightPredictor {
         queuedRebuilds.clear();
         reseedAfterRuleChange.clear();
         for (BlockKey source : sources.keySet()) {
-            scheduleInfluence(Region.aroundBlock(activeLevel, new BlockPos(source.x, source.y, source.z)));
+            Region influence = Region.aroundBlock(activeLevel, new BlockPos(source.x, source.y, source.z));
+            ClientGameplayLightField.markSpeculativeRegion(
+                    activeDimension,
+                    influence.minX, influence.minY, influence.minZ,
+                    influence.maxX, influence.maxY, influence.maxZ
+            );
+            scheduleInfluence(influence);
             reseedAfterRuleChange.add(new ChunkKey(
                     Math.floorDiv(source.x, 16), Math.floorDiv(source.z, 16)
             ));
@@ -299,7 +327,10 @@ public final class ClientGameplayLightPredictor {
     }
 
     public static void tick(ClientLevel level, LocalPlayer player) {
+        long diagnosticStart = System.nanoTime();
         activate(level);
+        enterServerAuthorityIfAvailable();
+        ClientGameplayLightField.advancePredictionTick();
         if (RendererSettings.renderProfile() == RendererSettings.RenderProfile.MINECRAFT_RGB) {
             int skyKey = VanillaRgbLighting.skyRefreshKey(level);
             long clock = level.getOverworldClockTime();
@@ -325,6 +356,11 @@ public final class ClientGameplayLightPredictor {
             int nextChunkX = Math.floorDiv(player.blockPosition().getX(), 16);
             int nextChunkZ = Math.floorDiv(player.blockPosition().getZ(), 16);
             if (!centerKnown || Math.abs(nextChunkX - centerChunkX) > 1 || Math.abs(nextChunkZ - centerChunkZ) > 1) {
+                if (serverAuthoritative && centerKnown) {
+                    // Prediction is a near-player hint once stable server sync exists. Do not
+                    // accumulate source scans and correction jobs from every visited chunk.
+                    clearPredictionWork();
+                }
                 centerChunkX = nextChunkX;
                 centerChunkZ = nextChunkZ;
                 centerKnown = true;
@@ -374,6 +410,13 @@ public final class ClientGameplayLightPredictor {
             remaining -= used;
         }
         ClientGameplayLightField.finishLocalBatch(changedThisTick);
+        RgbLatencyDiagnostics.recordPredictor(
+                System.nanoTime() - diagnosticStart,
+                WORK_BUDGET - remaining,
+                scans.size(),
+                pendingRebuilds.size(),
+                immediatePropagations.size()
+        );
     }
 
     private static boolean scanBeforeRebuild(boolean hasScan, boolean hasRebuild, boolean scanTurn) {
@@ -439,6 +482,24 @@ public final class ClientGameplayLightPredictor {
         }
     }
 
+    /** Build-time guard: a newly placed source must not wait behind loaded-world emitters. */
+    static void verifyLocalSourcePriority() {
+        if (activeLevel != null || !immediatePropagations.isEmpty()) {
+            throw new IllegalStateException("RGB source-priority verifier requires an unused predictor");
+        }
+        BlockKey discovered = new BlockKey(0, 64, 0);
+        BlockKey placed = new BlockKey(1, 64, 0);
+        try {
+            queueImmediatePropagation(discovered, (char) 0xF321, false);
+            queueImmediatePropagation(placed, (char) 0xF321, true);
+            if (!immediatePropagations.peekFirst().source.equals(placed)) {
+                throw new IllegalStateException("Local RGB edits must precede background emitters");
+            }
+        } finally {
+            immediatePropagations.clear();
+        }
+    }
+
     private static void activate(ClientLevel level) {
         String dimension = level.dimension().identifier().toString();
         if (activeLevel == level && dimension.equals(activeDimension)) {
@@ -447,6 +508,38 @@ public final class ClientGameplayLightPredictor {
         clear();
         activeLevel = level;
         activeDimension = dimension;
+    }
+
+    private static void enterServerAuthorityIfAvailable() {
+        if (serverAuthoritative || activeDimension == null
+                || !ClientGameplayLightField.hasServerField(activeDimension)) {
+            return;
+        }
+        serverAuthoritative = true;
+        clearPredictionWork();
+    }
+
+    private static void clearPredictionWork() {
+        scans.clear();
+        pendingScans.clear();
+        chunkSourceStates.clear();
+        chunkGenerations.clear();
+        reseedAfterRuleChange.clear();
+        sources.clear();
+        sourcesBySection.clear();
+        immediatePropagations.clear();
+        pendingRebuilds.clear();
+        queuedRebuilds.clear();
+        knownSourceSections.clear();
+        centerKnown = false;
+        ClientGameplayLightField.clearLocal();
+    }
+
+    private static boolean nearPlayerChunk(int chunkX, int chunkZ, LocalPlayer player) {
+        int playerChunkX = Math.floorDiv(player.blockPosition().getX(), 16);
+        int playerChunkZ = Math.floorDiv(player.blockPosition().getZ(), 16);
+        return Math.abs(chunkX - playerChunkX) <= CHUNK_RADIUS
+                && Math.abs(chunkZ - playerChunkZ) <= CHUNK_RADIUS;
     }
 
     private static void enqueueVisibleChunks(ClientLevel level) {
@@ -602,7 +695,16 @@ public final class ClientGameplayLightPredictor {
     private static void publishDiscoveredSource(BlockKey source, char packed) {
         int oldPacked = getLocalPacked(source.x, source.y, source.z);
         setPacked(source.x, source.y, source.z, PackedRgbLight.componentMax(oldPacked, packed));
-        immediatePropagations.addLast(new ImmediatePropagationTask(source, packed));
+        queueImmediatePropagation(source, packed, false);
+    }
+
+    private static void queueImmediatePropagation(BlockKey source, char packed, boolean localEdit) {
+        ImmediatePropagationTask task = new ImmediatePropagationTask(source, packed);
+        if (localEdit) {
+            immediatePropagations.addFirst(task);
+        } else {
+            immediatePropagations.addLast(task);
+        }
     }
 
     private static List<RemovedSource> removeSourcesInChunk(ChunkKey chunk) {
@@ -757,6 +859,11 @@ public final class ClientGameplayLightPredictor {
     }
 
     private static boolean regionSourcesReady(Region region) {
+        if (serverAuthoritative) {
+            // Local work now contains only speculative block edits. The server field supplies
+            // all pre-existing emitters, so no client chunk source scan is required.
+            return true;
+        }
         for (int chunkZ = Math.floorDiv(region.minZ, 16); chunkZ <= Math.floorDiv(region.maxZ, 16); chunkZ++) {
             for (int chunkX = Math.floorDiv(region.minX, 16); chunkX <= Math.floorDiv(region.maxX, 16); chunkX++) {
                 if (!loaded(chunkX << 4, chunkZ << 4)) {

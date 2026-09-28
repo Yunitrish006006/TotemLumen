@@ -29,9 +29,11 @@ public final class HeldLightShaderVerifier {
                 || !rgbFragment.contains("texelFetch(PlacedRgbSampler, texel, 0)")
                 || !rgbFragment.contains("vec3 fraction = fract(voxelPosition)")
                 || !rgbFragment.contains("float shapedFalloff = 1.2 * falloff * falloff * (1.5 - 0.5 * falloff)")
-                || !rgbFragment.contains("vec3 missing = max(held - placed, vec3(0.0))")
+                || !rgbFragment.contains("vec3 existing = max(baseline, placed)")
+                || !rgbFragment.contains("float skyHeadroom = 1.0 - clamp(TextureMat[1].w, 0.0, 1.0)")
+                || !rgbFragment.contains("vec3 missing = max(min(held, vec3(1.0)) - existing, vec3(0.0))")
                 || !rgbFragment.contains("reflectance * missing * (vec3(1.0) - scene)")) {
-            throw new IllegalStateException("Held light must subtract placed RGB illumination before compositing");
+            throw new IllegalStateException("Held light must respect sky and placed RGB illumination before compositing");
         }
         verifyAtlasLayout();
         verify(fragment.replace(directive, include), "totem-lumen:core/held_light");
