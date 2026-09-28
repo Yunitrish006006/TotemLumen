@@ -160,6 +160,21 @@ showed exposed sand without the earlier obvious torch-bright patch. The
 rainy-noon run used `/time set 6000`; its log reported `MINECRAFT_RGB` terrain
 and held-light paths active. A final client restart after the nighttime-gain
 adjustment also showed evenly lit exposed sand at clear noon. These are
-scene-specific visual checks, not a
-measured luminance or frame-time benchmark. Direct cave-edge and thunderstorm
-comparisons remain open.
+scene-specific visual checks, not a measured luminance or frame-time benchmark.
+
+## Post-restart visual checks
+
+The same copied world was reopened with the committed daylight-balance build.
+At `/time set 18000`, nearby torches still lit sand while more distant terrain
+remained dark. At `/weather thunder` plus `/time set 6000`, the sky and exposed
+terrain darkened together and torches retained local light. This checks the
+expected storm transition visually; it does not assert that storm daylight
+must outrank a torch.
+
+For a controlled shaded edge at clear noon, a 17-by-17 temporary opaque roof
+was placed above the player in the copied world. The shaded sand darkened
+relative to exposed sand, while a nearby torch retained a local warm patch.
+The roof was then removed; the game log confirmed 289 blocks placed and 289
+removed, and a final screenshot showed open sky again. These screenshots are
+qualitative checks of this scene. A natural cave with mixed block geometry,
+numerical luminance comparison, and frame-time measurement remain untested.
