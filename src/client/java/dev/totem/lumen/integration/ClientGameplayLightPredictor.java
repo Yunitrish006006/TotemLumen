@@ -2,7 +2,6 @@ package dev.totem.lumen.integration;
 
 import dev.totem.lumen.TotemLumenClient;
 import dev.totem.lumen.gameplay.light.PackedRgbLight;
-import dev.totem.lumen.gameplay.light.RgbLightAttenuation;
 import dev.totem.lumen.render.RendererSettings;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -742,14 +741,7 @@ public final class ClientGameplayLightPredictor {
     private record BlockKey(int x, int y, int z) {
     }
 
-    private record PropagationNode(
-            BlockKey position,
-            int packed,
-            float distance,
-            float occlusionPenalty,
-            BlockKey origin,
-            boolean rounded
-    ) {
+    private record PropagationNode(BlockKey position, int packed) {
     }
 
     private record RemovedSource(BlockKey position) {
@@ -905,9 +897,7 @@ public final class ClientGameplayLightPredictor {
                         }
                         if (loaded(source.position.x, source.position.z)
                                 && setMax(source.position.x, source.position.y, source.position.z, source.packed)) {
-                            queue.add(new PropagationNode(
-                                    source.position, source.packed, 0.0f, 0.0f, source.position, true
-                            ));
+                            queue.add(new PropagationNode(source.position, source.packed));
                         }
                         consumed++;
                     }
@@ -923,18 +913,12 @@ public final class ClientGameplayLightPredictor {
                     while (!queue.isEmpty() && consumed < budget) {
                         PropagationNode current = queue.removeFirst();
                         if (current.packed != 0) {
-                            if (current.rounded) {
-                                for (RgbLightAttenuation.Step step : RgbLightAttenuation.ROUND_STEPS) {
-                                    propagate(current, step);
-                                }
-                            } else {
-                                propagateCardinal(current, -1, 0, 0);
-                                propagateCardinal(current, 1, 0, 0);
-                                propagateCardinal(current, 0, -1, 0);
-                                propagateCardinal(current, 0, 1, 0);
-                                propagateCardinal(current, 0, 0, -1);
-                                propagateCardinal(current, 0, 0, 1);
-                            }
+                            propagate(current, -1, 0, 0);
+                            propagate(current, 1, 0, 0);
+                            propagate(current, 0, -1, 0);
+                            propagate(current, 0, 1, 0);
+                            propagate(current, 0, 0, -1);
+                            propagate(current, 0, 0, 1);
                         }
                         consumed++;
                     }
@@ -1016,56 +1000,22 @@ public final class ClientGameplayLightPredictor {
             mutablePos.set(x, y, z);
             int incoming = ClientRgbVisualLightSource.attenuate(outside, activeLevel.getBlockState(mutablePos));
             if (incoming != 0 && setMax(x, y, z, incoming)) {
-                queue.add(new PropagationNode(
-                        new BlockKey(x, y, z), incoming, 0.0f, 0.0f, null, false
-                ));
+                queue.add(new PropagationNode(new BlockKey(x, y, z), incoming));
             }
         }
 
-        private void propagateCardinal(PropagationNode from, int dx, int dy, int dz) {
-            propagate(from, new RgbLightAttenuation.Step(dx, dy, dz, 1.0f));
-        }
-
-        private void propagate(PropagationNode from, RgbLightAttenuation.Step step) {
-            int x = from.position.x + step.x();
-            int y = from.position.y + step.y();
-            int z = from.position.z + step.z();
+        private void propagate(PropagationNode from, int dx, int dy, int dz) {
+            int x = from.position.x + dx;
+            int y = from.position.y + dy;
+            int z = from.position.z + dz;
             if (!region.contains(x, y, z) || !activeLevel.isInsideBuildHeight(y) || !loaded(x, z)) return;
-            if (step.diagonal() && !diagonalPathOpen(from.position, step)) return;
             mutablePos.set(x, y, z);
-            BlockState destination = activeLevel.getBlockState(mutablePos);
-            float nextPenalty = from.occlusionPenalty + RgbLightAttenuation.obstaclePenalty(destination);
-            float nextDistance = from.rounded
-                    ? Math.max(from.distance, visualDistance(from.origin, x, y, z) + nextPenalty)
-                    : 0.0f;
-            int candidate = from.rounded
-                    ? ClientRgbVisualLightSource.attenuateRounded(from.packed, from.distance, nextDistance)
-                    : ClientRgbVisualLightSource.attenuate(from.packed, destination);
+            int candidate = ClientRgbVisualLightSource.attenuate(
+                    from.packed, activeLevel.getBlockState(mutablePos)
+            );
             if (candidate != 0 && setMax(x, y, z, candidate)) {
-                queue.add(new PropagationNode(
-                        new BlockKey(x, y, z), candidate,
-                        nextDistance,
-                        nextPenalty,
-                        from.origin,
-                        from.rounded
-                ));
+                queue.add(new PropagationNode(new BlockKey(x, y, z), candidate));
             }
-        }
-
-        private boolean diagonalPathOpen(BlockKey from, RgbLightAttenuation.Step step) {
-            if (step.x() != 0) {
-                mutablePos.set(from.x + step.x(), from.y, from.z);
-                if (activeLevel.getBlockState(mutablePos).getLightDampening() > 1) return false;
-            }
-            if (step.y() != 0) {
-                mutablePos.set(from.x, from.y + step.y(), from.z);
-                if (activeLevel.getBlockState(mutablePos).getLightDampening() > 1) return false;
-            }
-            if (step.z() != 0) {
-                mutablePos.set(from.x, from.y, from.z + step.z());
-                if (activeLevel.getBlockState(mutablePos).getLightDampening() > 1) return false;
-            }
-            return true;
         }
 
         private boolean setMax(int x, int y, int z, int candidate) {
@@ -1092,7 +1042,7 @@ public final class ClientGameplayLightPredictor {
         private ImmediatePropagationTask(BlockKey source, char packed) {
             this.source = source;
             this.sourcePacked = packed;
-            queue.add(new PropagationNode(source, packed, 0.0f, 0.0f, source, true));
+            queue.add(new PropagationNode(source, packed));
         }
 
         private int process(int budget) {
@@ -1106,9 +1056,12 @@ public final class ClientGameplayLightPredictor {
             while (!queue.isEmpty() && consumed < budget) {
                 PropagationNode current = queue.removeFirst();
                 if (current.packed != 0) {
-                    for (RgbLightAttenuation.Step step : RgbLightAttenuation.ROUND_STEPS) {
-                        propagate(current, step);
-                    }
+                    propagate(current, -1, 0, 0);
+                    propagate(current, 1, 0, 0);
+                    propagate(current, 0, -1, 0);
+                    propagate(current, 0, 1, 0);
+                    propagate(current, 0, 0, -1);
+                    propagate(current, 0, 0, 1);
                 }
                 consumed++;
             }
@@ -1116,50 +1069,21 @@ public final class ClientGameplayLightPredictor {
             return consumed;
         }
 
-        private void propagate(PropagationNode from, RgbLightAttenuation.Step step) {
-            int x = from.position.x + step.x();
-            int y = from.position.y + step.y();
-            int z = from.position.z + step.z();
+        private void propagate(PropagationNode from, int dx, int dy, int dz) {
+            int x = from.position.x + dx;
+            int y = from.position.y + dy;
+            int z = from.position.z + dz;
             if (activeLevel == null || !activeLevel.isInsideBuildHeight(y) || !loaded(x, z)) return;
-            if (step.diagonal() && !diagonalPathOpen(from.position, step)) return;
             mutablePos.set(x, y, z);
-            BlockState destination = activeLevel.getBlockState(mutablePos);
-            float nextPenalty = from.occlusionPenalty + RgbLightAttenuation.obstaclePenalty(destination);
-            float nextDistance = Math.max(
-                    from.distance, visualDistance(from.origin, x, y, z) + nextPenalty
-            );
-            if (nextDistance > PackedRgbLight.MAX_CHANNEL + 1.0f) return;
-            int candidate = ClientRgbVisualLightSource.attenuateRounded(
-                    from.packed, from.distance, nextDistance
+            int candidate = ClientRgbVisualLightSource.attenuate(
+                    from.packed, activeLevel.getBlockState(mutablePos)
             );
             int previous = getLocalPacked(x, y, z);
             int next = PackedRgbLight.componentMax(previous, candidate);
             if (candidate != 0 && next != previous && setPacked(x, y, z, next)) {
-                queue.add(new PropagationNode(
-                        new BlockKey(x, y, z), candidate, nextDistance, nextPenalty, from.origin, true
-                ));
+                queue.add(new PropagationNode(new BlockKey(x, y, z), candidate));
             }
-        }
-
-        private boolean diagonalPathOpen(BlockKey from, RgbLightAttenuation.Step step) {
-            if (step.x() != 0) {
-                mutablePos.set(from.x + step.x(), from.y, from.z);
-                if (activeLevel.getBlockState(mutablePos).getLightDampening() > 1) return false;
-            }
-            if (step.y() != 0) {
-                mutablePos.set(from.x, from.y + step.y(), from.z);
-                if (activeLevel.getBlockState(mutablePos).getLightDampening() > 1) return false;
-            }
-            if (step.z() != 0) {
-                mutablePos.set(from.x, from.y, from.z + step.z());
-                if (activeLevel.getBlockState(mutablePos).getLightDampening() > 1) return false;
-            }
-            return true;
         }
     }
 
-    private static float visualDistance(BlockKey origin, int x, int y, int z) {
-        if (origin == null) return 0.0f;
-        return RgbLightAttenuation.radialDistance(origin.x, origin.y, origin.z, x, y, z);
-    }
 }
