@@ -11,6 +11,7 @@ import java.util.List;
 /** Bounded server-authoritative RGB light-field section snapshot for vanilla rendering. */
 public record GameplayLightSectionsPayload(
         Identifier dimension,
+        long revision,
         List<Section> sections,
         boolean fullSync
 ) implements CustomPacketPayload {
@@ -23,7 +24,7 @@ public record GameplayLightSectionsPayload(
             CustomPacketPayload.codec(GameplayLightSectionsPayload::write, GameplayLightSectionsPayload::new);
 
     public GameplayLightSectionsPayload {
-        if (dimension == null || sections == null || sections.size() > MAX_SECTIONS) {
+        if (dimension == null || revision < 0L || sections == null || sections.size() > MAX_SECTIONS) {
             throw new IllegalArgumentException("invalid gameplay light section payload");
         }
         sections = List.copyOf(sections);
@@ -32,6 +33,7 @@ public record GameplayLightSectionsPayload(
     private GameplayLightSectionsPayload(RegistryFriendlyByteBuf buffer) {
         this(
                 buffer.readIdentifier(),
+                buffer.readVarLong(),
                 readSections(buffer),
                 buffer.readBoolean()
         );
@@ -39,6 +41,7 @@ public record GameplayLightSectionsPayload(
 
     private void write(RegistryFriendlyByteBuf buffer) {
         buffer.writeIdentifier(dimension);
+        buffer.writeVarLong(revision);
         buffer.writeVarInt(sections.size());
         for (Section section : sections) {
             buffer.writeInt(section.x());

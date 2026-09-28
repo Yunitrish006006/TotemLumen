@@ -2,9 +2,12 @@ package dev.totem.lumen.gameplay.light;
 
 import dev.totem.lumen.config.ServerLightingConfig;
 import dev.totem.lumen.config.ServerLightingConfigStore;
+import dev.totem.lumen.network.GameplayLightSectionsPayload;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.LevelChunk;
 
@@ -15,6 +18,7 @@ import java.util.Map;
 
 /** Owns one authoritative gameplay-light engine per loaded server dimension. */
 public final class ServerGameplayLightingManager {
+    private static final int NETWORK_SECTIONS_PER_PACKET = 24;
     public static final int DEFAULT_SERVER_WORK_BUDGET = 20_000;
     public static final long DEFAULT_SERVER_TIME_BUDGET_NANOS = 2_000_000L;
 
@@ -95,13 +99,81 @@ public final class ServerGameplayLightingManager {
             int workShare = Math.max(1, remainingWork / remainingEngines);
             long timeShare = Math.max(1L, remainingTime / remainingEngines);
             int consumed = candidate.tick(workShare, timeShare);
-            // The RGB terrain field is recomputed locally by each client. Drain the server
-            // change queue so it remains bounded; the server engine is still required by
-            // gameplay consumers such as spawn-light logic.
-            candidate.drainChangedSections();
+            List<ServerGameplayLightEngine.SectionSnapshot> changed = candidate.drainChangedSections();
+            if (!changed.isEmpty()) {
+                broadcastStableSections(candidate, changed);
+            }
             remainingWork -= consumed;
             remainingEngines--;
         }
+    }
+
+    public static void sendFullSync(ServerPlayer player) {
+        ServerLevel level = player.level();
+        ServerGameplayLightEngine engine = engine(level);
+        List<ServerGameplayLightEngine.SectionSnapshot> sections = engine.snapshotSections();
+        long revision = engine.fieldRevision();
+        if (sections.isEmpty()) {
+            sendPacket(player, level, revision, List.of(), true);
+            return;
+        }
+        for (int offset = 0; offset < sections.size(); offset += NETWORK_SECTIONS_PER_PACKET) {
+            int end = Math.min(sections.size(), offset + NETWORK_SECTIONS_PER_PACKET);
+            sendPacket(player, level, revision, sections.subList(offset, end), offset == 0);
+        }
+    }
+
+    private static void broadcastStableSections(
+            ServerGameplayLightEngine engine,
+            List<ServerGameplayLightEngine.SectionSnapshot> sections
+    ) {
+        ServerLevel level = engine.level();
+        long revision = engine.fieldRevision();
+        for (int offset = 0; offset < sections.size(); offset += NETWORK_SECTIONS_PER_PACKET) {
+            int end = Math.min(sections.size(), offset + NETWORK_SECTIONS_PER_PACKET);
+            GameplayLightSectionsPayload payload = payload(
+                    level,
+                    revision,
+                    sections.subList(offset, end),
+                    false
+            );
+            for (ServerPlayer player : level.players()) {
+                if (ServerPlayNetworking.canSend(player, GameplayLightSectionsPayload.TYPE)) {
+                    ServerPlayNetworking.send(player, payload);
+                }
+            }
+        }
+    }
+
+    private static void sendPacket(
+            ServerPlayer player,
+            ServerLevel level,
+            long revision,
+            List<ServerGameplayLightEngine.SectionSnapshot> sections,
+            boolean fullSync
+    ) {
+        if (!ServerPlayNetworking.canSend(player, GameplayLightSectionsPayload.TYPE)) {
+            return;
+        }
+        ServerPlayNetworking.send(player, payload(level, revision, sections, fullSync));
+    }
+
+    private static GameplayLightSectionsPayload payload(
+            ServerLevel level,
+            long revision,
+            List<ServerGameplayLightEngine.SectionSnapshot> sections,
+            boolean fullSync
+    ) {
+        return new GameplayLightSectionsPayload(
+                level.dimension().identifier(),
+                revision,
+                sections.stream()
+                        .map(section -> new GameplayLightSectionsPayload.Section(
+                                section.x(), section.y(), section.z(), section.values()
+                        ))
+                        .toList(),
+                fullSync
+        );
     }
 
     public static void refreshWorldRules(MinecraftServer server) {

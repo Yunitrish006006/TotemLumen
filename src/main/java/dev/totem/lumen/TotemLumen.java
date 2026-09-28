@@ -7,6 +7,7 @@ import dev.totem.lumen.gameplay.light.ServerGameplayLightingManager;
 import dev.totem.lumen.gameplay.light.ServerHeldLightManager;
 import dev.totem.lumen.gameplay.light.ServerLightingViewService;
 import dev.totem.lumen.gameplay.light.SpawnLightProfilesReloadListener;
+import dev.totem.lumen.network.GameplayLightSectionsPayload;
 import dev.totem.lumen.network.LightingWorldRulesPayload;
 import dev.totem.lumen.network.HeldLightsPayload;
 import dev.totem.lumen.network.ServerLightingViewPackets;
@@ -53,6 +54,10 @@ public final class TotemLumen implements ModInitializer {
         );
         PayloadTypeRegistry.clientboundPlay().register(HeldLightsPayload.TYPE, HeldLightsPayload.CODEC);
         PayloadTypeRegistry.clientboundPlay().register(
+                GameplayLightSectionsPayload.TYPE,
+                GameplayLightSectionsPayload.CODEC
+        );
+        PayloadTypeRegistry.clientboundPlay().register(
                 ServerLightingViewPackets.Summary.TYPE, ServerLightingViewPackets.Summary.CODEC);
         PayloadTypeRegistry.clientboundPlay().register(
                 ServerLightingViewPackets.Page.TYPE, ServerLightingViewPackets.Page.CODEC);
@@ -95,6 +100,7 @@ public final class TotemLumen implements ModInitializer {
                         EffectiveLightingRules.current().rules(), LightingWorldRulesReloadListener.currentTuning()
                 ));
             }
+            ServerGameplayLightingManager.sendFullSync(listener.getPlayer());
             ServerLightingViewService.sendSummary(listener.getPlayer());
         });
 
