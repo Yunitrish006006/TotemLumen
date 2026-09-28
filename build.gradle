@@ -167,11 +167,19 @@ tasks.register('verifyRgbHotPaths', JavaExec) {
     mainClass = 'dev.totem.lumen.integration.RgbHotPathVerifier'
 }
 
+tasks.register('verifyRgbDaylightBalance', JavaExec) {
+    group = 'verification'
+    dependsOn tasks.named('clientClasses')
+    classpath = sourceSets.client.runtimeClasspath + sourceSets.main.runtimeClasspath
+    mainClass = 'dev.totem.lumen.integration.RgbDaylightBalanceVerifier'
+}
+
 tasks.named('check') {
     dependsOn tasks.named('verifyRuntimeShader')
     dependsOn tasks.named('verifyHeldLightShader')
     dependsOn tasks.named('verifyRgbSectionRefresh')
     dependsOn tasks.named('verifyRgbHotPaths')
+    dependsOn tasks.named('verifyRgbDaylightBalance')
     dependsOn tasks.named('verifyP14DDynamicMeshes')
     dependsOn tasks.named('verifyP14DMixinDescriptors')
     dependsOn tasks.named('verifyP14EFluidMixinDescriptors')

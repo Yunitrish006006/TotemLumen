@@ -56,16 +56,19 @@ void main() {
     // just outside the visible surface, toward this moving light's air cell.
     vec3 placed = placedLightAt(worldPosition + normalize(ModelOffset - worldPosition) * 0.5);
     vec3 baseline = max(TextureMat[1].rgb, vec3(0.04));
-    vec3 reflectance = clamp(scene / max(baseline + placed, vec3(0.04)),
+    // Terrain now uses the stronger of sky and placed block light. Use the same
+    // budget here, so a carried torch does not brighten a level-15 sunlit face.
+    vec3 existing = max(baseline, placed);
+    vec3 reflectance = clamp(scene / max(existing, vec3(0.04)),
             vec3(0.0), vec3(1.0));
     vec3 tint = mix(vec3(1.0), ColorModulator.rgb, 0.55);
     // Keep the 0.90 handheld setting, but concentrate more of its illumination
     // near the source instead of lighting the whole radius nearly uniformly.
     float shapedFalloff = 1.2 * falloff * falloff * (1.5 - 0.5 * falloff);
-    vec3 held = tint * (ColorModulator.a * shapedFalloff);
-    // Component-wise max matches the placed RGB field's source-combination rule.
-    // Only the illumination missing from that field may be added to the scene.
-    vec3 missing = max(held - placed, vec3(0.0));
+    float skyHeadroom = 1.0 - clamp(TextureMat[1].w, 0.0, 1.0);
+    vec3 held = tint * (ColorModulator.a * shapedFalloff * skyHeadroom);
+    // Only light stronger than the existing sky or placed source may be added.
+    vec3 missing = max(min(held, vec3(1.0)) - existing, vec3(0.0));
     vec3 contribution = reflectance * missing * (vec3(1.0) - scene);
     fragColor = vec4(contribution, 0.0);
 }

@@ -134,3 +134,32 @@ surfaces darken and brighten.
 One dedicated-server source remove/add case passed after the event-hook fix.
 Broader visual behavior, response latency, and frame time remain unconfirmed.
 Repeated cache read/write counts are confirmed; settled RGB equality is not.
+
+## Noon sky and torch balance follow-up
+
+The copied world later exposed a separate Minecraft RGB presentation issue:
+at noon, sand around a torch could look brighter than exposed sand lit by the
+sky. The default data pack doubles the block-light presentation multiplier,
+while the terrain tint previously added sky and block contributions. The RGB
+held-light pass also subtracted placed block light but not the sky baseline.
+Rain in the test world lowered Minecraft's sky-darkening term further, making
+the contrast especially visible.
+
+Terrain now uses the stronger RGB contribution at each channel, with the
+data-pack block-light multiplier filling only the part not already supplied by
+sky light. The Overworld palette reaches neutral white at clear noon. The
+held-light pass uses the same daylight headroom and subtracts the stronger
+existing sky or placed-light baseline. Surfaces with zero sky light and
+moonlit nighttime surfaces retain the full block-light multiplier.
+
+The new daylight-balance verifier checks clear and rainy noon against a
+level-14 torch, plus partial-sky and night behavior. `gradle clean build`
+passed with the verifier and held-light shader compilation. In the 26.3
+development client, clear-noon and rainy-noon screenshots of the copied world
+showed exposed sand without the earlier obvious torch-bright patch. The
+rainy-noon run used `/time set 6000`; its log reported `MINECRAFT_RGB` terrain
+and held-light paths active. A final client restart after the nighttime-gain
+adjustment also showed evenly lit exposed sand at clear noon. These are
+scene-specific visual checks, not a
+measured luminance or frame-time benchmark. Direct cave-edge and thunderstorm
+comparisons remain open.
