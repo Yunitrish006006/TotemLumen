@@ -19,7 +19,7 @@ The server gameplay subsystem never initializes or depends on Vulkan. A dedicate
 
 ## Current milestone
 
-The current development baseline is **Alpha 60** (Minecraft 26.3 port). The build and ABI checks pass; in-world rendering validation remains pending.
+The current development baseline is **Alpha 61** for Minecraft 26.3. Minecraft RGB gameplay-light propagation, reload persistence and sky/torch presentation have received focused local checks; the broader Totem renderer and dedicated-server parity matrices remain active. See [Alpha 61 release notes](docs/RELEASE_ALPHA61.md) for the tested scope and remaining limits.
 
 Client renderer state:
 
@@ -85,7 +85,7 @@ Minecraft client extraction / submission
 Current execution direction:
 
 ```text
-Alpha 60 / Minecraft 26.3 baseline
+Alpha 61 / Minecraft 26.3 baseline
   -> finish P14D/P14E/P17/P18 runtime and coverage gates
   -> primary-hit/G-buffer + reflection/GI performance architecture
   -> GL4 gameplay-light profiling / GL5 hardening
