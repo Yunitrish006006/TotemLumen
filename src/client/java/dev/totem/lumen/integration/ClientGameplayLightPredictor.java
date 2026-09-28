@@ -41,6 +41,8 @@ public final class ClientGameplayLightPredictor {
     private static String activeDimension;
     private static final Map<ChunkKey, ScanTask> scans = new HashMap<>();
     private static final ArrayDeque<ScanTask> pendingScans = new ArrayDeque<>();
+    private static final Map<ChunkKey, ChunkSourceState> chunkSourceStates = new HashMap<>();
+    private static final Map<ChunkKey, Long> chunkGenerations = new HashMap<>();
     private static final Set<ChunkKey> reseedAfterRuleChange = new HashSet<>();
     private static final Map<BlockKey, Character> sources = new HashMap<>();
     /** Avoid a whole-world source scan for every bounded RGB correction. */
@@ -70,6 +72,8 @@ public final class ClientGameplayLightPredictor {
         activeDimension = null;
         scans.clear();
         pendingScans.clear();
+        chunkSourceStates.clear();
+        chunkGenerations.clear();
         reseedAfterRuleChange.clear();
         sources.clear();
         sourcesBySection.clear();
@@ -98,6 +102,8 @@ public final class ClientGameplayLightPredictor {
             return;
         }
         ChunkKey key = new ChunkKey(chunk.getPos().x(), chunk.getPos().z());
+        bumpChunkGeneration(key);
+        chunkSourceStates.remove(key);
         reseedAfterRuleChange.remove(key);
         ScanTask scan = scans.remove(key);
         if (scan != null) {
@@ -108,12 +114,9 @@ public final class ClientGameplayLightPredictor {
                 && Math.floorDiv(task.source.z, 16) == key.z);
         ClientGameplayLightField.clearLocalChunk(activeDimension, key.x, key.z);
         for (RemovedSource source : removed) {
-            rescheduleRebuild(
-                    SectionKey.fromBlock(source.position.x, source.position.y, source.position.z),
-                    Region.aroundBlock(level, new BlockPos(
-                            source.position.x, source.position.y, source.position.z
-                    ))
-            );
+            scheduleInfluence(Region.aroundBlock(level, new BlockPos(
+                    source.position.x, source.position.y, source.position.z
+            )));
         }
     }
 
@@ -122,6 +125,10 @@ public final class ClientGameplayLightPredictor {
             return;
         }
         activate(level);
+        bumpChunkGeneration(new ChunkKey(
+                Math.floorDiv(pos.getX(), 16),
+                Math.floorDiv(pos.getZ(), 16)
+        ));
         BlockKey key = new BlockKey(pos.getX(), pos.getY(), pos.getZ());
         SectionKey section = SectionKey.fromBlock(pos.getX(), pos.getY(), pos.getZ());
         // The source scan is intentionally incremental. During that window a torch can be
@@ -169,11 +176,11 @@ public final class ClientGameplayLightPredictor {
                 immediatePropagations.removeIf(task -> task.source.equals(key));
                 // Keep the last complete field visible until the replacement is ready.
                 // Clearing the entire influence radius here made other nearby lights blink.
-                rescheduleRebuild(section, Region.aroundBlock(level, pos));
+                scheduleInfluence(Region.aroundBlock(level, pos));
                 ClientGameplayLightField.requestImmediateUpload();
             }
         } else if (propagationChanged) {
-            rescheduleRebuild(section, Region.aroundBlock(level, pos));
+            scheduleInfluence(Region.aroundBlock(level, pos));
         }
     }
 
@@ -202,11 +209,15 @@ public final class ClientGameplayLightPredictor {
         queuedRebuilds.clear();
         reseedAfterRuleChange.clear();
         for (BlockKey source : sources.keySet()) {
-            scheduleRebuild(SectionKey.fromBlock(source.x, source.y, source.z));
+            scheduleInfluence(Region.aroundBlock(activeLevel, new BlockPos(source.x, source.y, source.z)));
             reseedAfterRuleChange.add(new ChunkKey(
                     Math.floorDiv(source.x, 16), Math.floorDiv(source.z, 16)
             ));
         }
+        for (ChunkKey chunk : List.copyOf(chunkSourceStates.keySet())) {
+            bumpChunkGeneration(chunk);
+        }
+        chunkSourceStates.clear();
         // A previous rule may have suppressed an emitter entirely, so it will not be in
         // `sources`. Revisit loaded nearby chunks on the next tick as well.
         centerKnown = false;
@@ -328,7 +339,7 @@ public final class ClientGameplayLightPredictor {
             int used;
             ImmediatePropagationTask immediate = immediatePropagations.peekFirst();
             ScanTask scan = nextScan();
-            RebuildTask rebuild = pendingRebuilds.peekFirst();
+            RebuildTask rebuild = nextReadyRebuild();
             if (immediate != null && (immediateTurn || (scan == null && rebuild == null))) {
                 used = immediate.process(Math.min(remaining, 4096));
                 if (immediate.complete) {
@@ -345,9 +356,12 @@ public final class ClientGameplayLightPredictor {
             } else if (rebuild != null) {
                 used = rebuild.process(Math.min(remaining, 4096));
                 if (rebuild.complete()) {
-                    rebuild.publish();
+                    boolean published = rebuild.publish();
                     pendingRebuilds.removeFirst();
                     queuedRebuilds.remove(rebuild.anchor);
+                    if (!published) {
+                        scheduleCoreRebuild(rebuild.anchor);
+                    }
                 }
                 scanTurn = true;
                 immediateTurn = true;
@@ -457,6 +471,13 @@ public final class ClientGameplayLightPredictor {
 
     private static void enqueueScan(ClientLevel level, LevelChunk chunk, boolean priority) {
         ChunkKey key = new ChunkKey(chunk.getPos().x(), chunk.getPos().z());
+        if (priority
+                && chunkSourceStates.get(key) == ChunkSourceState.READY
+                && !reseedAfterRuleChange.contains(key)) {
+            return;
+        }
+        bumpChunkGeneration(key);
+        chunkSourceStates.put(key, ChunkSourceState.SCANNING);
         ScanTask old = scans.remove(key);
         if (old != null) {
             old.cancelled = true;
@@ -484,9 +505,24 @@ public final class ClientGameplayLightPredictor {
         return null;
     }
 
+    private static RebuildTask nextReadyRebuild() {
+        int attempts = pendingRebuilds.size();
+        while (attempts-- > 0 && !pendingRebuilds.isEmpty()) {
+            RebuildTask task = pendingRebuilds.removeFirst();
+            if (task.started || regionSourcesReady(task.region)) {
+                pendingRebuilds.addFirst(task);
+                return task;
+            }
+            pendingRebuilds.addLast(task);
+        }
+        return null;
+    }
+
     private static void finishScan(ScanTask scan) {
         pendingScans.removeFirstOccurrence(scan);
         scans.remove(scan.chunkKey, scan);
+        chunkSourceStates.put(scan.chunkKey, ChunkSourceState.READY);
+        bumpChunkGeneration(scan.chunkKey);
         boolean reseed = reseedAfterRuleChange.remove(scan.chunkKey);
         Map<BlockKey, Character> observed = new HashMap<>();
         Map<SectionKey, Region> corrections = new HashMap<>();
@@ -546,7 +582,9 @@ public final class ClientGameplayLightPredictor {
         // chunk scan can discover another emitter inside its output region; publishing the
         // old snapshot after the new source's fast pass would erase that light indefinitely.
         int invalidated = refreshOverlappingRebuilds(changedInfluences);
-        corrections.forEach(ClientGameplayLightPredictor::rescheduleRebuild);
+        for (Region correction : corrections.values()) {
+            scheduleInfluence(correction);
+        }
         if (invalidated > 0 && loggedRebuildInvalidations++ < 4) {
             TotemLumenClient.LOGGER.info(
                     "RGB stale rebuilds restarted: chunk=({},{}), count={}",
@@ -580,14 +618,6 @@ public final class ClientGameplayLightPredictor {
             }
         }
         return affected;
-    }
-
-    private static void scheduleRebuild(SectionKey anchor) {
-        if (activeLevel == null || queuedRebuilds.add(anchor)) {
-            if (activeLevel != null) {
-                pendingRebuilds.addLast(new RebuildTask(anchor, Region.around(activeLevel, anchor)));
-            }
-        }
     }
 
     private static Character putSource(BlockKey key, char packed) {
@@ -630,6 +660,10 @@ public final class ClientGameplayLightPredictor {
                 }
             }
         }
+        result.sort(Comparator
+                .comparingInt((RebuildTask.Source source) -> source.position.y)
+                .thenComparingInt(source -> source.position.z)
+                .thenComparingInt(source -> source.position.x));
         return result;
     }
 
@@ -669,7 +703,7 @@ public final class ClientGameplayLightPredictor {
         if (changedInfluences.isEmpty()) {
             return 0;
         }
-        Map<SectionKey, Region> stale = new HashMap<>();
+        Set<SectionKey> stale = new HashSet<>();
         pendingRebuilds.removeIf(task -> {
             boolean overlaps = false;
             for (Region influence : changedInfluences) {
@@ -681,36 +715,93 @@ public final class ClientGameplayLightPredictor {
             if (!overlaps) {
                 return false;
             }
-            stale.put(task.anchor, task.region);
+            stale.add(task.anchor);
             queuedRebuilds.remove(task.anchor);
             return true;
         });
-        stale.forEach(ClientGameplayLightPredictor::scheduleRebuild);
+        stale.forEach(ClientGameplayLightPredictor::rescheduleCoreRebuild);
         return stale.size();
     }
 
-    private static void rescheduleRebuild(SectionKey anchor, Region region) {
+    private static void scheduleInfluence(Region influence) {
         if (activeLevel == null) {
             return;
         }
-        Region[] combined = {region};
-        pendingRebuilds.removeIf(task -> {
-            if (!task.anchor.equals(anchor)) {
-                return false;
+        for (int sectionY = Math.floorDiv(influence.minY, 16); sectionY <= Math.floorDiv(influence.maxY, 16); sectionY++) {
+            for (int sectionZ = Math.floorDiv(influence.minZ, 16); sectionZ <= Math.floorDiv(influence.maxZ, 16); sectionZ++) {
+                for (int sectionX = Math.floorDiv(influence.minX, 16); sectionX <= Math.floorDiv(influence.maxX, 16); sectionX++) {
+                    scheduleCoreRebuild(new SectionKey(sectionX, sectionY, sectionZ));
+                }
             }
-            combined[0] = combined[0].union(task.region);
-            return true;
-        });
-        queuedRebuilds.remove(anchor);
-        if (queuedRebuilds.add(anchor)) {
-            pendingRebuilds.addFirst(new RebuildTask(anchor, combined[0]));
         }
     }
 
-    private static void scheduleRebuild(SectionKey anchor, Region region) {
-        if (activeLevel != null && queuedRebuilds.add(anchor)) {
-            pendingRebuilds.addLast(new RebuildTask(anchor, region));
+    private static void scheduleCoreRebuild(SectionKey anchor) {
+        if (activeLevel == null || !loaded(anchor.x * 16, anchor.z * 16)) {
+            return;
         }
+        if (queuedRebuilds.add(anchor)) {
+            pendingRebuilds.addLast(new RebuildTask(anchor, Region.around(activeLevel, anchor)));
+        }
+    }
+
+    private static void rescheduleCoreRebuild(SectionKey anchor) {
+        if (activeLevel == null || !loaded(anchor.x * 16, anchor.z * 16)) {
+            return;
+        }
+        pendingRebuilds.removeIf(task -> task.anchor.equals(anchor));
+        queuedRebuilds.remove(anchor);
+        if (queuedRebuilds.add(anchor)) {
+            pendingRebuilds.addFirst(new RebuildTask(anchor, Region.around(activeLevel, anchor)));
+        }
+    }
+
+    private static boolean regionSourcesReady(Region region) {
+        for (int chunkZ = Math.floorDiv(region.minZ, 16); chunkZ <= Math.floorDiv(region.maxZ, 16); chunkZ++) {
+            for (int chunkX = Math.floorDiv(region.minX, 16); chunkX <= Math.floorDiv(region.maxX, 16); chunkX++) {
+                if (!loaded(chunkX << 4, chunkZ << 4)) {
+                    continue;
+                }
+                if (chunkSourceStates.get(new ChunkKey(chunkX, chunkZ)) != ChunkSourceState.READY) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    private static Map<ChunkKey, ChunkInputStamp> captureChunkInputs(Region region) {
+        Map<ChunkKey, ChunkInputStamp> result = new HashMap<>();
+        for (int chunkZ = Math.floorDiv(region.minZ, 16); chunkZ <= Math.floorDiv(region.maxZ, 16); chunkZ++) {
+            for (int chunkX = Math.floorDiv(region.minX, 16); chunkX <= Math.floorDiv(region.maxX, 16); chunkX++) {
+                ChunkKey key = new ChunkKey(chunkX, chunkZ);
+                result.put(key, new ChunkInputStamp(
+                        chunkGenerations.getOrDefault(key, 0L),
+                        loaded(chunkX << 4, chunkZ << 4),
+                        chunkSourceStates.get(key)
+                ));
+            }
+        }
+        return result;
+    }
+
+    private static boolean chunkInputsCurrent(Map<ChunkKey, ChunkInputStamp> snapshot) {
+        for (Map.Entry<ChunkKey, ChunkInputStamp> entry : snapshot.entrySet()) {
+            ChunkKey key = entry.getKey();
+            ChunkInputStamp current = new ChunkInputStamp(
+                    chunkGenerations.getOrDefault(key, 0L),
+                    loaded(key.x << 4, key.z << 4),
+                    chunkSourceStates.get(key)
+            );
+            if (!current.equals(entry.getValue())) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static void bumpChunkGeneration(ChunkKey key) {
+        chunkGenerations.merge(key, 1L, Long::sum);
     }
 
     private static char sourceFor(BlockState state) {
@@ -733,6 +824,14 @@ public final class ClientGameplayLightPredictor {
 
     private static boolean loaded(int x, int z) {
         return activeLevel != null && activeLevel.hasChunkAt(x, z);
+    }
+
+    private enum ChunkSourceState {
+        SCANNING,
+        READY
+    }
+
+    private record ChunkInputStamp(long generation, boolean loaded, ChunkSourceState state) {
     }
 
     private record ChunkKey(int x, int z) {
@@ -865,26 +964,35 @@ public final class ClientGameplayLightPredictor {
 
     private static final class RebuildTask {
         private static final int SOURCES = 0;
-        private static final int BOUNDARY = 1;
-        private static final int PROPAGATE = 2;
-        private static final int DONE = 3;
+        private static final int PROPAGATE = 1;
+        private static final int DONE = 2;
 
         private final SectionKey anchor;
         private final Region region;
-        private final List<Source> sourceSnapshot;
+        private List<Source> sourceSnapshot = List.of();
+        private Map<ChunkKey, ChunkInputStamp> inputSnapshot = Map.of();
+        private boolean started;
         private final ArrayDeque<PropagationNode> queue = new ArrayDeque<>();
         private final Map<ClientGameplayLightField.SectionCoordinate, char[]> staged = new HashMap<>();
         private int phase = SOURCES;
         private int sourceCursor;
-        private long boundaryCursor;
 
         private RebuildTask(SectionKey anchor, Region region) {
             this.anchor = anchor;
             this.region = region;
-            this.sourceSnapshot = sourcesIn(region);
+        }
+
+        private void start() {
+            if (started) {
+                return;
+            }
+            sourceSnapshot = sourcesIn(region);
+            inputSnapshot = captureChunkInputs(region);
+            started = true;
         }
 
         private int process(int budget) {
+            start();
             int consumed = 0;
             while (consumed < budget && phase != DONE) {
                 if (phase == SOURCES) {
@@ -901,14 +1009,7 @@ public final class ClientGameplayLightPredictor {
                         }
                         consumed++;
                     }
-                    if (sourceCursor >= sourceSnapshot.size()) phase = BOUNDARY;
-                } else if (phase == BOUNDARY) {
-                    long count = boundaryCount();
-                    while (boundaryCursor < count && consumed < budget) {
-                        seedBoundary(boundaryCursor++);
-                        consumed++;
-                    }
-                    if (boundaryCursor >= count) phase = PROPAGATE;
+                    if (sourceCursor >= sourceSnapshot.size()) phase = PROPAGATE;
                 } else {
                     while (!queue.isEmpty() && consumed < budget) {
                         PropagationNode current = queue.removeFirst();
@@ -946,62 +1047,23 @@ public final class ClientGameplayLightPredictor {
             return true;
         }
 
-        private void publish() {
-            ClientGameplayLightField.replaceLocalRegion(activeDimension,
-                    region.minX, region.minY, region.minZ,
-                    region.maxX, region.maxY, region.maxZ, staged);
-        }
-
-        private long boundaryCount() {
-            return 2L * region.sizeY() * region.sizeZ()
-                    + 2L * region.sizeX() * region.sizeZ()
-                    + 2L * region.sizeX() * region.sizeY();
-        }
-
-        private void seedBoundary(long cursor) {
-            long segment = (long) region.sizeY() * region.sizeZ();
-            if (cursor < segment * 2) {
-                boolean max = cursor >= segment;
-                long index = cursor % segment;
-                int y = region.minY + (int) (index / region.sizeZ());
-                int z = region.minZ + (int) (index % region.sizeZ());
-                int x = max ? region.maxX : region.minX;
-                seedFromOutside(x, y, z, max ? x + 1 : x - 1, y, z);
-                return;
+        private boolean publish() {
+            if (!chunkInputsCurrent(inputSnapshot)) {
+                return false;
             }
-            cursor -= segment * 2;
-            segment = (long) region.sizeX() * region.sizeZ();
-            if (cursor < segment * 2) {
-                boolean max = cursor >= segment;
-                long index = cursor % segment;
-                int x = region.minX + (int) (index % region.sizeX());
-                int z = region.minZ + (int) (index / region.sizeX());
-                int y = max ? region.maxY : region.minY;
-                seedFromOutside(x, y, z, x, max ? y + 1 : y - 1, z);
-                return;
-            }
-            cursor -= segment * 2;
-            segment = (long) region.sizeX() * region.sizeY();
-            boolean max = cursor >= segment;
-            long index = cursor % segment;
-            int x = region.minX + (int) (index % region.sizeX());
-            int y = region.minY + (int) (index / region.sizeX());
-            int z = max ? region.maxZ : region.minZ;
-            seedFromOutside(x, y, z, x, y, max ? z + 1 : z - 1);
-        }
-
-        private void seedFromOutside(int x, int y, int z, int outsideX, int outsideY, int outsideZ) {
-            if (!activeLevel.isInsideBuildHeight(y) || !activeLevel.isInsideBuildHeight(outsideY)
-                    || !loaded(x, z) || !loaded(outsideX, outsideZ)) {
-                return;
-            }
-            int outside = getPacked(outsideX, outsideY, outsideZ);
-            if (outside == 0) return;
-            mutablePos.set(x, y, z);
-            int incoming = ClientRgbVisualLightSource.attenuate(outside, activeLevel.getBlockState(mutablePos));
-            if (incoming != 0 && setMax(x, y, z, incoming)) {
-                queue.add(new PropagationNode(new BlockKey(x, y, z), incoming));
-            }
+            int minX = anchor.x * 16;
+            int minY = Math.max(activeLevel.getMinY(), anchor.y * 16);
+            int minZ = anchor.z * 16;
+            int maxX = minX + 15;
+            int maxY = Math.min(activeLevel.getMaxY() - 1, minY + 15);
+            int maxZ = minZ + 15;
+            ClientGameplayLightField.replaceLocalRegion(
+                    activeDimension,
+                    minX, minY, minZ,
+                    maxX, maxY, maxZ,
+                    staged
+            );
+            return true;
         }
 
         private void propagate(PropagationNode from, int dx, int dy, int dz) {
