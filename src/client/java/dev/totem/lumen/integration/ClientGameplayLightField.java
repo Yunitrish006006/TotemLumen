@@ -191,6 +191,10 @@ public final class ClientGameplayLightField {
         return revision;
     }
 
+    public static boolean hasServerField(String dimension) {
+        return SERVER_REVISIONS.containsKey(dimension);
+    }
+
     /** Requests one coalesced vanilla chunk-mesh rebuild after the next RGB update settles. */
     public static synchronized void requestRebuild() {
         rebuildRequested = true;

@@ -55,6 +55,7 @@ public final class ClientGameplayLightPredictor {
     private static int centerChunkX;
     private static int centerChunkZ;
     private static boolean centerKnown;
+    private static boolean serverAuthoritative;
     private static boolean scanTurn = true;
     private static boolean immediateTurn = true;
     private static boolean changedThisTick;
@@ -84,6 +85,7 @@ public final class ClientGameplayLightPredictor {
         loggedInitialScans = 0;
         loggedRebuildInvalidations = 0;
         centerKnown = false;
+        serverAuthoritative = false;
         scanTurn = true;
         immediateTurn = true;
         lastSkyRefreshKey = Integer.MIN_VALUE;
@@ -94,7 +96,13 @@ public final class ClientGameplayLightPredictor {
 
     public static void onChunkLoaded(ClientLevel level, LevelChunk chunk) {
         activate(level);
-        enqueueScan(level, chunk, false);
+        enterServerAuthorityIfAvailable();
+        LocalPlayer player = Minecraft.getInstance().player;
+        if (!serverAuthoritative || (player != null && nearPlayerChunk(
+                chunk.getPos().x(), chunk.getPos().z(), player
+        ))) {
+            enqueueScan(level, chunk, false);
+        }
     }
 
     public static void onChunkUnloaded(ClientLevel level, LevelChunk chunk) {
@@ -125,6 +133,7 @@ public final class ClientGameplayLightPredictor {
             return;
         }
         activate(level);
+        enterServerAuthorityIfAvailable();
         bumpChunkGeneration(new ChunkKey(
                 Math.floorDiv(pos.getX(), 16),
                 Math.floorDiv(pos.getZ(), 16)
@@ -194,6 +203,13 @@ public final class ClientGameplayLightPredictor {
 
     public static void requestRebuild() {
         if (activeLevel == null) {
+            return;
+        }
+        enterServerAuthorityIfAvailable();
+        if (serverAuthoritative) {
+            // The server will rebuild from the new rules and stream stable sections. Any old
+            // local work uses the previous rules and must not overlay those sections later.
+            clearPredictionWork();
             return;
         }
         // World-rule snapshots can arrive after the chunk scan. Re-evaluate the live states
@@ -315,6 +331,7 @@ public final class ClientGameplayLightPredictor {
     public static void tick(ClientLevel level, LocalPlayer player) {
         long diagnosticStart = System.nanoTime();
         activate(level);
+        enterServerAuthorityIfAvailable();
         ClientGameplayLightField.advancePredictionTick();
         if (RendererSettings.renderProfile() == RendererSettings.RenderProfile.MINECRAFT_RGB) {
             int skyKey = VanillaRgbLighting.skyRefreshKey(level);
@@ -341,6 +358,11 @@ public final class ClientGameplayLightPredictor {
             int nextChunkX = Math.floorDiv(player.blockPosition().getX(), 16);
             int nextChunkZ = Math.floorDiv(player.blockPosition().getZ(), 16);
             if (!centerKnown || Math.abs(nextChunkX - centerChunkX) > 1 || Math.abs(nextChunkZ - centerChunkZ) > 1) {
+                if (serverAuthoritative && centerKnown) {
+                    // Prediction is a near-player hint once stable server sync exists. Do not
+                    // accumulate source scans and correction jobs from every visited chunk.
+                    clearPredictionWork();
+                }
                 centerChunkX = nextChunkX;
                 centerChunkZ = nextChunkZ;
                 centerKnown = true;
@@ -470,6 +492,38 @@ public final class ClientGameplayLightPredictor {
         clear();
         activeLevel = level;
         activeDimension = dimension;
+    }
+
+    private static void enterServerAuthorityIfAvailable() {
+        if (serverAuthoritative || activeDimension == null
+                || !ClientGameplayLightField.hasServerField(activeDimension)) {
+            return;
+        }
+        serverAuthoritative = true;
+        clearPredictionWork();
+    }
+
+    private static void clearPredictionWork() {
+        scans.clear();
+        pendingScans.clear();
+        chunkSourceStates.clear();
+        chunkGenerations.clear();
+        reseedAfterRuleChange.clear();
+        sources.clear();
+        sourcesBySection.clear();
+        immediatePropagations.clear();
+        pendingRebuilds.clear();
+        queuedRebuilds.clear();
+        knownSourceSections.clear();
+        centerKnown = false;
+        ClientGameplayLightField.clearLocal();
+    }
+
+    private static boolean nearPlayerChunk(int chunkX, int chunkZ, LocalPlayer player) {
+        int playerChunkX = Math.floorDiv(player.blockPosition().getX(), 16);
+        int playerChunkZ = Math.floorDiv(player.blockPosition().getZ(), 16);
+        return Math.abs(chunkX - playerChunkX) <= CHUNK_RADIUS
+                && Math.abs(chunkZ - playerChunkZ) <= CHUNK_RADIUS;
     }
 
     private static void enqueueVisibleChunks(ClientLevel level) {
@@ -780,6 +834,11 @@ public final class ClientGameplayLightPredictor {
     }
 
     private static boolean regionSourcesReady(Region region) {
+        if (serverAuthoritative) {
+            // Local work now contains only speculative block edits. The server field supplies
+            // all pre-existing emitters, so no client chunk source scan is required.
+            return true;
+        }
         for (int chunkZ = Math.floorDiv(region.minZ, 16); chunkZ <= Math.floorDiv(region.maxZ, 16); chunkZ++) {
             for (int chunkX = Math.floorDiv(region.minX, 16); chunkX <= Math.floorDiv(region.maxX, 16); chunkX++) {
                 if (!loaded(chunkX << 4, chunkZ << 4)) {
