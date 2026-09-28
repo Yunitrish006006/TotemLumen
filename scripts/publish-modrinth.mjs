@@ -90,6 +90,8 @@ if (!project) {
     issues_url: 'https://github.com/Yunitrish006006/TotemLumen/issues',
     client_side: 'optional',
     server_side: 'optional',
+    initial_versions: [],
+    gallery_items: [],
     is_draft: true,
   }));
   project = await request('/project', { method: 'POST', body: form });
