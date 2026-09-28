@@ -1,0 +1,17 @@
+{
+  "project_slug": "totem-lumen",
+  "version_number": "0.1.0-alpha.61",
+  "game_versions": [
+    "26.3"
+  ],
+  "loaders": [
+    "fabric"
+  ],
+  "filename": "totem-lumen-0.1.0-alpha.61.jar",
+  "sha512": "695b13c00b672bb257d48b7e3647aaf6d5399c198b3c61ad57583f74a1dd31bb11c525c9135c6631c405678d52441c392f0bfd7e123299a7c16ca9bf7aa70336",
+  "project_id": "DcB192se",
+  "project_status": "draft",
+  "version_id": "HjG7ke4R",
+  "version_status": "listed",
+  "verified_at": "2026-09-28T18:03:59.973Z"
+}
