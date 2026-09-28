@@ -98,7 +98,8 @@ if (!project) {
   if (!created?.id) throw new Error('Modrinth did not return a project ID');
   project = await request(`/project/${created.id}`);
 }
-if (project?.slug !== 'totem-lumen' || project?.project_type !== 'mod') {
+if (project?.slug !== 'totem-lumen'
+    || !['mod', 'project'].includes(project?.project_type)) {
   throw new Error(`Modrinth project identity mismatch: ${JSON.stringify({
     id: project?.id, slug: project?.slug, project_type: project?.project_type,
   })}`);
