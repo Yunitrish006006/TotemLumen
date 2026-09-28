@@ -1,6 +1,10 @@
 package dev.totem.lumen.integration;
 
+import dev.totem.lumen.network.GameplayLightSectionsPayload;
+import net.minecraft.resources.Identifier;
+
 import java.util.List;
+import java.util.Map;
 
 /** Build-time check that sky refreshes stay bounded and never delay source updates. */
 public final class RgbSectionRefreshVerifier {
@@ -28,7 +32,54 @@ public final class RgbSectionRefreshVerifier {
         if (second.size() != 12) {
             throw new IllegalStateException("Sky refresh budget must remain bounded on later ticks");
         }
+        verifyServerAuthority(dimension);
         ClientGameplayLightField.clear();
-        System.out.println("RGB section refresh verification PASS: sourcePriority=true, skyBudget=12, deduplicated=true");
+        System.out.println("RGB section refresh verification PASS: sourcePriority=true, skyBudget=12, "
+                + "deduplicated=true, serverAuthority=true");
+    }
+
+    private static void verifyServerAuthority(String dimension) {
+        var section = new ClientGameplayLightField.SectionCoordinate(dimension, 0, 4, 0);
+        char[] stable = new char[GameplayLightSectionsPayload.VOXEL_COUNT];
+        stable[0] = (char) 0xF123;
+        char[] prediction = new char[GameplayLightSectionsPayload.VOXEL_COUNT];
+        prediction[0] = (char) 0xF456;
+        Map<ClientGameplayLightField.SectionCoordinate, char[]> staged = Map.of(section, prediction);
+        Identifier overworld = Identifier.fromNamespaceAndPath("minecraft", "overworld");
+        ClientGameplayLightField.apply(new GameplayLightSectionsPayload(overworld, 1L,
+                List.of(new GameplayLightSectionsPayload.Section(0, 4, 0, stable)), true));
+        ClientGameplayLightField.replaceLocalRegion(dimension, 0, 64, 0, 0, 64, 0, staged);
+        if (ClientGameplayLightField.localPackedAt(dimension, 0, 64, 0) != 0xF123
+                || ClientGameplayLightField.setLocalPacked(dimension, 0, 64, 0, 0xF456)) {
+            throw new IllegalStateException("A queued predictor job overwrote a stable server section");
+        }
+
+        ClientGameplayLightField.markSpeculativeRegion(dimension, 0, 64, 0, 0, 64, 0);
+        ClientGameplayLightField.replaceLocalRegion(dimension, 0, 64, 0, 0, 64, 0, staged);
+        if (ClientGameplayLightField.localPackedAt(dimension, 0, 64, 0) != 0xF456) {
+            throw new IllegalStateException("A local block edit must retain immediate prediction");
+        }
+        ClientGameplayLightField.apply(new GameplayLightSectionsPayload(overworld, 2L,
+                List.of(new GameplayLightSectionsPayload.Section(0, 4, 0, stable)), false));
+        ClientGameplayLightField.replaceLocalRegion(dimension, 0, 64, 0, 0, 64, 0, staged);
+        if (ClientGameplayLightField.localPackedAt(dimension, 0, 64, 0) != 0xF123) {
+            throw new IllegalStateException("Server update did not retire local speculation");
+        }
+
+        ClientGameplayLightField.markSpeculativeRegion(dimension, 0, 64, 0, 0, 64, 0);
+        ClientGameplayLightField.replaceLocalRegion(dimension, 0, 64, 0, 0, 64, 0, staged);
+        for (int tick = 0; tick < 200; tick++) {
+            ClientGameplayLightField.advancePredictionTick();
+        }
+        if (ClientGameplayLightField.localPackedAt(dimension, 0, 64, 0) != 0xF123) {
+            throw new IllegalStateException("Unacknowledged prediction must expire to server state");
+        }
+
+        ClientGameplayLightField.drainDirtySections(dimension);
+        ClientGameplayLightField.apply(new GameplayLightSectionsPayload(overworld, 3L, List.of(), true));
+        if (ClientGameplayLightField.localPackedAt(dimension, 0, 64, 0) != 0
+                || !ClientGameplayLightField.drainDirtySections(dimension).contains(section)) {
+            throw new IllegalStateException("Full sync must refresh sections removed from the server field");
+        }
     }
 }

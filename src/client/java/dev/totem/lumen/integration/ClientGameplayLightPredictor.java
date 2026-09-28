@@ -144,6 +144,14 @@ public final class ClientGameplayLightPredictor {
         }
         boolean sourceChanged = oldSource != nextSource;
         boolean propagationChanged = oldState.getLightDampening() != newState.getLightDampening();
+        if (sourceChanged || propagationChanged) {
+            Region influence = Region.aroundBlock(level, pos);
+            ClientGameplayLightField.markSpeculativeRegion(
+                    activeDimension,
+                    influence.minX, influence.minY, influence.minZ,
+                    influence.maxX, influence.maxY, influence.maxZ
+            );
+        }
         if (sourceChanged && loggedSourceEvents++ < 16) {
             TotemLumenClient.LOGGER.info(
                     "RGBA source changed: pos={}, oldA={}, newA={}, newHue=({},{},{})",
@@ -209,7 +217,13 @@ public final class ClientGameplayLightPredictor {
         queuedRebuilds.clear();
         reseedAfterRuleChange.clear();
         for (BlockKey source : sources.keySet()) {
-            scheduleInfluence(Region.aroundBlock(activeLevel, new BlockPos(source.x, source.y, source.z)));
+            Region influence = Region.aroundBlock(activeLevel, new BlockPos(source.x, source.y, source.z));
+            ClientGameplayLightField.markSpeculativeRegion(
+                    activeDimension,
+                    influence.minX, influence.minY, influence.minZ,
+                    influence.maxX, influence.maxY, influence.maxZ
+            );
+            scheduleInfluence(influence);
             reseedAfterRuleChange.add(new ChunkKey(
                     Math.floorDiv(source.x, 16), Math.floorDiv(source.z, 16)
             ));
@@ -300,6 +314,7 @@ public final class ClientGameplayLightPredictor {
 
     public static void tick(ClientLevel level, LocalPlayer player) {
         activate(level);
+        ClientGameplayLightField.advancePredictionTick();
         if (RendererSettings.renderProfile() == RendererSettings.RenderProfile.MINECRAFT_RGB) {
             int skyKey = VanillaRgbLighting.skyRefreshKey(level);
             long clock = level.getOverworldClockTime();

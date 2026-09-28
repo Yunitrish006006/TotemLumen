@@ -7,7 +7,9 @@ import net.minecraft.core.BlockPos;
 
 import java.util.LinkedHashSet;
 import java.util.ArrayList;
+import java.util.ArrayDeque;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -21,6 +23,12 @@ public final class ClientGameplayLightField {
     private static final Map<String, Long> SERVER_REVISIONS = new ConcurrentHashMap<>();
     /** Local prediction is preferred until the matching stable server section arrives. */
     private static final Map<Key, char[]> LOCAL_SECTIONS = new ConcurrentHashMap<>();
+    /** A server section can only be overlaid by a local world change after its last packet. */
+    private static final Set<Key> authoritativeSections = new java.util.HashSet<>();
+    private static final Map<Key, Long> speculativeSections = new HashMap<>();
+    private static final ArrayDeque<SpeculativeExpiry> speculationExpiries = new ArrayDeque<>();
+    private static final int MAX_SPECULATIVE_TICKS = 200;
+    private static long predictionTick;
     private static volatile String activeDimension = "minecraft:overworld";
     private static volatile long revision;
     /** Terrain workers repeatedly sample nearby voxels in the same 16³ light section. */
@@ -64,11 +72,25 @@ public final class ClientGameplayLightField {
             }
         }
         if (payload.fullSync()) {
+            for (Key key : SECTIONS.keySet()) {
+                if (key.dimension.equals(dimension)) {
+                    dirtySections.add(new SectionCoordinate(dimension, key.x, key.y, key.z));
+                }
+            }
+            for (Key key : LOCAL_SECTIONS.keySet()) {
+                if (key.dimension.equals(dimension)) {
+                    dirtySections.add(new SectionCoordinate(dimension, key.x, key.y, key.z));
+                }
+            }
             SECTIONS.keySet().removeIf(key -> key.dimension.equals(dimension));
             LOCAL_SECTIONS.keySet().removeIf(key -> key.dimension.equals(dimension));
+            authoritativeSections.removeIf(key -> key.dimension.equals(dimension));
+            speculativeSections.keySet().removeIf(key -> key.dimension.equals(dimension));
         }
         for (GameplayLightSectionsPayload.Section section : payload.sections()) {
             Key key = new Key(dimension, section.x(), section.y(), section.z());
+            authoritativeSections.add(key);
+            speculativeSections.remove(key);
             LOCAL_SECTIONS.remove(key);
             dirtySections.add(new SectionCoordinate(dimension, section.x(), section.y(), section.z()));
             char[] values = section.values();
@@ -133,6 +155,10 @@ public final class ClientGameplayLightField {
         SECTIONS.clear();
         SERVER_REVISIONS.clear();
         LOCAL_SECTIONS.clear();
+        authoritativeSections.clear();
+        speculativeSections.clear();
+        speculationExpiries.clear();
+        predictionTick = 0L;
         activeDimension = "minecraft:overworld";
         dirtySections.clear();
         skyDirtySections.clear();
@@ -149,6 +175,8 @@ public final class ClientGameplayLightField {
         SECTIONS.keySet().removeIf(key -> key.dimension.equals(dimension));
         SERVER_REVISIONS.remove(dimension);
         LOCAL_SECTIONS.keySet().removeIf(key -> key.dimension.equals(dimension));
+        authoritativeSections.removeIf(key -> key.dimension.equals(dimension));
+        speculativeSections.keySet().removeIf(key -> key.dimension.equals(dimension));
         dirtySections.removeIf(section -> section.dimension.equals(dimension));
         skyDirtySections.removeIf(section -> section.dimension.equals(dimension));
         skyAffectedSections.removeIf(section -> section.dimension.equals(dimension));
@@ -333,9 +361,47 @@ public final class ClientGameplayLightField {
     public record SectionCoordinate(String dimension, int x, int y, int z) {
     }
 
+    /** Permit a local edit to predict until the server next publishes each affected section. */
+    public static synchronized void markSpeculativeRegion(
+            String dimension, int minX, int minY, int minZ, int maxX, int maxY, int maxZ
+    ) {
+        for (int y = Math.floorDiv(minY, 16); y <= Math.floorDiv(maxY, 16); y++) {
+            for (int z = Math.floorDiv(minZ, 16); z <= Math.floorDiv(maxZ, 16); z++) {
+                for (int x = Math.floorDiv(minX, 16); x <= Math.floorDiv(maxX, 16); x++) {
+                    Key key = new Key(dimension, x, y, z);
+                    long deadline = predictionTick + MAX_SPECULATIVE_TICKS;
+                    speculativeSections.put(key, deadline);
+                    speculationExpiries.addLast(new SpeculativeExpiry(key, deadline));
+                }
+            }
+        }
+    }
+
+    /** Retire a local overlay if no matching server packet arrives within the bounded window. */
+    public static synchronized void advancePredictionTick() {
+        predictionTick++;
+        boolean changed = false;
+        while (!speculationExpiries.isEmpty()
+                && speculationExpiries.peekFirst().deadline <= predictionTick) {
+            SpeculativeExpiry expiry = speculationExpiries.removeFirst();
+            Key key = expiry.key;
+            if (!speculativeSections.remove(key, expiry.deadline)) {
+                continue;
+            }
+            if (authoritativeSections.contains(key) && LOCAL_SECTIONS.remove(key) != null) {
+                dirtySections.add(new SectionCoordinate(key.dimension, key.x, key.y, key.z));
+                changed = true;
+            }
+        }
+        finishLocalBatch(changed);
+    }
+
     /** Writes one predicted cell without blocking the client tick on a full GPU snapshot rebuild. */
     public static synchronized boolean setLocalPacked(String dimension, int x, int y, int z, int packed) {
         Key key = new Key(dimension, Math.floorDiv(x, 16), Math.floorDiv(y, 16), Math.floorDiv(z, 16));
+        if (authoritativeSections.contains(key) && !speculativeSections.containsKey(key)) {
+            return false;
+        }
         int index = ((y & 15) << 8) | ((z & 15) << 4) | (x & 15);
         char[] values = LOCAL_SECTIONS.get(key);
         if (values == null) {
@@ -409,6 +475,9 @@ public final class ClientGameplayLightField {
             for (int sectionZ = Math.floorDiv(minZ, 16); sectionZ <= Math.floorDiv(maxZ, 16); sectionZ++) {
                 for (int sectionX = Math.floorDiv(minX, 16); sectionX <= Math.floorDiv(maxX, 16); sectionX++) {
                     Key key = new Key(dimension, sectionX, sectionY, sectionZ);
+                    if (authoritativeSections.contains(key) && !speculativeSections.containsKey(key)) {
+                        continue;
+                    }
                     char[] previous = LOCAL_SECTIONS.get(key);
                     char[] authoritative = SECTIONS.get(key);
                     char[] replacement = staged.get(new SectionCoordinate(dimension, sectionX, sectionY, sectionZ));
@@ -461,6 +530,8 @@ public final class ClientGameplayLightField {
     }
 
     public static synchronized void clearLocal() {
+        speculativeSections.clear();
+        speculationExpiries.clear();
         if (LOCAL_SECTIONS.isEmpty()) {
             return;
         }
@@ -482,6 +553,8 @@ public final class ClientGameplayLightField {
                 changed = true;
             }
         }
+        speculativeSections.keySet().removeIf(key -> key.dimension.equals(dimension)
+                && key.x == chunkX && key.z == chunkZ);
         finishLocalBatch(changed);
         skyAffectedSections.removeIf(section -> section.dimension.equals(dimension)
                 && section.x == chunkX && section.z == chunkZ);
@@ -504,6 +577,9 @@ public final class ClientGameplayLightField {
     }
 
     private record Key(String dimension, int x, int y, int z) {
+    }
+
+    private record SpeculativeExpiry(Key key, long deadline) {
     }
 
     static final class LocalLookup {
