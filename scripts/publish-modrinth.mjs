@@ -27,8 +27,10 @@ if (mod.id !== 'totem-lumen' || mod.version !== version || mod.depends?.minecraf
 }
 const zipEntries = execFileSync('unzip', ['-Z1', file], { encoding: 'utf8' }).split('\n');
 if (!zipEntries.includes('assets/totem-lumen/shaders/core/held_light_rgb.fsh')
-    || !zipEntries.includes('LICENSE.txt_totem-lumen')) {
-  throw new Error('Release JAR is missing packaged shader assets or license');
+    || !zipEntries.includes('LICENSE.txt_totem-lumen')
+    || mod.icon !== 'assets/totem-lumen/icon.png'
+    || !zipEntries.includes(mod.icon)) {
+  throw new Error('Release JAR is missing packaged shader assets, license, or icon');
 }
 const changelog = readFileSync('docs/RELEASE_ALPHA61.md', 'utf8');
 const projectBody = readFileSync('docs/MODRINTH_PROJECT.md', 'utf8');

@@ -3,6 +3,7 @@
   "id": "totem-lumen",
   "version": "${version}",
   "name": "Totem Lumen",
+  "icon": "assets/totem-lumen/icon.png",
   "description": "Vulkan-first real-time lighting and voxel ray tracing for Minecraft 26.3, with server-authoritative gameplay lighting.",
   "authors": [
     "Yunitrish006006"
