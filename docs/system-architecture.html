@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Totem Lumen｜系統架構圖</title>
+  <style>
+    :root { color-scheme: dark; font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #071019; color: #e8f1f5; }
+    body { background: radial-gradient(circle at 64% 42%, #153044 0, #0b1824 40%, #060d15 100%); }
+    button, a { -webkit-tap-highlight-color: transparent; }
+    button:focus-visible, a:focus-visible, canvas:focus-visible { outline: 2px solid #a9eddd; outline-offset: 3px; }
+    .topbar { position: absolute; z-index: 5; top: 0; left: 0; right: 0; display: flex; align-items: center; gap: 16px; padding: 18px 24px; background: linear-gradient(#071019ec, #071019b8 68%, transparent); pointer-events: none; }
+    .brand, .toolbar { pointer-events: auto; }
+    .brand { display: flex; align-items: center; min-width: 0; gap: 12px; }
+    .brand img { width: 39px; height: 39px; image-rendering: pixelated; filter: drop-shadow(0 0 12px #ffbe686b); }
+    .brand h1 { margin: 0; font-size: clamp(17px, 2vw, 23px); font-weight: 750; letter-spacing: .025em; white-space: nowrap; }
+    .brand p { margin: 3px 0 0; color: #9cafbc; font-size: 11px; letter-spacing: .11em; white-space: nowrap; }
+    .toolbar { display: flex; gap: 8px; margin-left: auto; }
+    .toolbar button, .close { border: 1px solid #385263; border-radius: 9px; padding: 9px 12px; color: #d6e8ef; background: #102430dc; cursor: pointer; font: inherit; font-size: 12px; }
+    .toolbar button:hover, .close:hover { border-color: #8bc8c3; background: #183543; }
+    #scene { display: block; width: 100vw; height: 100vh; cursor: grab; touch-action: none; }
+    #scene.dragging { cursor: grabbing; }
+    .hint { position: absolute; left: 24px; bottom: 22px; z-index: 3; max-width: min(520px, calc(100vw - 48px)); padding: 11px 14px; border: 1px solid #3b576260; border-radius: 11px; background: #091a25d6; color: #bad0d8; font-size: 12px; line-height: 1.55; backdrop-filter: blur(12px); pointer-events: none; }
+    .hint strong { color: #eaf6f7; }
+    .legend { position: absolute; top: 91px; left: 24px; display: flex; flex-wrap: wrap; gap: 11px 16px; max-width: min(580px, calc(100vw - 48px)); z-index: 2; color: #a6bec9; font-size: 11px; pointer-events: none; }
+    .legend span { display: inline-flex; align-items: center; gap: 6px; }
+    .legend i { display: block; width: 9px; height: 9px; border-radius: 50%; box-shadow: 0 0 9px currentColor; }
+    .detail { position: absolute; z-index: 4; top: 95px; right: 24px; bottom: 22px; width: min(370px, calc(100vw - 48px)); padding: 23px 22px; overflow-y: auto; border: 1px solid #49718191; border-radius: 18px; background: linear-gradient(150deg, #15303deb, #0b1925f3 55%, #0a1722f5); box-shadow: 0 20px 70px #0008, inset 0 1px #91d9d526; backdrop-filter: blur(20px); transform: translateX(calc(100% + 30px)); opacity: 0; transition: transform .25s ease, opacity .25s ease; }
+    .detail.open { transform: translateX(0); opacity: 1; }
+    .detail .close { float: right; padding: 5px 9px; font-size: 18px; line-height: 1; }
+    .eyebrow { color: #8fd1cc; letter-spacing: .15em; font-size: 11px; font-weight: 700; text-transform: uppercase; }
+    .detail h2 { margin: 12px 0 6px; font-size: 23px; line-height: 1.25; }
+    .detail .status { display: inline-block; margin: 3px 0 18px; padding: 5px 9px; border-radius: 99px; background: #1f3d46; color: #bfe8df; font-size: 11px; }
+    .detail p { margin: 0 0 19px; color: #d5e3e8; font-size: 14px; line-height: 1.72; }
+    .detail h3 { margin: 23px 0 8px; color: #a4c8d2; font-size: 11px; letter-spacing: .12em; }
+    .detail .boundary { border-left: 2px solid #dfa960; padding-left: 11px; color: #c7d7dd; }
+    .sources { display: flex; flex-wrap: wrap; gap: 7px; }
+    .sources a { display: inline-block; padding: 6px 9px; border: 1px solid #35535f; border-radius: 8px; color: #b4e9e2; text-decoration: none; font-size: 11px; word-break: break-word; }
+    .sources a:hover { border-color: #9adcd2; color: #fff; }
+    .footer { position: absolute; right: 25px; bottom: 25px; z-index: 2; color: #7896a3; font-size: 11px; pointer-events: none; }
+    @media (max-width: 700px) {
+      .topbar { padding: 13px 15px; gap: 8px; }
+      .brand img { width: 31px; height: 31px; }
+      .brand p { display: none; }
+      .toolbar { gap: 5px; }
+      .toolbar button { padding: 7px 8px; font-size: 11px; }
+      .legend { top: 64px; left: 15px; gap: 5px 11px; font-size: 10px; }
+      .hint { left: 12px; bottom: 12px; max-width: calc(100vw - 24px); padding: 8px 10px; font-size: 10px; }
+      .detail { top: auto; left: 8px; right: 8px; bottom: 8px; width: auto; max-height: min(60vh, 510px); padding: 17px; transform: translateY(calc(100% + 16px)); }
+      .footer { display: none; }
+    }
+    @media (prefers-reduced-motion: reduce) { .detail { transition: none; } }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <img src="../src/main/resources/assets/totem-lumen/icon.png" alt="Totem Lumen icon">
+      <div><h1>Totem Lumen｜系統架構</h1><p>MINECRAFT 26.3 · FABRIC · ALPHA 61 SOURCE</p></div>
+    </div>
+    <div class="toolbar">
+      <button id="moveMode" type="button" aria-pressed="false">平移模式</button>
+      <button id="resetView" type="button">重置視角</button>
+    </div>
+  </header>
+  <div class="legend" aria-hidden="true">
+    <span><i style="color:#e9ae69;background:#e9ae69"></i>伺服器權威</span>
+    <span><i style="color:#70c9d6;background:#70c9d6"></i>同步邊界</span>
+    <span><i style="color:#a99bf3;background:#a99bf3"></i>客戶端選擇</span>
+    <span><i style="color:#83d3af;background:#83d3af"></i>Minecraft 畫面</span>
+    <span><i style="color:#efca82;background:#efca82"></i>Totem Vulkan</span>
+    <span><i style="color:#8bbdf2;background:#8bbdf2"></i>輸出與診斷</span>
+  </div>
+  <canvas id="scene" tabindex="0" aria-label="互動式 Totem Lumen 系統架構圖。點選節點展開與閱讀說明；方向鍵切換節點，Enter 開啟。"></canvas>
+  <div class="hint"><strong>操作：</strong>點選主節點展開子系統；拖曳旋轉、滾輪縮放；按「平移模式」後拖曳可移動畫面。鍵盤方向鍵切換節點，Enter 開啟，Esc 收合。</div>
+  <aside id="detail" class="detail" aria-live="polite" aria-label="架構節點說明">
+    <button id="closeDetail" class="close" type="button" aria-label="關閉說明">×</button>
+    <div class="eyebrow" id="detailKind"></div>
+    <h2 id="detailTitle"></h2>
+    <span class="status" id="detailStatus"></span>
+    <p id="detailDescription"></p>
+    <h3>資料流</h3><p id="detailFlow"></p>
+    <h3>目前界線</h3><p id="detailBoundary" class="boundary"></p>
+    <h3>對應來源</h3><div id="detailSources" class="sources"></div>
+  </aside>
+  <div class="footer">SOURCE-BASED MAP · 2026-09-29</div>
+  <script>
+    'use strict';
+    const src = (label, href) => ({ label, href });
+    const nodes = [
+      { id:'server', title:'伺服器權威', sub:'資料包 · RGB 光場 · 生成判定', kind:'伺服器', color:'#e9ae69', x:-650,y:-55,z:-60, root:true, status:'已實作；部分實機驗證待完成',
+        description:'世界資料包與伺服器設定決定發光顏色、強度、維度環境及生成敏感度。伺服器維護有界的 RGB 遊戲光場，並以此參與怪物生成判定。',
+        flow:'資料包／設定 → 有效規則 → ServerGameplayLightEngine → 生成判定；規則與區段光場另經網路送往有模組的客戶端。',
+        boundary:'遊戲光場是確定性的近似，不是 Vulkan 渲染結果；專用伺服器不初始化客戶端 Vulkan 類別。GL1/GL2 已實作，較廣的伺服器實機驗證與 GL4 效能分析仍待完成。',
+        refs:[src('架構文件','ARCHITECTURE.md'),src('伺服器入口','../src/main/java/dev/totem/lumen/TotemLumen.java'),src('ServerGameplayLightEngine','../src/main/java/dev/totem/lumen/gameplay/light/ServerGameplayLightEngine.java')],
+        children:['rules','field','spawn'] },
+      { id:'rules', title:'資料包與有效規則', sub:'發光 · 維度 · 生成設定', kind:'伺服器子系統', color:'#e9ae69', rootOf:'server', dx:-245,dy:-155,dz:90, status:'已實作',
+        description:'Resource reload 讀入方塊發光規則、維度環境與生成光譜設定，再合併伺服器覆寫。預設資料包隨模組提供。',
+        flow:'World Data Pack + ServerLightingConfigStore → EffectiveLightingRules → 光場與客戶端規則快照。',
+        boundary:'伺服器覆寫具權威性；預覽 UI 不直接修改來源資料包。', refs:[src('資料包載入','../src/main/java/dev/totem/lumen/world/LightingWorldRulesReloadListener.java'),src('有效規則','../src/main/java/dev/totem/lumen/world/EffectiveLightingRules.java'),src('設定','../src/main/java/dev/totem/lumen/config/ServerLightingConfigStore.java')] },
+      { id:'field', title:'RGB 遊戲光場', sub:'稀疏區段 · 有界傳播', kind:'伺服器子系統', color:'#e9ae69', rootOf:'server', dx:220,dy:-150,dz:70, status:'已實作；規模驗證待完成',
+        description:'追蹤光源、區段光值與待重建區域，按預算逐步更新。與客戶端預測共用 RgbLightAttenuation 的衰減規則。',
+        flow:'發光方塊／手持光源／環境 → ServerGameplayLightingManager → ServerGameplayLightEngine → RGB 區段快取。',
+        boundary:'不做 GI、反射或 Vulkan 光追；光場更新有工作量與時間上限。', refs:[src('光場引擎','../src/main/java/dev/totem/lumen/gameplay/light/ServerGameplayLightEngine.java'),src('共用衰減','../src/main/java/dev/totem/lumen/gameplay/light/RgbLightAttenuation.java')] },
+      { id:'spawn', title:'怪物生成判定', sub:'讀取伺服器光場', kind:'伺服器子系統', color:'#e9ae69', rootOf:'server', dx:0,dy:172,dz:110, status:'已實作；跨環境驗證待完成',
+        description:'生成判定讀取伺服器權威 RGB 光與光譜設定；客戶端畫面亮度不決定遊戲規則。',
+        flow:'RGB 區段快取 + 生成光譜 → GameplaySpawnLighting → Minecraft 生成判定。',
+        boundary:'髒區段採取保守處理；專用伺服器行為仍需更多實機驗證。', refs:[src('生成判定','../src/main/java/dev/totem/lumen/gameplay/light/GameplaySpawnLighting.java'),src('生成 Mixin','../src/main/java/dev/totem/lumen/mixin/MonsterSpawnLightingMixin.java')] },
+
+      { id:'wire', title:'同步邊界', sub:'權威規則 · 區段光值 · 手持光', kind:'網路', color:'#70c9d6', x:-330,y:-55,z:0, root:true, status:'已實作',
+        description:'伺服器只向具備對應 payload 能力的客戶端同步規則、手持光與 RGB 區段資料。客戶端接收後更新自己的預測、畫面或預覽狀態。',
+        flow:'伺服器快照 → Fabric clientbound payload → ClientLightingWorldRules／ClientGameplayLightField／ClientHeldLightState。',
+        boundary:'同步資料提供視覺與 UI；伺服器不信任客戶端渲染結果來判斷生成。', refs:[src('封包註冊','../src/main/java/dev/totem/lumen/TotemLumen.java'),src('客戶端接收','../src/client/java/dev/totem/lumen/TotemLumenClient.java')], children:['payloads','preview'] },
+      { id:'payloads', title:'遊戲光封包', sub:'Rules · Sections · Held', kind:'網路子系統', color:'#70c9d6', rootOf:'wire', dx:-160,dy:-170,dz:100, status:'已實作',
+        description:'規則、RGB 區段與手持光各有明確 payload，避免把整個 Minecraft 世界物件送進客戶端渲染管線。',
+        flow:'LightingWorldRulesPayload／GameplayLightSectionsPayload／HeldLightsPayload → 客戶端狀態。',
+        boundary:'客戶端可以呈現或預測光，但權威遊戲邏輯仍留在伺服器。', refs:[src('規則封包','../src/main/java/dev/totem/lumen/network/LightingWorldRulesPayload.java'),src('區段封包','../src/main/java/dev/totem/lumen/network/GameplayLightSectionsPayload.java'),src('手持封包','../src/main/java/dev/totem/lumen/network/HeldLightsPayload.java')] },
+      { id:'preview', title:'光源規則預覽', sub:'唯讀檢視 · 草稿另存', kind:'網路子系統', color:'#70c9d6', rootOf:'wire', dx:155,dy:165,dz:100, status:'已實作',
+        description:'伺服器提供資料包摘要與分頁，客戶端顯示規則來源；使用者的改動以草稿及新資料包保存。',
+        flow:'ServerLightingViewService → Summary／Page → ClientServerLightingViewState → 預覽與編輯畫面。',
+        boundary:'預覽不是直接改寫來源資料包或伺服器覆寫。', refs:[src('檢視服務','../src/main/java/dev/totem/lumen/gameplay/light/ServerLightingViewService.java'),src('預覽畫面','../src/client/java/dev/totem/lumen/gui/ServerLightingPreviewScreen.java')] },
+
+      { id:'profiles', title:'客戶端模式', sub:'Pure · RGB · Totem', kind:'客戶端', color:'#a99bf3', x:0,y:-55,z:35, root:true, status:'三種模式已實作',
+        description:'影片設定選擇三條畫面路徑。Minecraft Pure 保留原生世界渲染；Minecraft RGB 在原生幾何上呈現 RGB；Totem Lumen 啟用獨立的 Vulkan 場景與光追。',
+        flow:'RendererSettings.RenderProfile → 原生畫面分支或 Totem 場景抽取／Vulkan 分支。',
+        boundary:'Minecraft RGB 不等待 Totem 的大型 Vulkan 管線；只有 Totem Lumen 模式啟動完整光追。', refs:[src('模式設定','../src/client/java/dev/totem/lumen/render/RendererSettings.java'),src('影片設定整合','../src/client/java/dev/totem/lumen/gui/TotemLumenVideoSettingsIntegration.java')], children:['clientstate','selector'] },
+      { id:'clientstate', title:'客戶端光資料', sub:'快照 · 預測 · 區段欄位', kind:'客戶端子系統', color:'#a99bf3', rootOf:'profiles', dx:-175,dy:-165,dz:105, status:'已實作',
+        description:'接收伺服器快照並維持客戶端局部 RGB 欄位；區段變更按預算觸發重建，供 Minecraft RGB 的地形頂點取樣。',
+        flow:'封包與本地世界事件 → ClientGameplayLightPredictor／ClientGameplayLightField → 地形著色與 Totem 場景更新。',
+        boundary:'這是視覺欄位與短期預測，不取代伺服器生成判定。', refs:[src('光場','../src/client/java/dev/totem/lumen/integration/ClientGameplayLightField.java'),src('預測器','../src/client/java/dev/totem/lumen/integration/ClientGameplayLightPredictor.java')] },
+      { id:'selector', title:'設定與生命週期', sub:'切換 · 裝置就緒 · 回退', kind:'客戶端子系統', color:'#a99bf3', rootOf:'profiles', dx:165,dy:165,dz:105, status:'已實作',
+        description:'模式切換會重建所需的視覺資料。Totem 模式逐步等待 Vulkan 裝置、互通及管線就緒；啟動失敗時保留 Minecraft 畫面。',
+        flow:'影片設定 → RendererSettings → RendererBootstrap → 對應畫面分支。',
+        boundary:'不提供 OpenGL 光追後端；硬體 RT 擴充不構成最低需求。', refs:[src('RendererBootstrap','../src/client/java/dev/totem/lumen/render/RendererBootstrap.java'),src('客戶端入口','../src/client/java/dev/totem/lumen/TotemLumenClient.java')] },
+
+      { id:'native', title:'Minecraft 畫面路徑', sub:'原生幾何 · 可選 RGB', kind:'客戶端渲染', color:'#83d3af', x:345,y:-245,z:-10, root:true, status:'Alpha 61 RGB 視覺手測通過',
+        description:'Pure 與 RGB 都沿用 Minecraft 正常世界渲染。RGB 模式將區段 RGB 與天空光寫入地形頂點顏色；手持光另有畫面後處理。',
+        flow:'Minecraft 原生幾何 → Pure 原生光，或 RGB 地形頂點著色／手持光 → 原生畫面。',
+        boundary:'Alpha 61 的六項手動視覺檢查與柔和天空光邊界通過；數值收斂、移除光源與更廣覆蓋仍有待驗證。', refs:[src('RGB 地形光','../src/client/java/dev/totem/lumen/integration/VanillaRgbLighting.java'),src('手持光','../src/client/java/dev/totem/lumen/integration/HeldLightPostRenderer.java'),src('Alpha 61 狀態','ROADMAP.md')], children:['pure','rgb','held'] },
+      { id:'pure', title:'Minecraft Pure', sub:'原生世界畫面', kind:'原生模式', color:'#83d3af', rootOf:'native', dx:-205,dy:-150,dz:95, status:'已實作',
+        description:'保留 Minecraft 原生世界繪製，是診斷與比較其他模式的基準。', flow:'Minecraft 場景 → 原生世界繪製 → 主畫面。', boundary:'不啟動 Totem 光追管線。', refs:[src('模式定義','../src/client/java/dev/totem/lumen/render/RendererSettings.java'),src('啟動分流','../src/client/java/dev/totem/lumen/render/RendererBootstrap.java')] },
+      { id:'rgb', title:'Minecraft RGB', sub:'頂點 RGB + 平滑天空光', kind:'原生模式', color:'#83d3af', rootOf:'native', dx:200,dy:-150,dz:95, status:'Alpha 61 視覺手測通過',
+        description:'維持 Minecraft 地形渲染，從客戶端 RGB 欄位在每個 quad 頂點融合方塊光與天空光，保留原有紋理與透明度。', flow:'客戶端 RGB 欄位 + 天空光 → VanillaRgbLighting → Minecraft 地形 quad。', boundary:'RGB 是視覺效果；權威生成仍讀伺服器光場。', refs:[src('RGB 著色','../src/client/java/dev/totem/lumen/integration/VanillaRgbLighting.java'),src('天空光','../src/client/java/dev/totem/lumen/integration/RgbSkyLightMath.java')] },
+      { id:'held', title:'移動／手持光', sub:'有界畫面後處理', kind:'原生模式', color:'#83d3af', rootOf:'native', dx:0,dy:165,dz:110, status:'已實作；光遮擋仍有限制',
+        description:'手持光源在 Pure／RGB 原生世界畫面上以深度重建後處理補光，避免每幀因移動光源重建地形。', flow:'ClientHeldLightState + 本地 RGB 欄位 → HeldLightPostRenderer → 畫面補光。', boundary:'深度畫面路徑尚未提供完整方塊遮擋；需與放置光源做實機比較。', refs:[src('後處理','../src/client/java/dev/totem/lumen/integration/HeldLightPostRenderer.java'),src('狀態','../src/client/java/dev/totem/lumen/integration/ClientHeldLightState.java')] },
+
+      { id:'totem', title:'Totem Vulkan 路徑', sub:'場景抽取 · Compute 光追 · 合成', kind:'光追渲染', color:'#efca82', x:345,y:145,z:15, root:true, status:'基線已實作；26.3 世界內驗證待完成',
+        description:'Totem 模式抽取不可變場景，打包成 GPU 資源，借用 Minecraft 的 Vulkan 裝置與提交時間線，在 compute shader 中進行體素光追和後續光照合成。',
+        flow:'Minecraft 抽取 → RayScene／材質 → Vulkan GPU 場景 → Compute voxel RT → 光照／時間累積 → 主世界目標。',
+        boundary:'不直接在 Vulkan 命令記錄階段持有可變 ClientLevel；Apple M4／MoltenVK 的 26.2 基線已驗證，26.3 的完整世界內接受仍待完成。硬體 RT 屬 P19+ 規劃。', refs:[src('總覽','ARCHITECTURE.md'),src('路線圖','ROADMAP.md'),src('主要渲染器','../src/client/java/dev/totem/lumen/vulkan/P5StableLookupRenderer.java')], children:['extract','cpu','gpu','trace','lighting','future'] },
+      { id:'extract', title:'Minecraft 抽取', sub:'區塊 · 實體 · 流體 · 環境', kind:'Totem 子系統', color:'#efca82', rootOf:'totem', dx:-390,dy:-160,dz:90, status:'已實作；覆蓋仍有缺口',
+        description:'以 Fabric extraction 事件與局部 Mixin 擷取 Minecraft 已解析的幾何、相機與環境，轉成 Totem 自有的快照與更新佇列。', flow:'ClientLevel／模型結果 → SceneExtractionBridge → SceneUpdateQueue／FrameSnapshot。', boundary:'掉落物、載具、投射物、特殊 renderer 等 P17 家族仍未完整覆蓋。', refs:[src('抽取橋接','../src/client/java/dev/totem/lumen/integration/SceneExtractionBridge.java'),src('更新佇列','../src/main/java/dev/totem/lumen/scene/SceneUpdateQueue.java')] },
+      { id:'cpu', title:'CPU 場景與材質', sub:'RayScene · P14/P17/P18', kind:'Totem 子系統', color:'#efca82', rootOf:'totem', dx:-145,dy:-160,dz:100, status:'已實作；部分材質驗證待完成',
+        description:'RayScene 保存區段、動態實體與畫面快照；材質層處理一般表面及 LabPBR。P14E 流體、P17 實體與 P18 紋理材質已進入實作。', flow:'抽取快照 → RayScene／MaterialRegistry／LabPBR 解碼 → GPU 打包。', boundary:'P14E 世界內幾何、P17 renderer 家族、P18D 實體與方塊實體材質保真仍有待完成。', refs:[src('RayScene','../src/main/java/dev/totem/lumen/scene/RayScene.java'),src('材質','../src/main/java/dev/totem/lumen/material/MaterialRegistry.java'),src('P18 設計','P18_RESOURCE_PACK_LABPBR.md')] },
+      { id:'gpu', title:'Vulkan GPU 場景', sub:'區段槽位 · 材質 · 歷史', kind:'Totem 子系統', color:'#efca82', rootOf:'totem', dx:135,dy:-160,dz:100, status:'基線已實作',
+        description:'將區段、材質、光源、實體、流體與歷史緩衝打包到 GPU ABI，使用 Minecraft 現有 Vulkan 裝置與提交序列。', flow:'RayScene／材質 → GpuSceneAbi 與上傳器 → Vulkan storage buffers。', boundary:'不建立第二個 VkDevice；GPU 資源生命週期與 fence 同步是正確性條件。', refs:[src('GPU ABI','../src/main/java/dev/totem/lumen/gpu/GpuSceneAbi.java'),src('Vulkan 橋接','../src/client/java/dev/totem/lumen/vulkan/MinecraftVulkanBridge.java')] },
+      { id:'trace', title:'Compute 體素光追', sub:'最近交點 · 陰影 · 反射', kind:'Totem 子系統', color:'#efca82', rootOf:'totem', dx:405,dy:-160,dz:95, status:'Compute 基線已驗證於 Apple M4',
+        description:'Vulkan compute 中的體素 DDA 是最低支援路徑；模型網格、流體與動態實體逐步納入共用最近交點。', flow:'GPU 場景 + 相機 → P5StableLookupRenderer／shader → 主要可見性與次級光線。', boundary:'Vulkan 硬體 RT 擴充是可選的未來加速方向，不是目前可用的必要後端。', refs:[src('Compute 渲染','../src/client/java/dev/totem/lumen/vulkan/P5StableLookupRenderer.java'),src('P17 設計','P17_DYNAMIC_ENTITIES.md')] },
+      { id:'lighting', title:'光照與穩定化', sub:'天空 · GI · 時間累積 · 降噪', kind:'Totem 子系統', color:'#efca82', rootOf:'totem', dx:225,dy:165,dz:120, status:'多階段已實作；完整驗收待完成',
+        description:'整合日月天空、局部光、陰影、一次漫反射 GI、反射，再用歷史重投影與空間過濾穩定畫面。', flow:'交點與材質 → P12/P13/P16 等 shader 階段 → temporal history／denoise → 最終顏色。', boundary:'P10/P11 曾在 26.2 Apple M4 驗證；26.3 全路徑及部分光學材質仍需世界內檢查。', refs:[src('路線圖','ROADMAP.md'),src('完整光照管線','../src/client/java/dev/totem/lumen/vulkan/P12FullBasePipeline.java')] },
+      { id:'future', title:'P19+ 硬體 RT', sub:'可選加速方向', kind:'未來規劃', color:'#e39b86', rootOf:'totem', dx:-240,dy:165,dz:125, status:'規劃；尚非基線實作',
+        description:'若裝置具備所需功能與擴充，可在穩定的 compute 基線之上評估 Vulkan 硬體光追。', flow:'裝置能力探測 → 未來可選加速路徑。', boundary:'目前架構圖的實際最低後端仍是 Vulkan compute voxel RT。', refs:[src('P19+ 路線圖','ROADMAP.md'),src('能力探測','../src/client/java/dev/totem/lumen/vulkan/VulkanCapabilityProbe.java')] },
+
+      { id:'output', title:'畫面與診斷', sub:'主世界目標 · HUD · F8/F9', kind:'輸出', color:'#8bbdf2', x:700,y:-55,z:-45, root:true, status:'世界接管曾於 26.2 實機驗證',
+        description:'原生路徑直接呈現 Minecraft 世界。Totem 模式在完整畫格就緒後將結果寫入主世界目標，取代該階段的原生世界繪製；HUD 保持後續獨立階段。',
+        flow:'Pure／RGB 原生畫面，或 Totem 完成畫格 → Minecraft 主畫面；F8/F9 提供視覺及效能診斷。',
+        boundary:'Alpha 51 的接管與 Alpha 52 的方向修正為 26.2 歷史驗證；26.3 發行版仍須與實際世界畫面分開報告。', refs:[src('接管 Mixin','../src/client/java/dev/totem/lumen/mixin/LevelRendererTakeoverMixin.java'),src('渲染器','../src/client/java/dev/totem/lumen/vulkan/P5StableLookupRenderer.java'),src('驗證記錄','ROADMAP.md')], children:['takeover','diagnostics'] },
+      { id:'takeover', title:'主畫面接管', sub:'完整畫格才取代原生繪製', kind:'輸出子系統', color:'#8bbdf2', rootOf:'output', dx:-160,dy:-165,dz:95, status:'已實作',
+        description:'LevelRendererTakeoverMixin 在 Totem 畫格可呈現時接管世界繪製；抽取事件仍照常執行。', flow:'完成的 Totem Vulkan 畫格 → presentToWorldTarget → Minecraft 主世界目標。', boundary:'尚未就緒或失敗時保留 Minecraft 可用的畫面路徑。', refs:[src('接管實作','../src/client/java/dev/totem/lumen/mixin/LevelRendererTakeoverMixin.java'),src('渲染器','../src/client/java/dev/totem/lumen/vulkan/P5StableLookupRenderer.java')] },
+      { id:'diagnostics', title:'設定與診斷', sub:'影片設定 · F8 · F9', kind:'輸出子系統', color:'#8bbdf2', rootOf:'output', dx:160,dy:165,dz:95, status:'已實作',
+        description:'影片設定中的模式與品質控制，以及 F8 視覺模式、F9 分階段效能探針，支援畫面及效能排查。', flow:'RendererSettings／診斷按鍵 → 狀態、HUD 與日誌。', boundary:'建置通過、日誌、實際畫面與公開發布是不同證據。', refs:[src('客戶端按鍵','../src/client/java/dev/totem/lumen/TotemLumenClient.java'),src('診斷畫面','../src/client/java/dev/totem/lumen/gui/TotemLumenDiagnosticsScreen.java')] }
+    ];
+    const byId = new Map(nodes.map(node => [node.id, node]));
+    const links = [['server','wire'],['wire','profiles'],['profiles','native'],['profiles','totem'],['native','output'],['totem','output']];
+    const canvas = document.getElementById('scene');
+    const ctx = canvas.getContext('2d');
+    const detail = document.getElementById('detail');
+    const moveButton = document.getElementById('moveMode');
+    let width = 0, height = 0, dpr = 1, activeGroup = null, selected = null, hover = null;
+    let moving = false, pointer = null, dragged = false;
+    const camera = { yaw: -0.10, pitch: 0.07, zoom: 0.85, panX: 0, panY: 0 };
+
+    function resize() {
+      const previousWidth = width;
+      width = window.innerWidth; height = window.innerHeight;
+      dpr = Math.min(window.devicePixelRatio || 1, 2);
+      canvas.width = Math.round(width * dpr); canvas.height = Math.round(height * dpr);
+      camera.zoom = previousWidth ? camera.zoom : width < 700 ? 0.83 : Math.min(1.0, Math.max(0.59, (width - 100) / 1600));
+      if (!previousWidth && width < 700) camera.panX = 540;
+      draw();
+    }
+    function world(node) {
+      if (!node.rootOf) return node;
+      const parent = byId.get(node.rootOf);
+      return { x: parent.x + node.dx, y: parent.y + node.dy, z: parent.z + node.dz };
+    }
+    function project(node) {
+      const p = world(node), cy = Math.cos(camera.yaw), sy = Math.sin(camera.yaw);
+      const cp = Math.cos(camera.pitch), sp = Math.sin(camera.pitch);
+      const rx = p.x * cy - p.z * sy, rz = p.x * sy + p.z * cy;
+      const ry = p.y * cp - rz * sp, depth = p.y * sp + rz * cp;
+      const perspective = 1250 / (1250 + depth);
+      const scale = camera.zoom * perspective;
+      return { x: width / 2 + camera.panX + rx * scale, y: height / 2 + camera.panY + ry * scale,
+        scale, depth, w: (node.root ? 204 : 185) * scale, h: (node.root ? 78 : 69) * scale };
+    }
+    function visibleNodes() { return nodes.filter(n => n.root || n.rootOf === activeGroup); }
+    function roundRect(x,y,w,h,r) {
+      ctx.beginPath(); ctx.roundRect(x,y,w,h,r);
+    }
+    function drawBackground() {
+      const g = ctx.createRadialGradient(width*.52,height*.49,40,width*.52,height*.49,Math.max(width,height)*.75);
+      g.addColorStop(0,'#17364a'); g.addColorStop(.52,'#0a1b29'); g.addColorStop(1,'#061019');
+      ctx.fillStyle = g; ctx.fillRect(0,0,width,height);
+      ctx.strokeStyle = '#40748719'; ctx.lineWidth = 1;
+      const gap = 72 * Math.max(.65,camera.zoom);
+      for (let x = ((camera.panX + width/2) % gap) - gap; x < width + gap; x += gap) {
+        ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,height); ctx.stroke();
+      }
+      for (let y = ((camera.panY + height/2) % gap) - gap; y < height + gap; y += gap) {
+        ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(width,y); ctx.stroke();
+      }
+      ctx.fillStyle='#9bdcd344';
+      for (let i=0;i<36;i++) {
+        const x=(i*239.73+width*.18)%width, y=(i*137.19+height*.27)%height;
+        ctx.beginPath();ctx.arc(x,y,i%5===0?1.4:.7,0,Math.PI*2);ctx.fill();
+      }
+    }
+    function drawLink(a,b,color,dashed=false) {
+      const p=project(byId.get(a)),q=project(byId.get(b));
+      const vx=q.x-p.x,vy=q.y-p.y,len=Math.hypot(vx,vy)||1,ux=vx/len,uy=vy/len;
+      const start={x:p.x+ux*p.w*.49,y:p.y+uy*p.h*.47};
+      const end={x:q.x-ux*q.w*.50,y:q.y-uy*q.h*.49};
+      const mx=(start.x+end.x)/2,my=(start.y+end.y)/2;
+      ctx.save();ctx.strokeStyle=color;ctx.lineWidth=dashed?1.4:2;ctx.setLineDash(dashed?[5,6]:[]);
+      ctx.shadowBlur=11;ctx.shadowColor=color;
+      ctx.beginPath();ctx.moveTo(start.x,start.y);
+      ctx.quadraticCurveTo(mx,my-23*camera.zoom,end.x,end.y);ctx.stroke();
+      ctx.setLineDash([]);ctx.shadowBlur=0;
+      const angle=Math.atan2(end.y-my,end.x-mx),size=7*Math.max(.7,camera.zoom);
+      ctx.fillStyle=color;ctx.beginPath();ctx.moveTo(end.x,end.y);
+      ctx.lineTo(end.x-Math.cos(angle-.5)*size,end.y-Math.sin(angle-.5)*size);
+      ctx.lineTo(end.x-Math.cos(angle+.5)*size,end.y-Math.sin(angle+.5)*size);
+      ctx.closePath();ctx.fill();ctx.restore();
+    }
+    function drawNode(node) {
+      const p=project(node), x=p.x-p.w/2,y=p.y-p.h/2;
+      const isSelected=selected===node.id,isHovered=hover===node.id;
+      ctx.save();ctx.shadowColor=node.color;ctx.shadowBlur=isSelected?25:isHovered?17:10;
+      ctx.fillStyle='#091a28e8';ctx.strokeStyle=isSelected?'#f3faf7':node.color;
+      ctx.lineWidth=isSelected?2.1:1.25;
+      roundRect(x,y,p.w,p.h,Math.max(9,13*p.scale));ctx.fill();ctx.stroke();ctx.shadowBlur=0;
+      const grad=ctx.createLinearGradient(x,y,x+p.w,y+p.h);
+      grad.addColorStop(0,node.color+'30');grad.addColorStop(1,node.color+'04');
+      ctx.fillStyle=grad;roundRect(x+1,y+1,p.w-2,p.h-2,Math.max(8,12*p.scale));ctx.fill();
+      ctx.fillStyle=node.color;roundRect(x+11*p.scale,y+12*p.scale,3*p.scale,p.h-24*p.scale,3*p.scale);ctx.fill();
+      ctx.textBaseline='middle';ctx.textAlign='left';
+      ctx.fillStyle='#eff8f9';ctx.font=`${node.root?700:650} ${Math.max(10,(node.root?16:14)*p.scale)}px ui-sans-serif,system-ui`;
+      ctx.fillText(node.title,x+23*p.scale,y+29*p.scale,p.w-35*p.scale);
+      ctx.fillStyle='#a9c2ca';ctx.font=`${Math.max(8,10.5*p.scale)}px ui-sans-serif,system-ui`;
+      ctx.fillText(node.sub,x+23*p.scale,y+52*p.scale,p.w-34*p.scale);
+      if(node.root){ctx.fillStyle=node.color;ctx.font=`${Math.max(8,11*p.scale)}px ui-sans-serif,system-ui`;
+        ctx.textAlign='right';ctx.fillText(activeGroup===node.id?'−':'+',x+p.w-12*p.scale,y+18*p.scale);}
+      if(node.id==='future'){ctx.setLineDash([4,4]);ctx.strokeStyle='#e39b86';ctx.lineWidth=1;roundRect(x-4,y-4,p.w+8,p.h+8,16*p.scale);ctx.stroke();}
+      ctx.restore();
+    }
+    function draw() {
+      if(!width||!height)return;
+      ctx.setTransform(dpr,0,0,dpr,0,0);drawBackground();
+      for(const [a,b] of links) drawLink(a,b,'#90bdc477');
+      if(activeGroup){
+        const root=byId.get(activeGroup);
+        for(const childId of root.children) drawLink(activeGroup,childId,childId==='future'?'#e39b86aa':root.color+'a8',childId==='future');
+      }
+      const ordered=visibleNodes().sort((a,b)=>project(b).depth-project(a).depth);
+      for(const node of ordered) drawNode(node);
+    }
+    function hit(x,y) {
+      const ordered=visibleNodes().sort((a,b)=>project(b).depth-project(a).depth);
+      for(let i=ordered.length-1;i>=0;i--){const n=ordered[i],p=project(n);
+        if(x>=p.x-p.w/2&&x<=p.x+p.w/2&&y>=p.y-p.h/2&&y<=p.y+p.h/2)return n;}
+      return null;
+    }
+    function fillDetail(node) {
+      document.getElementById('detailKind').textContent=node.kind;
+      document.getElementById('detailTitle').textContent=node.title;
+      document.getElementById('detailStatus').textContent=node.status;
+      document.getElementById('detailDescription').textContent=node.description;
+      document.getElementById('detailFlow').textContent=node.flow;
+      document.getElementById('detailBoundary').textContent=node.boundary;
+      const refs=document.getElementById('detailSources');refs.replaceChildren();
+      for(const item of node.refs){const a=document.createElement('a');a.href=item.href;a.textContent=item.label;refs.append(a);}
+      detail.classList.add('open');
+    }
+    function focusGroup(id) {
+      const p=project(byId.get(id));
+      camera.panX += width*(width<700?.50:.44)-p.x;
+      camera.panY += height*.48-p.y;
+    }
+    function select(node) {
+      if(node.root){activeGroup=activeGroup===node.id?null:node.id;if(activeGroup)focusGroup(node.id);}
+      selected=node.id;fillDetail(node);draw();
+    }
+    function closeDetail() { detail.classList.remove('open');selected=null;draw(); }
+    function reset() {camera.yaw=-.10;camera.pitch=.07;camera.zoom=width<700?.83:Math.min(1,Math.max(.59,(width-100)/1600));camera.panX=width<700?540:0;camera.panY=0;activeGroup=null;selected=null;detail.classList.remove('open');draw();}
+    canvas.addEventListener('pointerdown',event=>{canvas.focus();canvas.setPointerCapture(event.pointerId);pointer={x:event.clientX,y:event.clientY,button:event.button};dragged=false;canvas.classList.add('dragging');});
+    canvas.addEventListener('pointermove',event=>{
+      if(!pointer){const h=hit(event.clientX,event.clientY);const id=h?.id||null;if(id!==hover){hover=id;canvas.style.cursor=id?'pointer':'grab';draw();}return;}
+      const dx=event.clientX-pointer.x,dy=event.clientY-pointer.y;
+      if(Math.abs(dx)+Math.abs(dy)>2)dragged=true;
+      if(dragged){if(moving||pointer.button===2||event.shiftKey){camera.panX+=dx;camera.panY+=dy;}
+        else{camera.yaw=Math.max(-.42,Math.min(.42,camera.yaw+dx*.002));camera.pitch=Math.max(-.30,Math.min(.30,camera.pitch+dy*.002));}
+        pointer.x=event.clientX;pointer.y=event.clientY;draw();}
+    });
+    canvas.addEventListener('pointerup',event=>{if(!dragged){const n=hit(event.clientX,event.clientY);if(n)select(n);}pointer=null;canvas.classList.remove('dragging');});
+    canvas.addEventListener('pointercancel',()=>{pointer=null;canvas.classList.remove('dragging');});
+    canvas.addEventListener('contextmenu',event=>event.preventDefault());
+    canvas.addEventListener('wheel',event=>{event.preventDefault();camera.zoom=Math.max(.42,Math.min(1.8,camera.zoom*Math.exp(-event.deltaY*.001)));draw();},{passive:false});
+    canvas.addEventListener('keydown',event=>{
+      const list=visibleNodes();let index=list.findIndex(n=>n.id===selected);
+      if(['ArrowRight','ArrowDown','ArrowLeft','ArrowUp'].includes(event.key)){event.preventDefault();index=(index+(event.key==='ArrowRight'||event.key==='ArrowDown'?1:-1)+list.length)%list.length;selected=list[index].id;fillDetail(list[index]);draw();}
+      else if(event.key==='Enter'||event.key===' '){event.preventDefault();const n=byId.get(selected)||list[0];select(n);}
+      else if(event.key==='Escape'){event.preventDefault();closeDetail();activeGroup=null;draw();}
+      else if(event.key==='+'||event.key==='='){camera.zoom=Math.min(1.8,camera.zoom*1.12);draw();}
+      else if(event.key==='-'){camera.zoom=Math.max(.42,camera.zoom/1.12);draw();}
+    });
+    document.getElementById('resetView').addEventListener('click',reset);
+    document.getElementById('closeDetail').addEventListener('click',closeDetail);
+    moveButton.addEventListener('click',()=>{moving=!moving;moveButton.setAttribute('aria-pressed',String(moving));moveButton.textContent=moving?'旋轉模式':'平移模式';});
+    window.addEventListener('resize',resize);
+    resize();
+  </script>
+</body>
+</html>

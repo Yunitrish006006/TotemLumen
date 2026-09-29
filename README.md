@@ -21,6 +21,8 @@ The server gameplay subsystem never initializes or depends on Vulkan. A dedicate
 
 The current development baseline is **Alpha 61** for Minecraft 26.3. Minecraft RGB gameplay-light propagation, reload persistence and sky/torch presentation have received focused local checks; the broader Totem renderer and dedicated-server parity matrices remain active. See [Alpha 61 release notes](docs/RELEASE_ALPHA61.md) for the tested scope and remaining limits.
 
+Explore the [interactive system architecture diagram](docs/system-architecture.html) (Traditional Chinese) for the server authority, sync boundary, three client profiles, and Vulkan rendering path.
+
 Client renderer state:
 
 - Alpha 51+ uses direct world takeover: once a complete Totem frame is ready, Totem presents into Minecraft's main render target and vanilla level drawing is skipped. HUD/GUI remain independent.
