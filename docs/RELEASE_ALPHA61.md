@@ -15,7 +15,7 @@ Minecraft 26.3 · Fabric · Java 25
 - Java 25 `gradle check` includes unit tests, RGB verifiers, mixin descriptor checks and packaged shader compilation.
 - A 26.3 Apple M4/MoltenVK development client loaded the copied test world with Minecraft RGB and Indigo vertex sampling active.
 - The player reported torch add/remove, repeated world entry, boundary approach, sky-versus-torch scenes and perceived response/performance as visually OK. The player also confirmed the smooth sky-light hard edge was gone after the fix.
-- Separate local dedicated-server and saved-field probes confirmed one source remove/add and nearby propagation case; see [runtime evidence](GAMEPLAY_RGB_RUNTIME_2026-09-28.md).
+- Separate local dedicated-server and saved-field probes confirmed one source remove/add and nearby propagation case; see [runtime evidence](https://github.com/Yunitrish006006/TotemLumen/blob/main/docs/GAMEPLAY_RGB_RUNTIME_2026-09-28.md).
 
 ## Alpha limitations
 
