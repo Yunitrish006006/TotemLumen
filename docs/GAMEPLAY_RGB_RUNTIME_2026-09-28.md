@@ -124,17 +124,20 @@ benchmark.
 
 The September 28 handoff held PRs #59–#62 for a broader runtime matrix. The
 player's September 29 visual sweep and smooth sky-light confirmation support
-an explicitly limited Alpha 61 release, while the numerical matrix remains open:
-settled-value comparison over repeated reloads; both chunk loading orders;
-x/z/y and four-chunk boundaries; post-fix source add/remove and immediate save;
-`/reload`; offline emitter removal; and dedicated server/client parity.
+an explicitly limited Alpha 61 release. The later September 29 numerical
+acceptance closed the previously open cases: settled-value comparison over
+repeated saves/restarts; both cold chunk loading orders; x/z/y and four-chunk
+boundaries; post-fix source add/remove and immediate save; actual `/reload`
+rule changes; offline emitter removal; and dedicated server/client field
+parity. See `GAMEPLAY_RGB_ACCEPTANCE_2026-09-29.md` for the measured values.
 One post-fix torch placement visibly lit surrounding surfaces according to
 the player, a separate saved-field probe confirmed nearby propagation, and
 the development-client remove/restore sequence independently showed nearby
 surfaces darken and brighten.
 One dedicated-server source remove/add case passed after the event-hook fix.
-Broader visual behavior, measured response latency, and frame time remain unconfirmed.
-Repeated cache read/write counts are confirmed; settled RGB equality is not.
+Broader visual behavior, measured response latency, and frame time remain
+unconfirmed. The numerical follow-up confirmed selected settled RGB values and
+section hashes; it does not assert pixel parity or every possible world shape.
 
 ## Noon sky and torch balance follow-up
 

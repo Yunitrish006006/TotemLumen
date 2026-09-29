@@ -5,10 +5,13 @@
 Alpha 61 carries the Minecraft RGB gameplay-light correctness and presentation
 follow-up. The player reported six manual visual checks as passing, then
 confirmed that the smooth sky-light edge regression was resolved. Local
-`gradle check` passed after the per-vertex sky-light change. Numerical settled
-field equality, offline source removal, dedicated-server/client parity and
-broader Totem renderer coverage remain open; see `RELEASE_ALPHA61.md` and
-`GAMEPLAY_RGB_RUNTIME_2026-09-28.md`.
+`gradle check` passed after the per-vertex sky-light change. The September 29
+dedicated-server numerical matrix passed settled field equality, both cold
+chunk loading orders, boundaries, rule reload, offline source removal, and
+dedicated-server/client field parity. Matched response/frame-time measurements,
+large-world scale work, and broader Totem renderer coverage remain open; see
+`RELEASE_ALPHA61.md`, `GAMEPLAY_RGB_RUNTIME_2026-09-28.md`, and
+`GAMEPLAY_RGB_ACCEPTANCE_2026-09-29.md`.
 
 Alpha 60 ports the mod to Minecraft 26.3, Fabric Loader 0.19.5, Fabric API 0.160.5+26.3, and Gradle 9.6.1. Local build, tests, Vulkan shader packaging, and mixin descriptor checks pass. The 26.3 development client has a separate run directory so 26.2 worlds are not upgraded implicitly. Startup smoke reached Vulkan device initialization and resource loading on Apple M4 after updating the GPU backend accessor. In-world rendering acceptance remains pending.
 

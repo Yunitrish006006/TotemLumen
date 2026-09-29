@@ -16,10 +16,11 @@ Minecraft 26.3 · Fabric · Java 25
 - A 26.3 Apple M4/MoltenVK development client loaded the copied test world with Minecraft RGB and Indigo vertex sampling active.
 - The player reported torch add/remove, repeated world entry, boundary approach, sky-versus-torch scenes and perceived response/performance as visually OK. The player also confirmed the smooth sky-light hard edge was gone after the fix.
 - Separate local dedicated-server and saved-field probes confirmed one source remove/add and nearby propagation case; see [runtime evidence](https://github.com/Yunitrish006006/TotemLumen/blob/main/docs/GAMEPLAY_RGB_RUNTIME_2026-09-28.md).
+- The September 29 numerical follow-up passed repeated settled saves and restart, both cold chunk loading orders, x/z/y boundaries, actual rule reload, offline source removal, and dedicated-server/client RGB field parity; see [numerical acceptance](GAMEPLAY_RGB_ACCEPTANCE_2026-09-29.md).
 
 ## Alpha limitations
 
-- Visual checks do not establish equal settled RGB values across repeated reloads, opposite chunk load orders or all chunk/section boundaries. Offline emitter removal, rule reload and dedicated-server/client numerical parity remain open.
-- Frame time, broad material coverage and the full Totem Vulkan profile still need in-world validation. This version is an Alpha release for Minecraft 26.3.
+- The numerical matrix tests selected block coordinates and sections; it does not establish rendered pixel equality or cover every world shape and material.
+- Matched frame-time and response-latency measurements, large-world convergence, broad material coverage and the full Totem Vulkan profile still need validation. This version is an Alpha release for Minecraft 26.3.
 
 Requires Fabric Loader 0.19.5 or newer and the matching Minecraft 26.3 Fabric API. The client renderer uses Minecraft's Vulkan graphics backend. A dedicated server does not need Vulkan.
