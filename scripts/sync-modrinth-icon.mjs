@@ -35,10 +35,8 @@ if (process.env.GITHUB_REF !== 'refs/heads/main'
   throw new Error('Modrinth icon upload requires the owning repository main branch');
 }
 const token = process.env.MODRINTH_TOKEN;
-const projectId = process.env.MODRINTH_PROJECT_ID;
-if (!token || projectId !== 'DcB192se') {
-  throw new Error('Expected Modrinth token and Totem Lumen project ID');
-}
+if (!token) throw new Error('MODRINTH_TOKEN is missing');
+const projectId = 'DcB192se';
 
 const base = `https://api.modrinth.com/v2/project/${projectId}`;
 const headers = {

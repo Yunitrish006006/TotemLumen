@@ -20,5 +20,4 @@ jobs:
       - name: Upload and verify Modrinth icon
         env:
           MODRINTH_TOKEN: ${{ secrets.MODRINTH_TOKEN }}
-          MODRINTH_PROJECT_ID: ${{ secrets.MODRINTH_PROJECT_ID }}
         run: node scripts/sync-modrinth-icon.mjs --upload
