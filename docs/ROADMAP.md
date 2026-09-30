@@ -8,10 +8,15 @@ confirmed that the smooth sky-light edge regression was resolved. Local
 `gradle check` passed after the per-vertex sky-light change. The September 29
 dedicated-server numerical matrix passed settled field equality, both cold
 chunk loading orders, boundaries, rule reload, offline source removal, and
-dedicated-server/client field parity. Matched response/frame-time measurements,
-large-world scale work, and broader Totem renderer coverage remain open; see
-`RELEASE_ALPHA61.md`, `GAMEPLAY_RGB_RUNTIME_2026-09-28.md`, and
-`GAMEPLAY_RGB_ACCEPTANCE_2026-09-29.md`.
+dedicated-server/client field parity. A September 30 follow-up measured
+stationary foreground Pure/RGB frame windows, improved the server's initial
+large-world scan with an emitting-palette skip, and verified remove/replace
+field restoration on the dedicated test world. Block-edit-to-visible-frame
+latency, repeatable new-chunk movement, GL4 heavy-load cost, and broader Totem
+renderer coverage remain open; see
+`RELEASE_ALPHA61.md`, `GAMEPLAY_RGB_RUNTIME_2026-09-28.md`,
+`GAMEPLAY_RGB_ACCEPTANCE_2026-09-29.md`, and
+`GAMEPLAY_RGB_PERFORMANCE_2026-09-30.md`.
 
 Alpha 60 ports the mod to Minecraft 26.3, Fabric Loader 0.19.5, Fabric API 0.160.5+26.3, and Gradle 9.6.1. Local build, tests, Vulkan shader packaging, and mixin descriptor checks pass. The 26.3 development client has a separate run directory so 26.2 worlds are not upgraded implicitly. Startup smoke reached Vulkan device initialization and resource loading on Apple M4 after updating the GPU backend accessor. In-world rendering acceptance remains pending.
 

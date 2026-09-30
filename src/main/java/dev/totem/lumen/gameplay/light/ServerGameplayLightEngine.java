@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.Comparator;
+import java.util.function.Predicate;
 
 /**
  * Server-thread authoritative RGB gameplay-light field for one ServerLevel.
@@ -32,6 +33,7 @@ public final class ServerGameplayLightEngine {
     private static final int METRICS_INTERVAL_TICKS = 600;
     private static final int MAX_UNLOADED_WARM_SOURCES = 200_000;
     private static final int MAX_UNLOADED_WARM_SECTIONS = 8_192;
+    private static final Predicate<BlockState> EMITS_LIGHT = state -> state.getLightEmission() > 0;
 
     private final ServerLevel level;
     private final Map<ServerSectionKey, ServerLightSection> sections = new HashMap<>();
@@ -883,7 +885,9 @@ public final class ServerGameplayLightEngine {
             int consumed = 0;
             while (sectionIndex < chunkSections.length && consumed < budget) {
                 LevelChunkSection section = chunkSections[sectionIndex];
-                if (section.hasOnlyAir()) {
+                // The palette can rule out all emitters without reading 4,096 block states.
+                // finish() still reconciles any stale warm-cache sources in this section.
+                if (section.hasOnlyAir() || !section.maybeHas(EMITS_LIGHT)) {
                     sectionIndex++;
                     voxelIndex = 0;
                     consumed++;
