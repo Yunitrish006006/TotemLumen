@@ -140,6 +140,21 @@ public final class P16MultipassReflection {
         worker.start();
     }
 
+    /** Drop a scene binding before its storage buffer is destroyed; retain the prepared pipeline. */
+    public static void detach(VulkanOwnedBuffer scene) {
+        VulkanComputeProgram staleProgram;
+        synchronized (LOCK) {
+            if (attachedScene != scene) return;
+            attachedScene = null;
+            staleProgram = activeProgram;
+            activeProgram = null;
+            failure = null;
+            firstDispatchLogged = false;
+            LOCK.notifyAll();
+        }
+        closeAsync(staleProgram, "TotemLumen-P16DetachedBindingCleanup");
+    }
+
     private static void bindPreparedPipeline(
             VulkanDevice device,
             VulkanOwnedBuffer scene,
@@ -164,18 +179,14 @@ public final class P16MultipassReflection {
                 prepared = preparedPipeline;
             }
 
-            created = prepared.bind(device, scene);
             synchronized (LOCK) {
-                if (workerGeneration != generation || attachedScene != scene) {
-                    VulkanComputeProgram stale = created;
-                    created = null;
-                    closeAsync(stale, "TotemLumen-P16StaleBindingCleanup");
-                    return;
-                }
+                if (workerGeneration != generation || attachedScene != scene) return;
+                // detach() holds the same lock before the caller closes scene storage.
+                created = prepared.bind(device, scene);
                 activeProgram = created;
                 created = null;
+                TotemLumenClient.LOGGER.info("Reflection scene binding READY");
             }
-            TotemLumenClient.LOGGER.info("Reflection scene binding READY");
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
             synchronized (LOCK) {

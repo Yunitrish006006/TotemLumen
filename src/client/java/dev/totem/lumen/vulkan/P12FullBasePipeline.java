@@ -183,6 +183,23 @@ public final class P12FullBasePipeline {
         worker.start();
     }
 
+    /** Drop scene descriptors before the owning renderer closes the storage buffer. */
+    public static void detach(VulkanOwnedBuffer scene) {
+        VulkanComputeProgram staleProgram;
+        synchronized (LOCK) {
+            if (attachedScene != scene) return;
+            attachedScene = null;
+            staleProgram = activeProgram;
+            activeProgram = null;
+            failure = null;
+            firstDispatchLogged = false;
+            LOCK.notifyAll();
+        }
+        P16MultipassReflection.detach(scene);
+        DISPATCH_PROGRAM.remove();
+        closeAsync(staleProgram, "TotemLumen-P12FullDetachedBindingCleanup");
+    }
+
     private static void bindPreparedPipeline(
             VulkanDevice device,
             VulkanOwnedBuffer scene,
@@ -210,22 +227,25 @@ public final class P12FullBasePipeline {
                 prepared = preparedPipeline;
             }
 
-            created = prepared.bind(device, scene);
             synchronized (LOCK) {
-                if (workerGeneration != generation || attachedScene != scene) {
-                    VulkanComputeProgram stale = created;
-                    created = null;
-                    closeAsync(stale, "TotemLumen-P12FullStaleBindingCleanup");
-                    return;
-                }
+                if (workerGeneration != generation || attachedScene != scene) return;
+                // detach() holds the same lock before the caller closes scene storage.
+                created = prepared.bind(device, scene);
                 activeProgram = created;
                 created = null;
+                // Keep the P16 attach inside this lock so detach cannot miss a late attach.
+                try {
+                    P16MultipassReflection.attach(device, scene);
+                } catch (Throwable reflectionFailure) {
+                    TotemLumenClient.LOGGER.error(
+                            "Reflection scene attach FAILED; base renderer remains active",
+                            reflectionFailure
+                    );
+                }
+                TotemLumenClient.LOGGER.info(
+                        "Full lighting scene binding READY; prewarmed pipeline is available for frame dispatch"
+                );
             }
-
-            TotemLumenClient.LOGGER.info(
-                    "Full lighting scene binding READY; prewarmed pipeline is available for frame dispatch"
-            );
-            P16MultipassReflection.attach(device, scene);
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
             synchronized (LOCK) {

@@ -111,6 +111,7 @@ Stop `runClient` before rebuilding, then start it again. The development client 
 
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — client/server layering and hard architectural boundaries.
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — renderer roadmap and completed milestones.
+- [`docs/LUMEN_PROFILE_HANDOFF_2026-09-30.md`](docs/LUMEN_PROFILE_HANDOFF_2026-09-30.md) — current Totem Lumen profile evidence, lifecycle change, open gates and next validation steps.
 - [`docs/P13_OVERWORLD_MOON.md`](docs/P13_OVERWORLD_MOON.md) — Alpha 40 Overworld night sky: moon disk, eight-step lunar phase, procedural stars, transport and runtime validation.
 - [`docs/P14C_GENERIC_BLOCK_MODELS.md`](docs/P14C_GENERIC_BLOCK_MODELS.md) — generic static block-model extraction, generic mesh ABI/GPU layout, geometry-domain completeness matrix and future-proofing rules.
 - [`docs/P14D_BLOCK_ENTITY_GEOMETRY.md`](docs/P14D_BLOCK_ENTITY_GEOMETRY.md) — block-entity renderer geometry capture, stable mutable mesh slots, lifecycle, limitations and runtime validation.

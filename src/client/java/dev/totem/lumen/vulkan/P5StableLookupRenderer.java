@@ -2108,6 +2108,7 @@ public final class P5StableLookupRenderer {
         if (resources == null || inFlight) return;
         Resources old = resources;
         resources = null;
+        P12FullBasePipeline.detach(old.scene);
         closeQuietly(old.view);
         closeQuietly(old.texture);
         closeQuietly(old.program);

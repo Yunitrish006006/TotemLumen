@@ -2,6 +2,9 @@
 
 ## Current project state — Alpha 61
 
+The current Totem Lumen profile handoff and next runtime gates are recorded in
+`LUMEN_PROFILE_HANDOFF_2026-09-30.md`.
+
 Alpha 61 carries the Minecraft RGB gameplay-light correctness and presentation
 follow-up. The player reported six manual visual checks as passing, then
 confirmed that the smooth sky-light edge regression was resolved. Local
