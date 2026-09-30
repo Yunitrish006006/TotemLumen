@@ -11,9 +11,11 @@ chunk loading orders, boundaries, rule reload, offline source removal, and
 dedicated-server/client field parity. A September 30 follow-up measured
 stationary foreground Pure/RGB frame windows, improved the server's initial
 large-world scan with an emitting-palette skip, and verified remove/replace
-field restoration on the dedicated test world. Block-edit-to-visible-frame
-latency, repeatable new-chunk movement, GL4 heavy-load cost, and broader Totem
-renderer coverage remain open; see
+field restoration on the dedicated test world. The player then reported
+immediate surrounding-light response and smooth movement toward new chunks in
+the RGB test world. Quantified edit-to-frame latency, paired Pure/RGB
+chunk-flight timing, GL4 heavy-load cost, and broader Totem renderer coverage
+remain open; see
 `RELEASE_ALPHA61.md`, `GAMEPLAY_RGB_RUNTIME_2026-09-28.md`,
 `GAMEPLAY_RGB_ACCEPTANCE_2026-09-29.md`, and
 `GAMEPLAY_RGB_PERFORMANCE_2026-09-30.md`.

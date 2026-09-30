@@ -59,13 +59,21 @@ solid floor `0`, and the two queried section SHA-256 hashes exactly to their
 pre-removal values. `save-all flush` was used before each cache inspection.
 The server was stopped through its console. `gradle --offline check` passed.
 
+## Player observation after the change
+
+With the 26.3 client open in `CodexRgbRuntimeCopy` and Minecraft RGB selected,
+the player placed/removed a torch and moved toward new chunks for roughly
+20–30 seconds. They reported that surrounding light changed immediately and
+movement was smooth. This closes the requested qualitative in-world response
+check for this scene. It is not a measured latency distribution or a paired
+Pure/RGB chunk-flight benchmark.
+
 ## Remaining acceptance
 
-- Measure block edit to first visible updated frame, ideally with a synchronized
-  client/server trace. The cache checks establish settled field correctness,
-  not response latency.
-- Compare new-chunk movement under Pure and RGB in a repeatable path. The
-  stationary room and mixed JFR samples do not close the chunk-flight gate.
+- Measure block edit to first visible updated frame with a synchronized
+  client/server trace if a quantitative response target is required.
+- Compare new-chunk movement under Pure and RGB on a repeatable path for a
+  quantitative chunk-flight result.
 - Profile GL4 with repeatable heavy-load scenarios and enforce or revise its
   tick-cost target. The current trace only characterizes this world load.
 
