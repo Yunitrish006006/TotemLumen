@@ -126,12 +126,16 @@ outputs without replaying Minecraft draw buffers.
 Generic meshes, fluids, entities and animated textures still lack complete unlit surface coverage,
 and P18 sampled normal/specular/AO data has not yet been promoted to resolved per-pixel outputs.
 
-An isolated DIRECT_LIGHT diagnostic producer now exists behind
+An isolated DIRECT_LIGHT producer exists behind
 `-Dtotem.lumen.rasterDirectLightStage=true` together with MATERIAL_RESOLVE. It reuses the shared
 VOXEL_SCENE GPU atlas, selects at most 32 RGB emitters and traces at most four bounded visibility
-rays for material-covered pixels. Its output is not read by COMPOSITE yet. Therefore the active
-accepted renderer remains `SURFACE_CAPTURE -> INDIRECT_GI -> COMPOSITE`, and unsupported pixels
-continue to use native-lit fallback.
+rays for material-covered pixels.
+
+A separate `-Dtotem.lumen.rasterDirectLightComposite=true` diagnostic may consume that output.
+It changes only covered near-field static textured cubes; every uncovered/far/unsupported pixel
+retains native-lit + INDIRECT_GI fallback through the unchanged safe composite pipeline. The preview
+uses a small diagnostic ambient term and has no sun/moon/sky, so it is not a production independent
+lighting claim. Both flags are off by default.
 
 ### Stage 2d candidate: stable publication and light payload order
 
