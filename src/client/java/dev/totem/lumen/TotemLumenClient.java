@@ -16,7 +16,7 @@ import dev.totem.lumen.integration.RgbLatencyDiagnostics;
 import dev.totem.lumen.integration.SceneExtractionBridge;
 import dev.totem.lumen.integration.RasterLightingScene;
 import dev.totem.lumen.integration.RasterLightingRenderer;
-import dev.totem.lumen.integration.RasterMaterialCapture;
+import dev.totem.lumen.integration.RasterSurfaceCapture;
 import dev.totem.lumen.integration.VanillaRgbLighting;
 import dev.totem.lumen.network.GameplayLightSectionsPayload;
 import dev.totem.lumen.network.LightingWorldRulesPayload;
@@ -215,7 +215,7 @@ public final class TotemLumenClient implements ClientModInitializer {
             SceneExtractionBridge.tick();
             RasterLightingScene.tick(client);
             RasterLightingRenderer.tickLifecycle(client);
-            RasterMaterialCapture.tickLifecycle(client);
+            RasterSurfaceCapture.tickLifecycle(client);
             P5StableLookupRenderer.tickLifecycle(client);
             RendererCompileProgressNotifier.tick(client);
 
@@ -279,7 +279,7 @@ public final class TotemLumenClient implements ClientModInitializer {
         ClientLifecycleEvents.CLIENT_STOPPING.register(client -> {
             RasterLightingScene.clear();
             RasterLightingRenderer.close();
-            RasterMaterialCapture.close();
+            RasterSurfaceCapture.close();
             RendererCompileProgressNotifier.reset();
             ClientGameplayLightPredictor.clear();
             FluidRenderGeometryCache.clear();

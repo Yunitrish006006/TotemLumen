@@ -17,8 +17,6 @@
     "MinecraftBlockModelMeshResolverMixin",
     "OptionsSubScreenAccessor",
     "LevelRendererTakeoverMixin",
-    "RasterMaterialCaptureMixin",
-    "RasterMaterialLayersInvoker",
     "SceneExtractionBridgeBlockEntityMixin",
     "P5StableLookupRendererMixin",
     "P5StableLookupRendererP17Mixin",

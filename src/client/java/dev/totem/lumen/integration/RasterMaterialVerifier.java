@@ -1,102 +1,164 @@
 package dev.totem.lumen.integration;
 
-import com.mojang.renderpearl.api.commands.RenderPass;
-import com.mojang.renderpearl.api.pipeline.RenderPipeline;
-import com.mojang.renderpearl.api.textures.GpuSampler;
-import com.mojang.renderpearl.api.textures.GpuTextureView;
-import dev.totem.lumen.mixin.RasterMaterialCaptureMixin;
-import dev.totem.lumen.mixin.RasterMaterialLayersInvoker;
-import net.minecraft.client.renderer.chunk.ChunkSectionLayer;
-import net.minecraft.client.renderer.chunk.ChunkSectionLayerGroup;
-import net.minecraft.client.renderer.chunk.ChunkSectionsToRender;
+import dev.totem.lumen.gpu.GpuPbrSurfaceSetScene;
+import dev.totem.lumen.gpu.GpuPbrTextureScene;
+import net.minecraft.client.renderer.state.level.CameraRenderState;
 import org.lwjgl.util.shaderc.Shaderc;
-import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.util.regex.Pattern;
 
-/** Compiles both native draw ABIs and checks the private bridge against the configured game jar. */
+/**
+ * Build-time verifier retained under the historical class name so existing developer tasks do not
+ * drift while the raster material replay is replaced by the owned SURFACE_CAPTURE stage.
+ */
 public final class RasterMaterialVerifier {
     private RasterMaterialVerifier() { }
 
-    public static void verify() throws Exception {
-        for (var layer : ChunkSectionLayerGroup.OPAQUE.layers()) {
-            for (boolean multi : new boolean[]{false, true}) {
-                var nativePipeline = layer.pipeline(multi);
-                var capture = RasterMaterialCapture.pipeline(nativePipeline);
-                // Builder stores layouts in a hash set; list iteration order is not an ABI.
-                if (!java.util.Set.copyOf(capture.getBindGroupLayouts()).equals(java.util.Set.copyOf(nativePipeline.getBindGroupLayouts()))
-                        || !capture.getVertexFormatBindings().equals(nativePipeline.getVertexFormatBindings())
-                        || !capture.getDepthStencilState().equals(nativePipeline.getDepthStencilState())
-                        || !capture.getColorTargetStates().equals(nativePipeline.getColorTargetStates())) {
-                    throw new IllegalStateException("Material pipeline ABI mismatch: " + layer + " multi=" + multi
-                            + " layouts=" + capture.getBindGroupLayouts().equals(nativePipeline.getBindGroupLayouts())
-                            + " vertex=" + capture.getVertexFormatBindings().equals(nativePipeline.getVertexFormatBindings())
-                            + " depth=" + capture.getDepthStencilState().equals(nativePipeline.getDepthStencilState())
-                            + " target=" + capture.getColorTargetStates().equals(nativePipeline.getColorTargetStates()));
-                }
-            }
-        }
-        Class<?>[] parameters = {ChunkSectionLayer[].class, GpuSampler.class, RenderPass.class,
-                GpuTextureView.class, GpuTextureView.class, RenderPipeline.class, RenderPipeline.class};
-        if (ChunkSectionsToRender.class.getDeclaredMethod("renderLayers", parameters).getReturnType() != void.class
-                || RasterMaterialLayersInvoker.class.getDeclaredMethod("totemLumen$renderMaterialLayers", parameters).getReturnType() != void.class) {
-            throw new IllegalStateException("Raster material layer invoker ABI mismatch");
-        }
-        ChunkSectionsToRender.class.getDeclaredMethod("renderGroup", ChunkSectionLayerGroup.class, RenderPass.class,
-                GpuSampler.class, GpuTextureView.class, boolean.class);
-        RasterMaterialCaptureMixin.class.getDeclaredMethod("totemLumen$rememberOpaque", ChunkSectionLayerGroup.class,
-                RenderPass.class, GpuSampler.class, GpuTextureView.class, boolean.class, CallbackInfo.class);
-        for (boolean multi : new boolean[]{false, true}) {
-            for (boolean cutout : new boolean[]{false, true}) {
-                for (boolean vertex : new boolean[]{false, true}) {
-                    String path = "assets/totem-lumen/shaders/core/raster_material." + (vertex ? "vsh" : "fsh");
-                    String source = expand(path, 0);
-                    String defines = (multi ? "#define MULTIDRAW_TERRAIN\n" : "")
-                            + (cutout ? "#define ALPHA_CUTOUT 0.1\n" : "");
-                    source = source.replace("#version 330", "#version 330\n" + defines);
-                    compile(source, path, vertex);
-                }
-            }
-        }
-        System.out.println("Raster material verification PASS: 8 shader variants, native opaque bridge ABI; NOT runtime/visual acceptance");
+    public static void main(String[] args) throws Exception {
+        verify();
     }
 
-    private static String expand(String path, int depth) throws Exception {
-        if (depth > 16) throw new IllegalStateException("Shader include depth exceeded");
-        String source;
+    public static void verify() throws Exception {
+        var capture = RasterSurfaceCapture.class.getDeclaredMethod("capture", CameraRenderState.class);
+        if (capture.getReturnType() != RasterSurfaceFrame.class) {
+            throw new IllegalStateException("Raster surface capture must publish RasterSurfaceFrame");
+        }
+
+        String depthPath = "assets/totem-lumen/shaders/core/raster_surface_depth.fsh";
+        String depthSource = resource(depthPath);
+        if (!depthSource.contains("uniform sampler2D DepthSampler")
+                || !depthSource.contains("float depth = texture(DepthSampler, texCoord).r")) {
+            throw new IllegalStateException("Owned depth capture shader contract drift");
+        }
+        compile(depthPath, depthSource);
+
+        String normalPath = "assets/totem-lumen/shaders/core/raster_surface_normal.fsh";
+        String normalSource = resource(normalPath);
+        String dynamicTransforms = resource("assets/minecraft/shaders/include/dynamictransforms.glsl");
+        String directive = "#include <minecraft:dynamictransforms.glsl>";
+        if (!normalSource.contains(directive)
+                || !normalSource.contains("vec3 n = cross(dx, dy)")
+                || !normalSource.contains("fragColor = vec4(n * 0.5 + 0.5, 1.0)")) {
+            throw new IllegalStateException("Owned normal capture shader contract drift");
+        }
+        compile(normalPath, normalSource.replace(directive, dynamicTransforms));
+
+        String materialPath = "assets/totem-lumen/shaders/core/raster_material_resolve.fsh";
+        String materialSource = resource(materialPath);
+        if (!materialSource.contains(directive)
+                || !materialSource.contains("uniform sampler2D MaterialIdAtlas")
+                || !materialSource.contains("p + ModelOffset - normal * 0.08")
+                || !materialSource.contains("fragColor = surfaceIdentity(cell)")) {
+            throw new IllegalStateException("Material resolve shader contract drift");
+        }
+        compile(materialPath, materialSource.replace(directive, dynamicTransforms));
+
+        String decodeDirective = "#include <totem-lumen:raster_material_decode.glsl>";
+        String decodeSource = resource("assets/totem-lumen/shaders/include/raster_material_decode.glsl");
+        String propertiesPath = "assets/totem-lumen/shaders/core/raster_material_properties.fsh";
+        String propertiesSource = resource(propertiesPath);
+        if (!propertiesSource.contains(decodeDirective)
+                || !propertiesSource.contains("uniform sampler2D VisibleSurfaceIdentity")
+                || !propertiesSource.contains("uniform sampler2D MaterialLut")
+                || !propertiesSource.contains("rasterMaterialFloat(MaterialLut, materialId, 2u)")
+                || !propertiesSource.contains("fragColor = vec4(roughness, metallic, opacity, emission)")) {
+            throw new IllegalStateException("Resolved material property shader contract drift");
+        }
+        compile(propertiesPath, propertiesSource.replace(decodeDirective, decodeSource));
+
+        String cubeAlbedoPath = "assets/totem-lumen/shaders/core/raster_unlit_cube_albedo.fsh";
+        String cubeAlbedoSource = resource(cubeAlbedoPath);
+        if (!cubeAlbedoSource.contains(directive)
+                || !cubeAlbedoSource.contains(decodeDirective)
+                || !cubeAlbedoSource.contains("const uint SURFACE_RECORD_WORDS = "
+                        + GpuPbrSurfaceSetScene.RECORD_WORDS + "u;")
+                || !cubeAlbedoSource.contains("const uint SURFACE_FACE_WORDS = "
+                        + GpuPbrSurfaceSetScene.FACE_WORDS + "u;")
+                || !cubeAlbedoSource.contains("const uint TEXTURE_DESCRIPTOR_WORDS = "
+                        + GpuPbrTextureScene.DESCRIPTOR_WORDS_PER_RECORD + "u;")
+                || !cubeAlbedoSource.contains("const uint TEXTURE_TEXEL_POOL_BASE = "
+                        + GpuPbrTextureScene.TEXEL_POOL_BASE_WORD + "u;")
+                || !cubeAlbedoSource.contains("TEXTURE_FLAG_ANIMATED")
+                || !cubeAlbedoSource.contains("fragColor = vec4(albedo, alpha)")) {
+            throw new IllegalStateException("Covered unlit cube albedo shader ABI drift");
+        }
+        compile(
+                cubeAlbedoPath,
+                cubeAlbedoSource
+                        .replace(directive, dynamicTransforms)
+                        .replace(decodeDirective, decodeSource)
+        );
+
+        String directPath = "assets/totem-lumen/shaders/core/raster_direct_light.fsh";
+        String directSource = resource(directPath);
+        if (!directSource.contains(directive)
+                || !directSource.contains("uniform sampler2D UnlitAlbedoSampler")
+                || !directSource.contains("uniform sampler2D VoxelSampler")
+                || !directSource.contains("uniform sampler2D LightSampler")
+                || !directSource.contains("for (int i = 0; i < 64; i++)")
+                || !directSource.contains("for (int i = 0; i < 32; i++)")
+                || !directSource.contains("for (int j = 0; j < 4; j++)")
+                || !directSource.contains("float coverage = texture(UnlitAlbedoSampler, texCoord).a")
+                || !directSource.contains("fragColor = vec4(direct, coverage)")) {
+            throw new IllegalStateException("DIRECT_LIGHT shader contract drift");
+        }
+        compile(directPath, directSource.replace(directive, dynamicTransforms));
+
+        String directCompositePath = "assets/totem-lumen/shaders/core/raster_direct_composite.fsh";
+        String directCompositeSource = resource(directCompositePath);
+        if (!directCompositeSource.contains(directive)
+                || !directCompositeSource.contains("uniform sampler2D IndirectSampler")
+                || !directCompositeSource.contains("uniform sampler2D NativeSceneSampler")
+                || !directCompositeSource.contains("uniform sampler2D UnlitAlbedoSampler")
+                || !directCompositeSource.contains("uniform sampler2D DirectSampler")
+                || !directCompositeSource.contains("albedo.a > 0.0 && direct.a > 0.0")
+                || !directCompositeSource.contains("texture(NativeSceneSampler, texCoord).rgb * indirect.rgb")) {
+            throw new IllegalStateException("DIRECT_LIGHT composite shader contract drift");
+        }
+        compile(directCompositePath, directCompositeSource.replace(directive, dynamicTransforms));
+
+        if (!RasterSurfaceFrame.ColorSemantic.NATIVE_LIT_COLOR.name().equals("NATIVE_LIT_COLOR")) {
+            throw new IllegalStateException("Raster surface color semantic drift");
+        }
+
+        System.out.println("Raster staged verification PASS: owned surface + material identity/base-property/covered-unlit-cube + direct-light producer/composite diagnostic shaders compile; NOT runtime/visual acceptance");
+    }
+
+    private static String resource(String path) throws IOException {
         try (var input = RasterMaterialVerifier.class.getClassLoader().getResourceAsStream(path)) {
             if (input == null) throw new IllegalStateException("Missing shader " + path);
-            source = new String(input.readAllBytes(), StandardCharsets.UTF_8);
+            return new String(input.readAllBytes(), StandardCharsets.UTF_8);
         }
-        var matcher = Pattern.compile("#include <([^:>]+):([^>]+)>").matcher(source);
-        StringBuilder expanded = new StringBuilder();
-        while (matcher.find()) {
-            matcher.appendReplacement(expanded, java.util.regex.Matcher.quoteReplacement(
-                    expand("assets/" + matcher.group(1) + "/shaders/include/" + matcher.group(2), depth + 1)));
-        }
-        return matcher.appendTail(expanded).toString();
     }
 
-    private static void compile(String source, String name, boolean vertex) {
+    private static void compile(String name, String source) {
         long compiler = Shaderc.shaderc_compiler_initialize();
         long options = Shaderc.shaderc_compile_options_initialize();
         if (compiler == 0 || options == 0) {
             if (compiler != 0) Shaderc.shaderc_compiler_release(compiler);
             if (options != 0) Shaderc.shaderc_compile_options_release(options);
-            throw new IllegalStateException("Shaderc initialization failed");
+            throw new IllegalStateException("shaderc initialization failed");
         }
         try {
             Shaderc.shaderc_compile_options_set_target_env(options, 0, 4202496);
             Shaderc.shaderc_compile_options_set_auto_bind_uniforms(options, true);
-            long result = Shaderc.shaderc_compile_into_spv(compiler, source,
-                    vertex ? Shaderc.shaderc_vertex_shader : Shaderc.shaderc_fragment_shader, name, "main", options);
-            if (result == 0) throw new IllegalStateException("Shaderc returned no result");
+            long result = Shaderc.shaderc_compile_into_spv(
+                    compiler, source, Shaderc.shaderc_fragment_shader, name, "main", options);
+            if (result == 0) throw new IllegalStateException("shaderc returned null result");
             try {
-                if (Shaderc.shaderc_result_get_compilation_status(result) != 0)
+                if (Shaderc.shaderc_result_get_compilation_status(result) != 0) {
                     throw new IllegalStateException(name + ": " + Shaderc.shaderc_result_get_error_message(result));
-                if (Shaderc.shaderc_result_get_length(result) == 0) throw new IllegalStateException("Empty SPIR-V");
-            } finally { Shaderc.shaderc_result_release(result); }
-        } finally { Shaderc.shaderc_compile_options_release(options); Shaderc.shaderc_compiler_release(compiler); }
+                }
+                if (Shaderc.shaderc_result_get_length(result) == 0) {
+                    throw new IllegalStateException("Empty SPIR-V");
+                }
+            } finally {
+                Shaderc.shaderc_result_release(result);
+            }
+        } finally {
+            Shaderc.shaderc_compile_options_release(options);
+            Shaderc.shaderc_compiler_release(compiler);
+        }
     }
 }

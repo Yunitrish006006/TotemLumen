@@ -62,13 +62,13 @@ public final class RgbFrameMetrics {
                     profile, result.samples(), rounded(result.seconds()), rounded(result.averageFps()),
                     rounded(result.onePercentLowFps()), rounded(result.intervalP95Ms()), width, height,
                     renderDistance, simulationDistance, fpsLimit, vsync, RendererSettings.giQuality(),
-                    RendererSettings.rasterLightingEnabled() ? (RasterMaterialCapture.lightingPreviewRequested()
+                    RendererSettings.rasterLightingEnabled() ? (RasterLightingRenderer.independentLightingActive()
                             ? "DIRECT_RGB_POINT_SHADOWS" : "AMBIENT_OCCLUSION_ONLY") : RendererSettings.shadowQuality(), RendererSettings.rasterLightingEnabled()
                             ? dev.totem.lumen.render.RasterLightingVolume.RAY_DISTANCE : RendererSettings.rayDistance(), RendererSettings.internalResolution(),
                     !RendererSettings.rasterLightingEnabled() && RendererSettings.reflectionsEnabled(),
                     RendererSettings.rasterLightingEnabled() ? "OFF" : RendererSettings.temporalQuality(),
                     RendererSettings.rasterLightingEnabled() ? "OFF" : RendererSettings.denoiseQuality(),
-                    RendererSettings.rasterLightingEnabled() && RasterMaterialCapture.lightingPreviewRequested(),
+                    RendererSettings.rasterLightingEnabled() && RasterLightingRenderer.independentLightingActive(),
                     (runtime.totalMemory() - runtime.freeMemory()) / 1048576L,
                     runtime.totalMemory() / 1048576L, runtime.maxMemory() / 1048576L);
             // Sorting/logging is outside sampling; the next window gets a fresh warmup.

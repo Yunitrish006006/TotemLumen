@@ -41,7 +41,7 @@ public final class HeldLightShaderVerifier {
         verify(rgbFragment.replace(directive, include), "totem-lumen:core/held_light_rgb");
         verify(readResource("assets/totem-lumen/shaders/core/hybrid_terrain.fsh").replace(directive, include),
                 "totem-lumen:core/hybrid_terrain");
-        verify(readResource("assets/totem-lumen/shaders/core/raster_ray.fsh").replace(directive, include), "totem-lumen:core/raster_ray");
+        verify(readResource("assets/totem-lumen/shaders/core/raster_indirect_gi.fsh").replace(directive, include), "totem-lumen:core/raster_indirect_gi");
         verify(readResource("assets/totem-lumen/shaders/core/raster_ray_composite.fsh").replace(directive, include), "totem-lumen:core/raster_ray_composite");
     }
 
