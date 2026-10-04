@@ -20,6 +20,24 @@ class StagedRenderPlanTest {
                 plan.externalInputs());
     }
 
+
+    @Test
+    void materialMetadataPathAddsIndependentResolveBoundary() {
+        var plan = StagedRenderPlan.rasterMaterialMetadataPath();
+        assertEquals(List.of(
+                LumenRenderStage.SURFACE_CAPTURE,
+                LumenRenderStage.MATERIAL_RESOLVE,
+                LumenRenderStage.INDIRECT_GI,
+                LumenRenderStage.COMPOSITE
+        ), plan.stages());
+        var material = plan.passes().stream()
+                .filter(pass -> pass.stage() == LumenRenderStage.MATERIAL_RESOLVE)
+                .findFirst().orElseThrow();
+        assertEquals(Set.of(LumenStageResource.SURFACE, LumenStageResource.VOXEL_SCENE),
+                material.reads());
+        assertEquals(Set.of(LumenStageResource.MATERIAL), material.writes());
+    }
+
     @Test
     void rejectsReadsBeforeProducer() {
         var pass = new StagedRenderPlan.Pass(
