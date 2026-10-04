@@ -52,11 +52,24 @@ public final class RasterMaterialVerifier {
         }
         compile(materialPath, materialSource.replace(directive, dynamicTransforms));
 
+        String decodeDirective = "#include <totem-lumen:raster_material_decode.glsl>";
+        String decodeSource = resource("assets/totem-lumen/shaders/include/raster_material_decode.glsl");
+        String propertiesPath = "assets/totem-lumen/shaders/core/raster_material_properties.fsh";
+        String propertiesSource = resource(propertiesPath);
+        if (!propertiesSource.contains(decodeDirective)
+                || !propertiesSource.contains("uniform sampler2D VisibleSurfaceIdentity")
+                || !propertiesSource.contains("uniform sampler2D MaterialLut")
+                || !propertiesSource.contains("rasterMaterialFloat(MaterialLut, materialId, 2u)")
+                || !propertiesSource.contains("fragColor = vec4(roughness, metallic, opacity, emission)")) {
+            throw new IllegalStateException("Resolved material property shader contract drift");
+        }
+        compile(propertiesPath, propertiesSource.replace(decodeDirective, decodeSource));
+
         if (!RasterSurfaceFrame.ColorSemantic.NATIVE_LIT_COLOR.name().equals("NATIVE_LIT_COLOR")) {
             throw new IllegalStateException("Raster surface color semantic drift");
         }
 
-        System.out.println("Raster staged verification PASS: owned surface + material resolve shader compile; NOT runtime/visual acceptance");
+        System.out.println("Raster staged verification PASS: owned surface + material identity/base-property resolve shaders compile; NOT runtime/visual acceptance");
     }
 
     private static String resource(String path) throws IOException {
