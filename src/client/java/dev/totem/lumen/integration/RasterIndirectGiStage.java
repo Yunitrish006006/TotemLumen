@@ -35,6 +35,7 @@ final class RasterIndirectGiStage {
             .withBindGroupLayout(BindGroupLayouts.DYNAMIC_TRANSFORMS)
             .withBindGroupLayout(BindGroupLayout.builder()
                     .withUniform("DepthSampler", UniformType.COMBINED_IMAGE_SAMPLER)
+                    .withUniform("NormalSampler", UniformType.COMBINED_IMAGE_SAMPLER)
                     .withUniform("VoxelSampler", UniformType.COMBINED_IMAGE_SAMPLER)
                     .build())
             .withPrimitiveTopology(PrimitiveTopology.TRIANGLES)
@@ -109,6 +110,7 @@ final class RasterIndirectGiStage {
             pass.setPipeline(compiled);
             pass.setUniform("DynamicTransforms", uniforms);
             pass.setUniform("DepthSampler", surface.depth(), nearest);
+            pass.setUniform("NormalSampler", surface.normal(), nearest);
             pass.setUniform("VoxelSampler", atlasView, nearest);
             pass.draw(3, 1, 0, 0);
         }
