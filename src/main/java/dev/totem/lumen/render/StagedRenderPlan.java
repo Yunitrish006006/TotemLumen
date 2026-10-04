@@ -82,12 +82,12 @@ public final class StagedRenderPlan {
     }
 
     /**
-     * Current Raster material-lighting preview represented as explicit coarse stages.
+     * Current owned Raster surface path represented as explicit coarse stages.
      *
      * <p>It deliberately has no MATERIAL_RESOLVE/INDIRECT_GI/REFLECTION/TEMPORAL/DENOISE pass yet.
      * Those stages must be added as separate producers rather than folded into DIRECT_LIGHT.</p>
      */
-    public static StagedRenderPlan rasterMaterialPreview() {
+    public static StagedRenderPlan rasterOwnedSurfacePath() {
         List<Pass> passes = new ArrayList<>();
         passes.add(new Pass(
                 LumenRenderStage.SURFACE_CAPTURE,
