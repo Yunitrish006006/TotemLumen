@@ -84,8 +84,8 @@ public final class StagedRenderPlan {
     /**
      * Current owned Raster surface path represented as explicit coarse stages.
      *
-     * <p>It deliberately has no MATERIAL_RESOLVE/INDIRECT_GI/REFLECTION/TEMPORAL/DENOISE pass yet.
-     * Those stages must be added as separate producers rather than folded into DIRECT_LIGHT.</p>
+     * <p>It deliberately has no MATERIAL_RESOLVE/DIRECT_LIGHT/REFLECTION/TEMPORAL/DENOISE pass yet.
+     * Those stages must be added as separate producers rather than folded into INDIRECT_GI.</p>
      */
     public static StagedRenderPlan rasterOwnedSurfacePath() {
         List<Pass> passes = new ArrayList<>();
@@ -95,13 +95,13 @@ public final class StagedRenderPlan {
                 Set.of(LumenStageResource.SURFACE)
         ));
         passes.add(new Pass(
-                LumenRenderStage.DIRECT_LIGHT,
+                LumenRenderStage.INDIRECT_GI,
                 Set.of(LumenStageResource.SURFACE, LumenStageResource.VOXEL_SCENE),
-                Set.of(LumenStageResource.DIRECT_RADIANCE)
+                Set.of(LumenStageResource.INDIRECT_RADIANCE)
         ));
         passes.add(new Pass(
                 LumenRenderStage.COMPOSITE,
-                Set.of(LumenStageResource.SURFACE, LumenStageResource.DIRECT_RADIANCE),
+                Set.of(LumenStageResource.SURFACE, LumenStageResource.INDIRECT_RADIANCE),
                 Set.of(LumenStageResource.FINAL_COLOR)
         ));
         return new StagedRenderPlan(
