@@ -65,9 +65,22 @@ final class RasterMaterialResolveStage {
                     Optional.empty(), GpuFormat.RGBA8_UNORM, ColorTargetState.WRITE_ALL))
             .build();
 
+    private static final RenderPipeline PROPERTIES_PIPELINE = RenderPipeline.builder()
+            .withLocation(Identifier.fromNamespaceAndPath("totem-lumen", "pipeline/raster_material_properties"))
+            .withVertexShader(RenderPipelines.TRACY_BLIT.getShaders().get(ShaderType.VERTEX))
+            .withFragmentShader(Identifier.fromNamespaceAndPath("totem-lumen", "core/raster_material_properties"))
+            .withBindGroupLayout(BindGroupLayout.builder()
+                    .withUniform("VisibleSurfaceIdentity", UniformType.COMBINED_IMAGE_SAMPLER)
+                    .withUniform("MaterialLut", UniformType.COMBINED_IMAGE_SAMPLER)
+                    .build())
+            .withPrimitiveTopology(PrimitiveTopology.TRIANGLES)
+            .withColorTargetState(new ColorTargetState(
+                    Optional.empty(), GpuFormat.RGBA16_FLOAT, ColorTargetState.WRITE_ALL))
+            .build();
+
     private static GpuDevice device;
-    private static GpuTexture materialAtlas, visibleIds, materialLut, surfaceSetLut;
-    private static GpuTextureView materialAtlasView, visibleIdsView, materialLutView, surfaceSetLutView;
+    private static GpuTexture materialAtlas, visibleIds, baseProperties, materialLut, surfaceSetLut;
+    private static GpuTextureView materialAtlasView, visibleIdsView, basePropertiesView, materialLutView, surfaceSetLutView;
     private static NativeImage materialTile, lutPixels, surfaceSetPixels;
     private static final RasterLightingVolume.Section[] uploaded =
             new RasterLightingVolume.Section[RasterLightingVolume.SLOTS];
@@ -154,11 +167,20 @@ final class RasterMaterialResolveStage {
             pass.draw(3, 1, 0, 0);
         }
 
+        var propertiesPipeline = RenderSystem.getCompiledPipeline(PROPERTIES_PIPELINE);
+        try (var pass = encoder.createRenderPass(
+                () -> "Raster MATERIAL_RESOLVE base properties", basePropertiesView, Optional.empty())) {
+            pass.setPipeline(propertiesPipeline);
+            pass.setUniform("VisibleSurfaceIdentity", visibleIdsView, nearest);
+            pass.setUniform("MaterialLut", materialLutView, nearest);
+            pass.draw(3, 1, 0, 0);
+        }
+
         frames++;
         if (!logged) {
             logged = true;
             TotemLumenClient.LOGGER.info(
-                    "RASTER MATERIAL_RESOLVE ACTIVE: materials={}, revision={}, materialIdBits=16, surfaceSetIdBits=16, lutWordEncoding=RGBA8_RAW32, unlitAlbedo=false",
+                    "RASTER MATERIAL_RESOLVE ACTIVE: materials={}, revision={}, materialIdBits=16, surfaceSetIdBits=16, baseProperties=RGBA16F(roughness,metallic,opacity,emission), lutWordEncoding=RGBA8_RAW32, unlitAlbedo=false",
                     materials.entries().size(),
                     materials.revision()
             );
@@ -172,6 +194,7 @@ final class RasterMaterialResolveStage {
                 materials.entries().size(),
                 surfaces.revision(),
                 visibleIdsView,
+                basePropertiesView,
                 materialLutView,
                 surfaceSetLutView
         );
@@ -188,7 +211,10 @@ final class RasterMaterialResolveStage {
         boolean surfaceChanged = device != gpu
                 || visibleIds == null
                 || visibleIds.getWidth(0) != width
-                || visibleIds.getHeight(0) != height;
+                || visibleIds.getHeight(0) != height
+                || baseProperties == null
+                || baseProperties.getWidth(0) != width
+                || baseProperties.getHeight(0) != height;
         boolean lutChanged = device != gpu || materialLut == null || lutRows != requiredRows;
         if (!surfaceChanged && !lutChanged && materialAtlas != null) return;
 
@@ -220,13 +246,21 @@ final class RasterMaterialResolveStage {
 
         if (surfaceChanged) {
             if (visibleIdsView != null) visibleIdsView.close();
+            if (basePropertiesView != null) basePropertiesView.close();
             if (visibleIds != null) visibleIds.close();
+            if (baseProperties != null) baseProperties.close();
             visibleIds = gpu.createTexture(
                     "Raster visible material IDs",
                     GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_TEXTURE_BINDING,
                     GpuFormat.RGBA8_UNORM,
                     width, height, 1, 1);
+            baseProperties = gpu.createTexture(
+                    "Raster resolved base material properties",
+                    GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_TEXTURE_BINDING,
+                    GpuFormat.RGBA16_FLOAT,
+                    width, height, 1, 1);
             visibleIdsView = gpu.createTextureView(visibleIds);
+            basePropertiesView = gpu.createTextureView(baseProperties);
         }
 
         if (lutChanged) {
@@ -315,15 +349,17 @@ final class RasterMaterialResolveStage {
     static void close() {
         if (materialAtlasView != null) materialAtlasView.close();
         if (visibleIdsView != null) visibleIdsView.close();
+        if (basePropertiesView != null) basePropertiesView.close();
         if (materialLutView != null) materialLutView.close();
         if (materialAtlas != null) materialAtlas.close();
         if (visibleIds != null) visibleIds.close();
+        if (baseProperties != null) baseProperties.close();
         if (materialLut != null) materialLut.close();
         if (materialTile != null) materialTile.close();
         if (lutPixels != null) lutPixels.close();
         if (surfaceSetPixels != null) surfaceSetPixels.close();
-        materialAtlasView = visibleIdsView = materialLutView = surfaceSetLutView = null;
-        materialAtlas = visibleIds = materialLut = surfaceSetLut = null;
+        materialAtlasView = visibleIdsView = basePropertiesView = materialLutView = surfaceSetLutView = null;
+        materialAtlas = visibleIds = baseProperties = materialLut = surfaceSetLut = null;
         materialTile = lutPixels = surfaceSetPixels = null;
         device = null;
         java.util.Arrays.fill(uploaded, null);
