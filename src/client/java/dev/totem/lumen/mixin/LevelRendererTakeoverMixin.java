@@ -5,7 +5,7 @@ import com.mojang.blaze3d.resource.GraphicsResourceAllocator;
 import dev.totem.lumen.vulkan.P5StableLookupRenderer;
 import dev.totem.lumen.render.HybridTerrainPolicy;
 import dev.totem.lumen.integration.RasterLightingRenderer;
-import dev.totem.lumen.integration.RasterMaterialCapture;
+import dev.totem.lumen.integration.RasterSurfaceCapture;
 import net.minecraft.client.renderer.LevelRenderer;
 import net.minecraft.client.renderer.state.level.CameraRenderState;
 import org.joml.Vector4f;
@@ -34,7 +34,6 @@ public abstract class LevelRendererTakeoverMixin {
             boolean shouldRenderWeather,
             CallbackInfo ci
     ) {
-        RasterMaterialCapture.beginFrame();
         if (HybridTerrainPolicy.ENABLED || !P5StableLookupRenderer.readyForWorldTakeover()) {
             return;
         }
@@ -50,7 +49,7 @@ public abstract class LevelRendererTakeoverMixin {
             boolean shouldRenderSky, boolean shouldRenderWeather, CallbackInfo ci
     ) {
         if (HybridTerrainPolicy.ENABLED) P5StableLookupRenderer.presentHybridTerrain(cameraState);
-        RasterMaterialCapture.render();
-        RasterLightingRenderer.render(cameraState);
+        var surface = RasterSurfaceCapture.capture();
+        RasterLightingRenderer.render(cameraState, surface);
     }
 }
