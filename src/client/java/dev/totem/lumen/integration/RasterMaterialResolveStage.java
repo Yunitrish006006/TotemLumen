@@ -380,7 +380,7 @@ final class RasterMaterialResolveStage {
         int totalPixels = RasterRawWordTextureLayout.WIDTH * SURFACE_LUT_ROWS;
         for (int pixel = 0; pixel < totalPixels; pixel++) {
             int raw = pixel < GpuPbrSurfaceSetScene.MAX_STORAGE_WORDS
-                    ? pbrTextureWords.getInt(pixel * Integer.BYTES)
+                    ? words.getInt(pixel * Integer.BYTES)
                     : 0;
             surfaceSetPixels.setPixelABGR(
                     RasterRawWordTextureLayout.x(pixel),
