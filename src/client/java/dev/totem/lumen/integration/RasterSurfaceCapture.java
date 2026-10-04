@@ -50,6 +50,8 @@ public final class RasterSurfaceCapture {
 
     private RasterSurfaceCapture() { }
 
+    public static boolean unavailable() { return failed; }
+
     public static RasterSurfaceFrame capture() {
         if (!RendererSettings.rasterLightingEnabled() || failed) return null;
         var target = Minecraft.getInstance().gameRenderer.mainRenderTarget();
