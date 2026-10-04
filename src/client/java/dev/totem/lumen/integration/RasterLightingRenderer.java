@@ -43,7 +43,7 @@ public final class RasterLightingRenderer {
     private static long lightSelections, lightSelectionNanos, lightUploadBytes;
     private static final RasterLightingVolume.Section[] uploaded = new RasterLightingVolume.Section[RasterLightingVolume.SLOTS];
     private static long epoch = -1, frames, uploadBytes;
-    private static boolean failed, ready, logged;
+    private static boolean failed, ready, logged, independentLightingActive;
 
     private RasterLightingRenderer() { }
 
@@ -62,6 +62,7 @@ public final class RasterLightingRenderer {
 
     public static boolean ready() { return ready && !failed && RendererSettings.rasterLightingEnabled(); }
     public static boolean unavailable() { return failed; }
+    public static boolean independentLightingActive() { return independentLightingActive && ready(); }
 
     public static void tickLifecycle(Minecraft client) {
         if (!RendererSettings.rasterLightingEnabled() || client.level == null) close();
@@ -70,6 +71,8 @@ public final class RasterLightingRenderer {
     public static void render(CameraRenderState camera, RasterSurfaceFrame surface) {
         if (!RendererSettings.rasterLightingEnabled() || failed || surface == null) return;
         ready = false;
+        independentLightingActive = false;
+        independentLightingActive = false;
         var volume = RasterLightingScene.snapshot();
         if (camera == null || !camera.initialized || volume == null) { ready = false; return; }
         var target = Minecraft.getInstance().gameRenderer.mainRenderTarget();
@@ -81,6 +84,7 @@ public final class RasterLightingRenderer {
             int w = color.getWidth(0), h = color.getHeight(0);
             if (!surface.matches(gpu, w, h)) return;
             boolean materialPreview = surface.supportsIndependentLighting();
+            independentLightingActive = materialPreview;
             int lw = RendererSettings.internalResolution().targetWidth(w, h);
             int lh = Math.max(1, Math.round(lw * h / (float) w));
             if (device != gpu || lighting == null || lighting.getWidth(0) != lw || lighting.getHeight(0) != lh) {
