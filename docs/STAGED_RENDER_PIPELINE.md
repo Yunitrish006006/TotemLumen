@@ -184,6 +184,21 @@ matched visual/lifecycle/performance acceptance. During migration:
 - stage ABI changes are versioned and tested;
 - the reference path is used for image comparisons, not as the place to prototype new architecture.
 
+## Frame-generation safety
+
+Stage outputs carry the identities of the upstream data they sampled rather than relying only on
+call ordering:
+
+- SURFACE uses a monotonic surface frame serial that is not reset when textures are retired;
+- MATERIAL records MaterialDefinition, P18 surface-set and P18 texture revisions;
+- INDIRECT_GI records the shared VOXEL_SCENE epoch;
+- DIRECT_LIGHT records the exact material revisions plus the shared VOXEL_SCENE epoch;
+- the direct-light composite rejects Direct and Indirect outputs produced from different voxel
+  epochs even when their surface serial matches.
+
+This makes resize/world/profile lifetime mistakes fail closed at the ABI boundary instead of
+silently combining textures from different generations.
+
 ## Validation order
 
 For each extracted stage:
