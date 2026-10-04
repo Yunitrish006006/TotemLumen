@@ -111,10 +111,18 @@ These values are decoded from the existing lossless 64-byte MaterialDefinition G
 MATERIAL_RESOLVE, so later stages do not need to repeat that base-property decode. Material-LUT
 capacity changes and the independent P18 surface-set LUT now have separate resource lifetimes.
 
-This is still **metadata-only**, not completed independent material shading. Unlit albedo/tint,
-texture UV identity, P18 sampled texture overrides, AO and transmission/refraction surface data are
-not yet published as resolved per-pixel outputs. Consequently DIRECT_LIGHT remains disabled and the
-active safe renderer continues to composite INDIRECT_GI over NATIVE_LIT_COLOR.
+This remains **partial material coverage**, not completed independent material shading. The stage
+now also uploads the existing P18 texture-scene ABI and publishes a full-resolution covered unlit
+albedo plane for **static canonical textured cubes only**. It reconstructs the cube face from the
+owned surface normal, evaluates the registered face UVs, samples the packed P18 albedo and multiplies
+the captured biome/block tint. Alpha is an explicit coverage value; unknown surface sets, missing
+texture handles and animated textures publish zero coverage so later stages must retain native
+fallback.
+
+Generic model meshes, fluids, entities, animated textured cubes, complete P18 normal/specular
+overrides, AO and transmission/refraction surface data are not yet covered. Consequently
+DIRECT_LIGHT remains disabled and the active safe renderer continues to composite INDIRECT_GI over
+NATIVE_LIT_COLOR.
 
 Changing material fidelity should not invalidate primary visibility or GI traversal pipelines unless
 their explicit stage ABI changes.
