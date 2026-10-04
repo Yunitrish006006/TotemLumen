@@ -25,7 +25,7 @@ import java.util.Optional;
 
 /** Independent Vulkan raster-primary experiment. Does not initialize the full Totem pipeline. */
 public final class RasterLightingRenderer {
-    private static final StagedRenderPlan STAGE_PLAN = StagedRenderPlan.rasterMaterialPreview();
+    private static final StagedRenderPlan STAGE_PLAN = StagedRenderPlan.rasterOwnedSurfacePath();
     private static final RenderPipeline LIGHTING = pipeline("raster_ray", GpuFormat.RGBA16_FLOAT,
             "DepthSampler", "VoxelSampler", "LightSampler");
     private static final RenderPipeline COMPOSITE = pipeline("raster_ray_composite",
