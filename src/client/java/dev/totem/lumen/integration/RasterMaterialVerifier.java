@@ -1,5 +1,7 @@
 package dev.totem.lumen.integration;
 
+import dev.totem.lumen.gpu.GpuPbrSurfaceSetScene;
+import dev.totem.lumen.gpu.GpuPbrTextureScene;
 import net.minecraft.client.renderer.state.level.CameraRenderState;
 import org.lwjgl.util.shaderc.Shaderc;
 
@@ -65,11 +67,34 @@ public final class RasterMaterialVerifier {
         }
         compile(propertiesPath, propertiesSource.replace(decodeDirective, decodeSource));
 
+        String cubeAlbedoPath = "assets/totem-lumen/shaders/core/raster_unlit_cube_albedo.fsh";
+        String cubeAlbedoSource = resource(cubeAlbedoPath);
+        if (!cubeAlbedoSource.contains(directive)
+                || !cubeAlbedoSource.contains(decodeDirective)
+                || !cubeAlbedoSource.contains("const uint SURFACE_RECORD_WORDS = "
+                        + GpuPbrSurfaceSetScene.RECORD_WORDS + "u;")
+                || !cubeAlbedoSource.contains("const uint SURFACE_FACE_WORDS = "
+                        + GpuPbrSurfaceSetScene.FACE_WORDS + "u;")
+                || !cubeAlbedoSource.contains("const uint TEXTURE_DESCRIPTOR_WORDS = "
+                        + GpuPbrTextureScene.DESCRIPTOR_WORDS_PER_RECORD + "u;")
+                || !cubeAlbedoSource.contains("const uint TEXTURE_TEXEL_POOL_BASE = "
+                        + GpuPbrTextureScene.TEXEL_POOL_BASE_WORD + "u;")
+                || !cubeAlbedoSource.contains("TEXTURE_FLAG_ANIMATED")
+                || !cubeAlbedoSource.contains("fragColor = vec4(albedo, alpha)")) {
+            throw new IllegalStateException("Covered unlit cube albedo shader ABI drift");
+        }
+        compile(
+                cubeAlbedoPath,
+                cubeAlbedoSource
+                        .replace(directive, dynamicTransforms)
+                        .replace(decodeDirective, decodeSource)
+        );
+
         if (!RasterSurfaceFrame.ColorSemantic.NATIVE_LIT_COLOR.name().equals("NATIVE_LIT_COLOR")) {
             throw new IllegalStateException("Raster surface color semantic drift");
         }
 
-        System.out.println("Raster staged verification PASS: owned surface + material identity/base-property resolve shaders compile; NOT runtime/visual acceptance");
+        System.out.println("Raster staged verification PASS: owned surface + material identity/base-property/covered-unlit-cube shaders compile; NOT runtime/visual acceptance");
     }
 
     private static String resource(String path) throws IOException {
