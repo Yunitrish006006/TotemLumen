@@ -103,17 +103,29 @@ class RasterDirectLightsTest {
         }
     }
 
-    @Test void directLightDataStaysDormantUntilMaterialStageExists() throws Exception {
-        String shader = Files.readString(Path.of("src/client/resources/assets/totem-lumen/shaders/core/raster_indirect_gi.fsh"));
-        assertFalse(shader.contains("LightSampler"));
-        assertFalse(shader.contains("directRgb("));
-        assertFalse(shader.contains("visibility("));
+    @Test void directLightRemainsSeparatedFromIndirectAndFinalComposite() throws Exception {
+        String indirect = Files.readString(Path.of("src/client/resources/assets/totem-lumen/shaders/core/raster_indirect_gi.fsh"));
+        assertFalse(indirect.contains("LightSampler"));
+        assertFalse(indirect.contains("directRgb("));
+        assertFalse(indirect.contains("visibility("));
+
+        String direct = Files.readString(Path.of("src/client/resources/assets/totem-lumen/shaders/core/raster_direct_light.fsh"));
+        assertTrue(direct.contains("LightSampler"));
+        assertTrue(direct.contains("directRgb("));
+        assertTrue(direct.contains("visibility("));
+
         String scene = Files.readString(Path.of("src/client/java/dev/totem/lumen/integration/RasterLightingScene.java"));
-        assertTrue(scene.contains("new RasterLightingVolume.Section(pixels, materialIds, surfaceSetIds)"));
+        assertTrue(scene.contains("RasterDirectLightStage.requested()"));
         assertFalse(scene.contains("RasterMaterialCapture"));
+
         String renderer = Files.readString(Path.of("src/client/java/dev/totem/lumen/integration/RasterLightingRenderer.java"));
         assertTrue(renderer.contains("surface.supportsIndependentLighting()"));
+        assertTrue(renderer.contains("RasterDirectLightStage.record("));
         assertTrue(renderer.contains("return false;"));
+
+        String composite = Files.readString(Path.of("src/client/java/dev/totem/lumen/integration/RasterCompositeStage.java"));
+        assertFalse(composite.contains("RasterDirectLightFrame"));
+
         String metrics = Files.readString(Path.of("src/client/java/dev/totem/lumen/integration/RgbFrameMetrics.java"));
         assertTrue(metrics.contains("rasterMaterialLighting={}"));
     }
