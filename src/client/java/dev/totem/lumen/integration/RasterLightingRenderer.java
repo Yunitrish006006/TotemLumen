@@ -20,7 +20,9 @@ import org.joml.Vector4f;
  * frame, creates shared frame uniforms, records the stage sequence and owns fail-closed readiness.</p>
  */
 public final class RasterLightingRenderer {
-    private static final StagedRenderPlan STAGE_PLAN = StagedRenderPlan.rasterOwnedSurfacePath();
+    private static final StagedRenderPlan STAGE_PLAN = RasterMaterialResolveStage.enabled()
+            ? StagedRenderPlan.rasterMaterialMetadataPath()
+            : StagedRenderPlan.rasterOwnedSurfacePath();
     private static boolean failed, ready, logged;
 
     private RasterLightingRenderer() { }
@@ -81,6 +83,15 @@ public final class RasterLightingRenderer {
             var nearest = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST);
 
             var encoder = gpu.createCommandEncoder();
+            RasterMaterialFrame material = null;
+            if (RasterMaterialResolveStage.enabled()) {
+                try {
+                    material = RasterMaterialResolveStage.record(
+                            encoder, gpu, surface, volume, uniforms, nearest);
+                } catch (RuntimeException materialFailure) {
+                    RasterMaterialResolveStage.fail(materialFailure);
+                }
+            }
             RasterLightingFrame lighting = RasterIndirectGiStage.record(
                     encoder, gpu, surface, volume, uniforms, nearest);
             if (lighting == null) {
@@ -118,6 +129,7 @@ public final class RasterLightingRenderer {
 
     public static void close() {
         ready = false;
+        RasterMaterialResolveStage.close();
         RasterIndirectGiStage.close();
         logged = false;
     }
