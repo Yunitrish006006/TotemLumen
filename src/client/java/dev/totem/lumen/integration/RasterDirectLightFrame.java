@@ -16,6 +16,10 @@ record RasterDirectLightFrame(
         int width,
         int height,
         long surfaceFrameSerial,
+        long materialRevision,
+        long surfaceSetRevision,
+        long pbrTextureRevision,
+        long voxelEpoch,
         int selectedLights,
         GpuTextureView radiance
 ) {
@@ -24,6 +28,8 @@ record RasterDirectLightFrame(
         Objects.requireNonNull(radiance, "radiance");
         if (width <= 0 || height <= 0) throw new IllegalArgumentException("Non-positive direct-light extent");
         if (surfaceFrameSerial <= 0) throw new IllegalArgumentException("Invalid surface frame serial");
+        if (materialRevision < 0 || surfaceSetRevision < 0 || pbrTextureRevision < 0 || voxelEpoch < 0)
+            throw new IllegalArgumentException("Invalid DIRECT_LIGHT input generations");
         if (selectedLights < 0 || selectedLights > 32) throw new IllegalArgumentException("Invalid selected-light count");
     }
 
@@ -34,6 +40,9 @@ record RasterDirectLightFrame(
                 && device == surface.device()
                 && width == surface.width()
                 && height == surface.height()
-                && surfaceFrameSerial == surface.frameSerial();
+                && surfaceFrameSerial == surface.frameSerial()
+                && materialRevision == material.materialRevision()
+                && surfaceSetRevision == material.surfaceSetRevision()
+                && pbrTextureRevision == material.pbrTextureRevision();
     }
 }
