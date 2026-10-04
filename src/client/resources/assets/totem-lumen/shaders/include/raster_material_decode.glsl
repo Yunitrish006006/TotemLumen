@@ -12,6 +12,10 @@ uint rasterMaterialId(vec4 encoded) {
     return rasterByte(encoded.r) | (rasterByte(encoded.g) << 8u);
 }
 
+uint rasterSurfaceSetId(vec4 encoded) {
+    return rasterByte(encoded.b) | (rasterByte(encoded.a) << 8u);
+}
+
 uint rasterMaterialWord(sampler2D lut, uint materialId, uint word) {
     uint x = (materialId & 255u) * RASTER_MATERIAL_WORDS + word;
     uint y = materialId >> 8u;
