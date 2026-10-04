@@ -81,9 +81,11 @@ class RasterLightingVolumeTest {
         assertFalse(renderer.contains("P5StableLookupRenderer"));
         assertFalse(renderer.contains("ClientLevel"));
         assertFalse(renderer.contains("getBlockState"));
+        String voxelScene = source("integration/RasterVoxelSceneGpu.java");
+        assertTrue(voxelScene.contains("GpuTexture.USAGE_COPY_DST | GpuTexture.USAGE_TEXTURE_BINDING"));
+        assertTrue(voxelScene.contains("| GpuTexture.USAGE_RENDER_ATTACHMENT"));
         String indirect = source("integration/RasterIndirectGiStage.java");
-        assertTrue(indirect.contains("GpuTexture.USAGE_COPY_DST | GpuTexture.USAGE_TEXTURE_BINDING"));
-        assertTrue(indirect.contains("| GpuTexture.USAGE_RENDER_ATTACHMENT"));
+        assertFalse(indirect.contains("GpuTexture.USAGE_COPY_DST"));
         assertFalse(renderer.contains("createTexture("));
         assertTrue(source("integration/RgbFrameMetrics.java").contains("if (RendererSettings.rasterLightingEnabled()) return RasterLightingRenderer.ready();"));
     }
