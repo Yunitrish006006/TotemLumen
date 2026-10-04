@@ -16,16 +16,33 @@ public final class RasterMaterialGpuLayout {
 
     private RasterMaterialGpuLayout() { }
 
-    /** ABGR integer for an RGBA8_UNORM texel: low byte in R, high byte in G, A=255. */
-    public static int materialIdTexel(int materialId) {
+    /**
+     * ABGR integer for one RGBA8_UNORM surface-identity texel:
+     * R/G = material ID low/high, B/A = surface-set ID low/high.
+     */
+    public static int surfaceIdentityTexel(int materialId, int surfaceSetId) {
         if (materialId < 0 || materialId > RasterMaterialRegistry.MAX_MATERIAL_ID) {
             throw new IllegalArgumentException("materialId out of range: " + materialId);
         }
-        return 0xFF000000 | (materialId & 0xFF) | (((materialId >>> 8) & 0xFF) << 8);
+        if (surfaceSetId < 0 || surfaceSetId > 0xFFFF) {
+            throw new IllegalArgumentException("surfaceSetId out of range: " + surfaceSetId);
+        }
+        return (materialId & 0xFF)
+                | (((materialId >>> 8) & 0xFF) << 8)
+                | ((surfaceSetId & 0xFF) << 16)
+                | (((surfaceSetId >>> 8) & 0xFF) << 24);
+    }
+
+    public static int materialIdTexel(int materialId) {
+        return surfaceIdentityTexel(materialId, 0);
     }
 
     public static int materialIdFromTexel(int abgr) {
         return (abgr & 0xFF) | (((abgr >>> 8) & 0xFF) << 8);
+    }
+
+    public static int surfaceSetIdFromTexel(int abgr) {
+        return ((abgr >>> 16) & 0xFF) | (((abgr >>> 24) & 0xFF) << 8);
     }
 
     public static int lutX(int materialId, int word) {
