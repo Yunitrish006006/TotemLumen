@@ -20,16 +20,20 @@ public record RasterMaterialFrame(
         long surfaceFrameSerial,
         long materialRevision,
         int materialCount,
+        long surfaceSetRevision,
         GpuTextureView visibleSurfaceIdentity,
-        GpuTextureView materialLut
+        GpuTextureView materialLut,
+        GpuTextureView surfaceSetLut
 ) {
     public RasterMaterialFrame {
         Objects.requireNonNull(device, "device");
         Objects.requireNonNull(visibleSurfaceIdentity, "visibleSurfaceIdentity");
         Objects.requireNonNull(materialLut, "materialLut");
+        Objects.requireNonNull(surfaceSetLut, "surfaceSetLut");
         if (width <= 0 || height <= 0) throw new IllegalArgumentException("Non-positive material extent");
         if (surfaceFrameSerial <= 0) throw new IllegalArgumentException("Invalid surface frame serial");
-        if (materialRevision < 0 || materialCount < 0) throw new IllegalArgumentException("Invalid material snapshot metadata");
+        if (materialRevision < 0 || materialCount < 0 || surfaceSetRevision < 0)
+            throw new IllegalArgumentException("Invalid material snapshot metadata");
     }
 
     public boolean matches(RasterSurfaceFrame surface) {
