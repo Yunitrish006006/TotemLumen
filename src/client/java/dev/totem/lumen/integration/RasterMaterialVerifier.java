@@ -42,11 +42,21 @@ public final class RasterMaterialVerifier {
         }
         compile(normalPath, normalSource.replace(directive, dynamicTransforms));
 
+        String materialPath = "assets/totem-lumen/shaders/core/raster_material_resolve.fsh";
+        String materialSource = resource(materialPath);
+        if (!materialSource.contains(directive)
+                || !materialSource.contains("uniform sampler2D MaterialIdAtlas")
+                || !materialSource.contains("p + ModelOffset - normal * 0.08")
+                || !materialSource.contains("fragColor = vec4(idBytes, 0.0, 1.0)")) {
+            throw new IllegalStateException("Material resolve shader contract drift");
+        }
+        compile(materialPath, materialSource.replace(directive, dynamicTransforms));
+
         if (!RasterSurfaceFrame.ColorSemantic.NATIVE_LIT_COLOR.name().equals("NATIVE_LIT_COLOR")) {
             throw new IllegalStateException("Raster surface color semantic drift");
         }
 
-        System.out.println("Raster surface verification PASS: owned color/depth/normal handoff and surface shader compile; NOT runtime/visual acceptance");
+        System.out.println("Raster staged verification PASS: owned surface + material resolve shader compile; NOT runtime/visual acceptance");
     }
 
     private static String resource(String path) throws IOException {
