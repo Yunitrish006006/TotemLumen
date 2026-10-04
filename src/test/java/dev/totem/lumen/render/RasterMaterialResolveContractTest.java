@@ -44,7 +44,8 @@ class RasterMaterialResolveContractTest {
         String stage = read("src/client/java/dev/totem/lumen/integration/RasterMaterialResolveStage.java");
         String renderer = read("src/client/java/dev/totem/lumen/integration/RasterLightingRenderer.java");
         assertTrue(stage.contains("totem.lumen.rasterMaterialResolve"));
-        assertTrue(stage.contains("unlitAlbedo=false"));
+        assertTrue(stage.contains("independentLighting=false"));
+        assertTrue(stage.contains("staticCanonicalCubesOnly"));
         assertTrue(renderer.contains("public static boolean independentLightingActive()"));
         assertTrue(renderer.contains("return false;"));
         assertFalse(renderer.contains("LumenRenderStage.DIRECT_LIGHT"));
