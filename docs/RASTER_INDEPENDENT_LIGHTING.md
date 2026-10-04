@@ -72,6 +72,38 @@ This change is an architectural/lifetime fix, not visual or FPS acceptance. Requ
 resize, profile switch, disconnect/rejoin, world exit/re-entry and shutdown with no closed-buffer or
 render-pass errors, followed by fixed-scene output checks. Apple/MoltenVK remains a separate gate.
 
+### Stage 2f implementation: active secondary lighting split into INDIRECT_GI + COMPOSITE
+
+The safe `NATIVE_LIT_COLOR` path no longer compiles the old combined `raster_ray` fragment shader.
+That shader still contained direct-RGB point-light selection/visibility and material-preview branches
+that could not legally run without unlit material input.
+
+The active graph is now:
+
+```text
+SURFACE_CAPTURE
+      |
+      v
+INDIRECT_GI
+      |
+      v
+COMPOSITE
+```
+
+`RasterIndirectGiStage` owns the voxel atlas and reduced-resolution radiance texture. Its shader has
+only `DepthSampler` and `VoxelSampler`, performs the existing bounded secondary diffuse/emissive
+and occlusion correction, and traces no primary visibility rays. `RasterLightingFrame` carries the
+radiance view plus the source surface frame serial. `RasterCompositeStage` validates that serial
+before sampling the surface and lighting outputs and is the sole staged pass writing the world color
+target.
+
+The direct-light data structures remain tested research code, but section extraction no longer builds
+their emitter summaries and the active shader has no `LightSampler`, `directRgb` or point-light
+visibility loop. DIRECT_LIGHT returns only after MATERIAL_RESOLVE publishes `UNLIT_MATERIAL_COLOR`.
+This is a compilation/ownership separation, not a claim that the current native-lit indirect
+correction equals the future independent-lighting renderer.
+
+
 ### Stage 2d candidate: stable publication and light payload order
 
 Unchanged section refreshes previously published a fresh volume every tick, so the
