@@ -72,7 +72,8 @@ final class RasterDirectCompositeStage {
         }
         if (!indirect.matches(surface)
                 || !material.matches(surface)
-                || !direct.matches(surface, material)) {
+                || !direct.matches(surface, material)
+                || direct.voxelEpoch() != indirect.voxelEpoch()) {
             throw new IllegalArgumentException("DIRECT_LIGHT COMPOSITE received mixed frame generations");
         }
 
