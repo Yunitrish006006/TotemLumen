@@ -57,8 +57,10 @@ surface:
 
 - native scene color -> Totem-owned color texture via GPU copy;
 - native depth -> Totem-owned `R32_FLOAT` texture via a small fullscreen depth-capture pipeline;
-- `RasterSurfaceFrame` carries device, extent, frame serial, color semantic, color view and depth
-  view to the lighting stage;
+- an owned full-resolution approximate normal field -> `RGBA16_FLOAT`, reconstructed once from
+  native depth inside SURFACE_CAPTURE;
+- `RasterSurfaceFrame` carries device, extent, frame serial, color semantic, color/depth/normal
+  views to later stages;
 - Raster lighting no longer reads the main target depth directly and no longer owns its own duplicate
   scene-copy resource;
 - client tick/stop lifecycle explicitly retires the surface stage.
@@ -90,9 +92,10 @@ INDIRECT_GI
 COMPOSITE
 ```
 
-`RasterIndirectGiStage` owns the voxel atlas and reduced-resolution radiance texture. Its shader has
-only `DepthSampler` and `VoxelSampler`, performs the existing bounded secondary diffuse/emissive
-and occlusion correction, and traces no primary visibility rays. `RasterLightingFrame` carries the
+`RasterIndirectGiStage` owns the voxel atlas and reduced-resolution radiance texture. Its shader
+consumes `DepthSampler`, `NormalSampler` and `VoxelSampler`; primary normal reconstruction has
+moved entirely into SURFACE_CAPTURE. It performs the existing bounded secondary diffuse/emissive and
+occlusion correction and traces no primary visibility rays. `RasterLightingFrame` carries the
 radiance view plus the source surface frame serial. `RasterCompositeStage` validates that serial
 before sampling the surface and lighting outputs and is the sole staged pass writing the world color
 target.
