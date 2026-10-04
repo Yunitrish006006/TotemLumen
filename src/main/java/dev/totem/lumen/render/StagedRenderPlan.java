@@ -109,4 +109,33 @@ public final class StagedRenderPlan {
                 passes
         );
     }
+
+    /** Development graph that inserts MATERIAL_RESOLVE without yet feeding it into lighting. */
+    public static StagedRenderPlan rasterMaterialMetadataPath() {
+        List<Pass> passes = new ArrayList<>();
+        passes.add(new Pass(
+                LumenRenderStage.SURFACE_CAPTURE,
+                Set.of(LumenStageResource.NATIVE_DEPTH),
+                Set.of(LumenStageResource.SURFACE)
+        ));
+        passes.add(new Pass(
+                LumenRenderStage.MATERIAL_RESOLVE,
+                Set.of(LumenStageResource.SURFACE, LumenStageResource.VOXEL_SCENE),
+                Set.of(LumenStageResource.MATERIAL)
+        ));
+        passes.add(new Pass(
+                LumenRenderStage.INDIRECT_GI,
+                Set.of(LumenStageResource.SURFACE, LumenStageResource.VOXEL_SCENE),
+                Set.of(LumenStageResource.INDIRECT_RADIANCE)
+        ));
+        passes.add(new Pass(
+                LumenRenderStage.COMPOSITE,
+                Set.of(LumenStageResource.SURFACE, LumenStageResource.INDIRECT_RADIANCE),
+                Set.of(LumenStageResource.FINAL_COLOR)
+        ));
+        return new StagedRenderPlan(
+                Set.of(LumenStageResource.NATIVE_DEPTH, LumenStageResource.VOXEL_SCENE),
+                passes
+        );
+    }
 }
