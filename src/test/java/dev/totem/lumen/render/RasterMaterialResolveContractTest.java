@@ -120,5 +120,8 @@ class RasterMaterialResolveContractTest {
         assertTrue(stage.contains("pbrTextureLutView.close()"));
         assertTrue(stage.contains("pbrTextureLut.close()"));
         assertTrue(stage.contains("uploadedTextureRevision = Long.MIN_VALUE;"));
+        assertTrue(stage.contains("private static ByteBuffer pbrTextureWords;"));
+        assertTrue(stage.contains("if (pbrTextureWords == null)"));
+        assertTrue(stage.contains("pbrTextureWords = null;"));
     }
 }
