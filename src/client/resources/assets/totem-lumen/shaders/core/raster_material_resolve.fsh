@@ -13,14 +13,14 @@ vec3 positionAt(vec2 uv, float depth) {
     return p.xyz / p.w;
 }
 
-vec2 materialIdBytes(ivec3 cell) {
-    if (any(lessThan(cell, ivec3(0))) || any(greaterThanEqual(cell, ivec3(96)))) return vec2(0);
+vec4 surfaceIdentity(ivec3 cell) {
+    if (any(lessThan(cell, ivec3(0))) || any(greaterThanEqual(cell, ivec3(96)))) return vec4(0);
     ivec3 section = cell / 16;
     int slot = (section.y * 6 + section.z) * 6 + section.x;
     ivec3 local = cell % 16;
     return texelFetch(MaterialIdAtlas, ivec2(
             (slot % 16) * 16 + local.x,
-            (slot / 16) * 256 + local.y * 16 + local.z), 0).rg;
+            (slot / 16) * 256 + local.y * 16 + local.z), 0);
 }
 
 void main() {
@@ -38,6 +38,5 @@ void main() {
     // Surface normals face out of the primary surface. Step into the owning voxel rather than
     // selecting the air cell immediately in front of the rasterized surface.
     ivec3 cell = ivec3(floor(p + ModelOffset - normal * 0.08));
-    vec2 idBytes = materialIdBytes(cell);
-    fragColor = vec4(idBytes, 0.0, 1.0);
+    fragColor = surfaceIdentity(cell);
 }
