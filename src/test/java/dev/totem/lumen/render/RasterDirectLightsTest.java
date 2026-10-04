@@ -109,7 +109,7 @@ class RasterDirectLightsTest {
         assertFalse(shader.contains("directRgb("));
         assertFalse(shader.contains("visibility("));
         String scene = Files.readString(Path.of("src/client/java/dev/totem/lumen/integration/RasterLightingScene.java"));
-        assertTrue(scene.contains("new RasterLightingVolume.Section(pixels, materialIds)"));
+        assertTrue(scene.contains("new RasterLightingVolume.Section(pixels, materialIds, surfaceSetIds)"));
         assertFalse(scene.contains("RasterMaterialCapture"));
         String renderer = Files.readString(Path.of("src/client/java/dev/totem/lumen/integration/RasterLightingRenderer.java"));
         assertTrue(renderer.contains("surface.supportsIndependentLighting()"));
