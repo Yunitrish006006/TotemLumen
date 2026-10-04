@@ -227,6 +227,7 @@ final class RasterMaterialResolveStage {
                 materials.revision(),
                 materials.entries().size(),
                 surfaces.revision(),
+                uploadedTextureRevision,
                 visibleIdsView,
                 basePropertiesView,
                 unlitAlbedoView,
