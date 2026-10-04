@@ -37,25 +37,29 @@ public final class RasterMaterialCapture {
     private static GpuTexture color, depth;
     private static GpuTextureView colorView, depthView;
     private static boolean failed, logged, capturedThisFrame;
-    private static long frames;
+    private static long frames, frameSerial, capturedFrameSerial = -1;
 
     private RasterMaterialCapture() { }
 
     private static boolean enabled() { return ENABLED && !failed && RendererSettings.rasterLightingEnabled(); }
 
-    public static void beginFrame() { capturedThisFrame = false; clearPending(); }
+    public static void beginFrame() {
+        capturedThisFrame = false;
+        capturedFrameSerial = -1;
+        frameSerial = frameSerial == Long.MAX_VALUE ? 1 : frameSerial + 1;
+        clearPending();
+    }
 
     /** RGB takes precedence over raw preview; neither flag can enable capture by itself. */
     public static boolean lightingPreviewRequested() { return ENABLED && RGB_PREVIEW; }
     public static boolean rawPreviewRequested() { return ENABLED && PREVIEW && !RGB_PREVIEW; }
 
-    /** Borrowed for this frame only. Never consume a prior frame after a skipped/failed capture. */
-    public record Frame(GpuTextureView color, GpuTextureView depth) { }
-
-    public static Frame lightingFrame(GpuDevice gpu, int width, int height) {
-        if (!lightingPreviewRequested() || !enabled() || !capturedThisFrame || device != gpu
+    /** Borrowed SURFACE_CAPTURE output for this exact frame only. */
+    public static RasterSurfaceFrame lightingFrame(GpuDevice gpu, int width, int height) {
+        if (!lightingPreviewRequested() || !enabled() || !capturedThisFrame
+                || capturedFrameSerial != frameSerial || device != gpu
                 || color == null || color.getWidth(0) != width || color.getHeight(0) != height) return null;
-        return new Frame(colorView, depthView);
+        return new RasterSurfaceFrame(device, width, height, frameSerial, colorView, depthView);
     }
 
     public static void remember(ChunkSectionsToRender draws, GpuSampler drawSampler, GpuTextureView blockAtlas) {
@@ -98,7 +102,10 @@ public final class RasterMaterialCapture {
             }
             // Explicit diagnostic mode only: black means no opaque/cutout surface, not a lighting result.
             if (rawPreviewRequested()) encoder.copyTextureToTexture(color, original, 0, 0, 0, 0, 0, w, h);
-            encoder.submit(); capturedThisFrame = true; frames++;
+            encoder.submit();
+            capturedThisFrame = true;
+            capturedFrameSerial = frameSerial;
+            frames++;
             if (!logged) {
                 logged = true;
                 TotemLumenClient.LOGGER.info("RASTER_MATERIAL capture ACTIVE: {}x{}, rawPreview={}, rgbPreview={}, no lightmap/fog; baked vertex shade retained; opaque/cutout only", w, h, rawPreviewRequested(), RGB_PREVIEW);
@@ -141,6 +148,7 @@ public final class RasterMaterialCapture {
 
     private static void retireTargets() {
         capturedThisFrame = false;
+        capturedFrameSerial = -1;
         // RenderPearl defers destruction until recorded GPU work has retired.
         if (colorView != null) colorView.close(); if (depthView != null) depthView.close();
         if (color != null) color.close(); if (depth != null) depth.close();
