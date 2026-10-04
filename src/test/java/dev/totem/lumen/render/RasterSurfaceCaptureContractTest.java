@@ -18,6 +18,8 @@ class RasterSurfaceCaptureContractTest {
         assertTrue(capture.contains("encoder.copyTextureToTexture(nativeColor, color"));
         assertTrue(capture.contains("Totem raster owned surface depth"));
         assertTrue(capture.contains("GpuFormat.R32_FLOAT"));
+        assertTrue(capture.contains("Totem raster owned surface normal"));
+        assertTrue(capture.contains("GpuFormat.RGBA16_FLOAT"));
         assertFalse(capture.contains("ChunkSectionsToRender"));
         assertFalse(capture.contains("renderLayers"));
         assertFalse(capture.contains("GpuBufferSlice"));
@@ -33,9 +35,18 @@ class RasterSurfaceCaptureContractTest {
     }
 
     @Test
+    void normalCapturePublishesOwnedSurfaceNormal() throws Exception {
+        String shader = read("src/client/resources/assets/totem-lumen/shaders/core/raster_surface_normal.fsh");
+        assertTrue(shader.contains("#include <minecraft:dynamictransforms.glsl>"));
+        assertTrue(shader.contains("uniform sampler2D DepthSampler"));
+        assertTrue(shader.contains("vec3 n = cross(dx, dy)"));
+        assertTrue(shader.contains("fragColor = vec4(n * 0.5 + 0.5, 1.0)"));
+    }
+
+    @Test
     void levelRendererPublishesOwnedSurfaceBeforeLighting() throws Exception {
         String hook = read("src/client/java/dev/totem/lumen/mixin/LevelRendererTakeoverMixin.java");
-        int capture = hook.indexOf("RasterSurfaceCapture.capture()");
+        int capture = hook.indexOf("RasterSurfaceCapture.capture(cameraState)");
         int lighting = hook.indexOf("RasterLightingRenderer.render(cameraState, surface)");
         assertTrue(capture >= 0 && lighting > capture);
         assertFalse(hook.contains("RasterMaterialCapture"));
@@ -50,6 +61,7 @@ class RasterSurfaceCaptureContractTest {
         assertTrue(renderer.contains("RasterIndirectGiStage.record("));
         assertTrue(renderer.contains("RasterCompositeStage.record("));
         assertTrue(indirect.contains("surface.depth()"));
+        assertTrue(indirect.contains("surface.normal()"));
         assertTrue(composite.contains("surface.depth()"));
         assertTrue(composite.contains("surface.baseColor()"));
         assertFalse(indirect.contains("target.getDepthTextureView()"));
@@ -71,6 +83,7 @@ class RasterSurfaceCaptureContractTest {
         assertTrue(frame.contains("NATIVE_LIT_COLOR"));
         assertTrue(frame.contains("UNLIT_MATERIAL_COLOR"));
         assertTrue(frame.contains("supportsIndependentLighting()"));
+        assertTrue(frame.contains("GpuTextureView normal"));
         assertTrue(capture.contains("RasterSurfaceFrame.ColorSemantic.NATIVE_LIT_COLOR"));
         assertFalse(capture.contains("UNLIT_MATERIAL_COLOR"));
     }
