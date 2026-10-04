@@ -27,6 +27,20 @@ class RasterLightingVolumeTest {
         }
     }
 
+    @Test void sectionMaterialIdsAreImmutableUnsigned16BitPayloads() {
+        int[] pixels = new int[4096];
+        char[] materials = new char[4096];
+        materials[0] = (char) 1;
+        materials[1] = (char) 0xFFFF;
+        var section = new RasterLightingVolume.Section(pixels, materials);
+        materials[0] = 99;
+        assertEquals(1, section.materialId(0));
+        assertEquals(65535, section.materialId(1));
+        assertEquals(0, section.materialId(2));
+        assertThrows(IllegalArgumentException.class,
+                () -> new RasterLightingVolume.Section(new int[4096], new char[1]));
+    }
+
     @Test void immutablePublicationAndUnknownCells() {
         int[] pixels = new int[4096]; pixels[0] = RasterLightingVolume.AIR;
         var section = new RasterLightingVolume.Section(pixels);
