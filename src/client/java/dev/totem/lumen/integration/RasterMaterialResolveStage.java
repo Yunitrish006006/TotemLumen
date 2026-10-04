@@ -230,10 +230,10 @@ final class RasterMaterialResolveStage {
         }
 
         if (lutChanged) {
+            // Material-LUT capacity changes are independent from the P18 surface-set LUT.
+            // Do not retire surface-set resources just because the material ID range grew.
             if (materialLutView != null) materialLutView.close();
-        if (surfaceSetLutView != null) surfaceSetLutView.close();
             if (materialLut != null) materialLut.close();
-        if (surfaceSetLut != null) surfaceSetLut.close();
             if (lutPixels != null) lutPixels.close();
             lutRows = requiredRows;
             materialLut = gpu.createTexture(
@@ -329,6 +329,7 @@ final class RasterMaterialResolveStage {
         java.util.Arrays.fill(uploaded, null);
         epoch = -1;
         uploadedMaterialRevision = Long.MIN_VALUE;
+        uploadedSurfaceRevision = Long.MIN_VALUE;
         lutRows = uploadedMaterialCount = 0;
         if (logged) {
             TotemLumenClient.LOGGER.info(
