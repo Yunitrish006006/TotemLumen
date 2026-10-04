@@ -23,6 +23,7 @@ public record RasterMaterialFrame(
         long surfaceSetRevision,
         GpuTextureView visibleSurfaceIdentity,
         GpuTextureView baseProperties,
+        GpuTextureView unlitAlbedo,
         GpuTextureView materialLut,
         GpuTextureView surfaceSetLut
 ) {
@@ -30,6 +31,7 @@ public record RasterMaterialFrame(
         Objects.requireNonNull(device, "device");
         Objects.requireNonNull(visibleSurfaceIdentity, "visibleSurfaceIdentity");
         Objects.requireNonNull(baseProperties, "baseProperties");
+        Objects.requireNonNull(unlitAlbedo, "unlitAlbedo");
         Objects.requireNonNull(materialLut, "materialLut");
         Objects.requireNonNull(surfaceSetLut, "surfaceSetLut");
         if (width <= 0 || height <= 0) throw new IllegalArgumentException("Non-positive material extent");
