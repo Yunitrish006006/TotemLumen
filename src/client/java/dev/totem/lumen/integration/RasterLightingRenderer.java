@@ -83,6 +83,13 @@ public final class RasterLightingRenderer {
             var nearest = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST);
 
             var encoder = gpu.createCommandEncoder();
+            RasterVoxelSceneFrame voxelScene = RasterVoxelSceneGpu.prepare(encoder, gpu, volume);
+            if (!voxelScene.coherent()) {
+                // Shared atlas uploads were recorded, but no lighting stage may sample stale slots.
+                encoder.submit();
+                return;
+            }
+
             RasterMaterialFrame material = null;
             if (RasterMaterialResolveStage.enabled()) {
                 try {
@@ -93,7 +100,7 @@ public final class RasterLightingRenderer {
                 }
             }
             RasterLightingFrame lighting = RasterIndirectGiStage.record(
-                    encoder, gpu, surface, volume, uniforms, nearest);
+                    encoder, gpu, surface, voxelScene, uniforms, nearest);
             if (lighting == null) {
                 // Atlas uploads were recorded but this generation is not coherent enough to shade.
                 encoder.submit();
@@ -131,6 +138,7 @@ public final class RasterLightingRenderer {
         ready = false;
         RasterMaterialResolveStage.close();
         RasterIndirectGiStage.close();
+        RasterVoxelSceneGpu.close();
         logged = false;
     }
 }
