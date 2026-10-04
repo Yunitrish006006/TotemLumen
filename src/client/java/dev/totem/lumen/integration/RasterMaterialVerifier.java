@@ -47,7 +47,7 @@ public final class RasterMaterialVerifier {
         if (!materialSource.contains(directive)
                 || !materialSource.contains("uniform sampler2D MaterialIdAtlas")
                 || !materialSource.contains("p + ModelOffset - normal * 0.08")
-                || !materialSource.contains("fragColor = vec4(idBytes, 0.0, 1.0)")) {
+                || !materialSource.contains("fragColor = surfaceIdentity(cell)")) {
             throw new IllegalStateException("Material resolve shader contract drift");
         }
         compile(materialPath, materialSource.replace(directive, dynamicTransforms));
