@@ -2,6 +2,7 @@ package dev.totem.lumen.integration;
 
 import dev.totem.lumen.TotemLumenClient;
 import dev.totem.lumen.scene.EnvironmentFrameState;
+import dev.totem.lumen.render.RendererSettings;
 import net.fabricmc.fabric.api.client.rendering.v1.level.LevelExtractionEvents;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.world.attribute.EnvironmentAttributes;
@@ -26,6 +27,9 @@ public final class P13EnvironmentCapture {
     }
 
     private static void capture(ClientLevel level) {
+        if (!RendererSettings.rendererEnabled()) {
+            return;
+        }
         String dimensionId = level.dimension().identifier().toString();
         long overworldClockTime = level.getOverworldClockTime();
         MoonPhase moonPhase = level.environmentAttributes()

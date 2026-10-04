@@ -6,6 +6,38 @@ import static org.junit.jupiter.api.Assertions.*;
 
 final class QuadSurfaceRegistryTest {
     @Test
+    void legacyAndUntintedSurfacesUseNeutralRgb() {
+        QuadSurface face = new QuadSurface("test:untinted", 0, 0, 1, 0, 1, 1, 0, 1);
+        assertEquals(0xFFFFFF, face.tintRgb());
+        assertEquals(0xFFFFFF, QuadSurface.UNTEXTURED.tintRgb());
+    }
+
+    @Test
+    void tintAlphaDoesNotBecomeOpacityOrChangeSurfaceIdentity() {
+        assertEquals(tinted(0x7F80C040), tinted(0xFF80C040));
+        assertEquals(0x80C040, tinted(0x7F80C040).tintRgb());
+        assertEquals(0, tinted(0).tintRgb()); // black is valid, not absent
+    }
+
+    @Test
+    void cubeSurfaceSetsKeepBiomeTintsDistinctButDeduplicateEqualTints() {
+        int greenId = BlockSurfaceSetRegistry.register(cube(tinted(0x80C040)));
+        int yellowId = BlockSurfaceSetRegistry.register(cube(tinted(0xD0C040)));
+        assertTrue(greenId > 0 && yellowId > 0);
+        assertNotEquals(greenId, yellowId);
+        assertEquals(greenId, BlockSurfaceSetRegistry.register(cube(tinted(0xFF80C040))));
+        assertEquals(0x80C040, BlockSurfaceSetRegistry.surfaceSet(greenId).positiveY().tintRgb());
+    }
+
+    private static QuadSurface tinted(int tint) {
+        return new QuadSurface("test:biome_tinted", 0, 0, 1, 0, 1, 1, 0, 1, tint);
+    }
+
+    private static BlockSurfaceSetRegistry.CubeSurfaceSet cube(QuadSurface face) {
+        return new BlockSurfaceSetRegistry.CubeSurfaceSet(face, face, face, face, face, face, 0.8f, 0);
+    }
+
+    @Test
     void quadSurfaceUsesValueEqualityForTextureAndUvs() {
         QuadSurface a = new QuadSurface(
                 "minecraft:block/stone",

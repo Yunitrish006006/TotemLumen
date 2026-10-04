@@ -16,6 +16,7 @@ public final class HeldLightShaderVerifier {
     }
 
     public static void main(String[] args) throws Exception {
+        RasterMaterialVerifier.verify();
         String fragment = readResource(FRAGMENT);
         String rgbFragment = readResource(RGB_FRAGMENT);
         String include = readResource(DYNAMIC_TRANSFORMS);
@@ -38,6 +39,10 @@ public final class HeldLightShaderVerifier {
         verifyAtlasLayout();
         verify(fragment.replace(directive, include), "totem-lumen:core/held_light");
         verify(rgbFragment.replace(directive, include), "totem-lumen:core/held_light_rgb");
+        verify(readResource("assets/totem-lumen/shaders/core/hybrid_terrain.fsh").replace(directive, include),
+                "totem-lumen:core/hybrid_terrain");
+        verify(readResource("assets/totem-lumen/shaders/core/raster_ray.fsh").replace(directive, include), "totem-lumen:core/raster_ray");
+        verify(readResource("assets/totem-lumen/shaders/core/raster_ray_composite.fsh").replace(directive, include), "totem-lumen:core/raster_ray_composite");
     }
 
     private static void verifyAtlasLayout() {

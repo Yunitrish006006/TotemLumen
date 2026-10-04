@@ -64,6 +64,16 @@ public final class TotemLumenVideoSettingsIntegration {
 
         list.addSmall(profileSlider, diagnosticsButton);
 
+        if (RendererSettings.rasterLightingEnabled()) {
+            list.addSmall(settingSlider(RendererSettings.GiQuality.values().length - 1,
+                    () -> RendererSettings.giQuality().ordinal(), RendererSettings::setGiQuality,
+                    index -> TotemLumenVideoSettingsScreen.giQualityLabel(RendererSettings.GiQuality.values()[index])),
+                    settingSlider(RendererSettings.InternalResolution.values().length - 1,
+                    () -> RendererSettings.internalResolution().ordinal(), RendererSettings::setInternalResolution,
+                    index -> TotemLumenVideoSettingsScreen.internalResolutionLabel(RendererSettings.InternalResolution.values()[index])));
+            return; // Keep vanilla quality controls; do not expose unsupported RT features.
+        }
+
         if (!RendererSettings.rendererEnabled()) {
             return;
         }

@@ -56,6 +56,7 @@ public final class HeldLightPostRenderer {
     public static void render(CameraRenderState camera) {
         if (pipelineUnavailable
                 || RendererSettings.renderProfile() == RendererSettings.RenderProfile.TOTEM_LUMEN
+                || RendererSettings.rasterLightingEnabled()
                 || !RenderSystem.isOnRenderThread()) return;
         Minecraft client = Minecraft.getInstance();
         if (client.level == null || camera == null || !camera.initialized) return;

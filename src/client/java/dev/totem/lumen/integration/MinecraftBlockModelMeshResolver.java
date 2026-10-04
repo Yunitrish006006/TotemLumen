@@ -4,6 +4,7 @@ import dev.totem.lumen.TotemLumenClient;
 import dev.totem.lumen.geometry.BlockModelMeshRegistry;
 import dev.totem.lumen.geometry.BlockSurfaceSetRegistry;
 import dev.totem.lumen.geometry.QuadSurface;
+import dev.totem.lumen.geometry.CubeFaceUvCanonicalizer;
 import dev.totem.lumen.material.BaselineSurfaceProperties;
 import dev.totem.lumen.material.SurfaceProperties;
 import dev.totem.lumen.scene.BlockGeometryCode;
@@ -26,6 +27,7 @@ import net.minecraft.world.level.block.state.properties.Property;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.shapes.VoxelShape;
 import org.joml.Vector3f;
+import it.unimi.dsi.fastutil.floats.FloatArrayList;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -43,6 +45,7 @@ public final class MinecraftBlockModelMeshResolver {
 
     private static Object observedModelSet;
     private static boolean extractionFailureLogged;
+    private static boolean tintCaptureLogged;
 
     private MinecraftBlockModelMeshResolver() {
     }
@@ -148,16 +151,16 @@ public final class MinecraftBlockModelMeshResolver {
             BlockStateModel model = modelSet.get(state);
             FabricBlockStateModel fabricModel = (FabricBlockStateModel) model;
 
-            List<Float> positions = new ArrayList<>();
+            FloatArrayList positions = new FloatArrayList(6 * BlockModelMeshRegistry.FLOATS_PER_QUAD);
             List<QuadSurface> surfaces = new ArrayList<>();
             Renderer renderer = Renderer.get();
             QuadEmitter emitter = renderer.quadEmitter(
-                    quad -> appendQuad(positions, surfaces, quad)
+                    quad -> appendQuad(positions, surfaces, quad, state, level, pos)
             );
             RandomSource random = RandomSource.create(state.getSeed(pos));
             fabricModel.emitQuads(emitter, level, pos, state, random, direction -> false);
             return new EmittedModelQuads(
-                    toFloatArray(positions),
+                    positions.toFloatArray(),
                     surfaces.toArray(QuadSurface[]::new)
             );
         } catch (Throwable failure) {
@@ -190,9 +193,12 @@ public final class MinecraftBlockModelMeshResolver {
     }
 
     private static void appendQuad(
-            List<Float> positions,
+            FloatArrayList positions,
             List<QuadSurface> surfaces,
-            MutableQuadView quad
+            MutableQuadView quad,
+            BlockState state,
+            ClientLevel level,
+            BlockPos pos
     ) {
         Vector3f scratch = new Vector3f();
         for (int vertex = 0; vertex < 4; vertex++) {
@@ -201,10 +207,12 @@ public final class MinecraftBlockModelMeshResolver {
             positions.add(canonicalFloat(scratch.y));
             positions.add(canonicalFloat(scratch.z));
         }
-        surfaces.add(resolveSurface(quad));
+        surfaces.add(resolveSurface(quad, state, level, pos));
     }
 
-    private static QuadSurface resolveSurface(MutableQuadView quad) {
+    private static QuadSurface resolveSurface(
+            MutableQuadView quad, BlockState state, ClientLevel level, BlockPos pos
+    ) {
         try {
             Object texture = Minecraft.getInstance()
                     .getTextureManager()
@@ -230,6 +238,22 @@ public final class MinecraftBlockModelMeshResolver {
 
             String spriteId = sprite.contents().name().toString();
             LabPbrTextureRegistry.observeSprite(spriteId);
+            // Resolve world/biome-dependent tint now, never from Vulkan command recording.
+            // Negative indices are untinted; getTintSource does not accept negative indices.
+            int tint = 0xFFFFFF;
+            if (quad.tintIndex() >= 0) {
+                var tintSource = Minecraft.getInstance().getBlockColors()
+                        .getTintSource(state, quad.tintIndex());
+                if (tintSource != null) tint = tintSource.colorInWorld(state, level, pos);
+            }
+            if (!tintCaptureLogged && (tint & 0xFFFFFF) != 0xFFFFFF) {
+                tintCaptureLogged = true;
+                TotemLumenClient.LOGGER.info(
+                        "P18 block tint captured: block={}, sprite={}, tintIndex={}, rgb=0x{}",
+                        BuiltInRegistries.BLOCK.getKey(state.getBlock()), spriteId,
+                        quad.tintIndex(), Integer.toHexString(tint & 0xFFFFFF)
+                );
+            }
             return new QuadSurface(
                     spriteId,
                     normalizeSpriteUv(quad.u(0), u0, uSpan),
@@ -239,7 +263,8 @@ public final class MinecraftBlockModelMeshResolver {
                     normalizeSpriteUv(quad.u(2), u0, uSpan),
                     normalizeSpriteUv(quad.v(2), v0, vSpan),
                     normalizeSpriteUv(quad.u(3), u0, uSpan),
-                    normalizeSpriteUv(quad.v(3), v0, vSpan)
+                    normalizeSpriteUv(quad.v(3), v0, vSpan),
+                    tint
             );
         } catch (Throwable ignored) {
             return QuadSurface.UNTEXTURED;
@@ -260,14 +285,6 @@ public final class MinecraftBlockModelMeshResolver {
         if (Math.abs(value) < 0.0000001f) return 0.0f;
         if (Math.abs(value - 1.0f) < 0.0000001f) return 1.0f;
         return value;
-    }
-
-    private static float[] toFloatArray(List<Float> values) {
-        float[] result = new float[values.size()];
-        for (int index = 0; index < values.size(); index++) {
-            result[index] = values.get(index);
-        }
-        return result;
     }
 
     private static boolean isCanonicalUnitCube(float[] quads) {
@@ -375,38 +392,7 @@ public final class MinecraftBlockModelMeshResolver {
             int constantAxis,
             QuadSurface source
     ) {
-        int axisA = (constantAxis + 1) % 3;
-        int axisB = (constantAxis + 2) % 3;
-        float[] cornerU = new float[4];
-        float[] cornerV = new float[4];
-        boolean[] seen = new boolean[4];
-
-        for (int vertex = 0; vertex < 4; vertex++) {
-            float a = quads[base + vertex * 3 + axisA];
-            float b = quads[base + vertex * 3 + axisB];
-            if (!nearBoundary(a) || !nearBoundary(b)) {
-                return source;
-            }
-            int corner = (a > 0.5f ? 1 : 0) | (b > 0.5f ? 2 : 0);
-            if (seen[corner]) return source;
-            seen[corner] = true;
-            cornerU[corner] = source.u(vertex);
-            cornerV[corner] = source.v(vertex);
-        }
-
-        for (boolean present : seen) {
-            if (!present) return source;
-        }
-
-        // Canonical winding: 00, 10, 11, 01. Shader-side bilerp can now use axisA/axisB
-        // coordinates without depending on Minecraft/Fabric emitted vertex order.
-        return new QuadSurface(
-                source.spriteId(),
-                cornerU[0], cornerV[0],
-                cornerU[1], cornerV[1],
-                cornerU[3], cornerV[3],
-                cornerU[2], cornerV[2]
-        );
+        return CubeFaceUvCanonicalizer.canonicalize(quads, base, constantAxis, source, CUBE_EPSILON);
     }
 
     private static boolean nearBoundary(float value) {
@@ -418,14 +404,14 @@ public final class MinecraftBlockModelMeshResolver {
         if (boxes.isEmpty()) {
             return new float[0];
         }
-        List<Float> values = new ArrayList<>(boxes.size() * 6 * BlockModelMeshRegistry.FLOATS_PER_QUAD);
+        FloatArrayList values = new FloatArrayList(boxes.size() * 6 * BlockModelMeshRegistry.FLOATS_PER_QUAD);
         for (AABB box : boxes) {
             appendBox(values, box);
         }
-        return toFloatArray(values);
+        return values.toFloatArray();
     }
 
-    private static void appendBox(List<Float> out, AABB b) {
+    private static void appendBox(FloatArrayList out, AABB b) {
         // -X, +X, -Y, +Y, -Z, +Z. Winding is irrelevant because P14C triangles are two-sided.
         quad(out, b.minX, b.minY, b.minZ, b.minX, b.minY, b.maxZ, b.minX, b.maxY, b.maxZ, b.minX, b.maxY, b.minZ);
         quad(out, b.maxX, b.minY, b.maxZ, b.maxX, b.minY, b.minZ, b.maxX, b.maxY, b.minZ, b.maxX, b.maxY, b.maxZ);
@@ -435,7 +421,7 @@ public final class MinecraftBlockModelMeshResolver {
         quad(out, b.minX, b.minY, b.maxZ, b.maxX, b.minY, b.maxZ, b.maxX, b.maxY, b.maxZ, b.minX, b.maxY, b.maxZ);
     }
 
-    private static void quad(List<Float> out, double... xyz) {
+    private static void quad(FloatArrayList out, double... xyz) {
         for (double value : xyz) out.add((float) value);
     }
 

@@ -53,6 +53,8 @@ public final class SceneExtractionBridge {
     private static boolean initialized;
     private static long clientTicks;
     private static long lastReportedDroppedUpdates;
+    private static boolean trackingActive;
+    private static int catchupIndex, catchupRadius, catchupX, catchupZ;
 
     private SceneExtractionBridge() {
     }
@@ -72,11 +74,26 @@ public final class SceneExtractionBridge {
     }
 
     public static void tick() {
+        boolean active = sceneTrackingEnabled();
+        if (trackingActive != active) {
+            trackingActive = active;
+            onLevelChanged(Minecraft.getInstance().level);
+        }
         if (!sceneTrackingEnabled()) {
             return;
         }
 
         SCENE.applyPending(UPDATE_QUEUE);
+        // Events are ignored while inactive. On reactivation rebuild from currently loaded chunks,
+        // at most eight lookups per tick; never reuse sections from an inactive world generation.
+        var level = Minecraft.getInstance().level;
+        int side = 2 * catchupRadius + 1;
+        for (int n = 0; level != null && n < 8 && catchupIndex < side * side; n++) {
+            int index = catchupIndex++;
+            var chunk = level.getChunkSource().getChunk(catchupX + index % side - catchupRadius,
+                    catchupZ + index / side - catchupRadius, ChunkStatus.FULL, false);
+            if (chunk != null) onChunkLoaded(level, chunk);
+        }
         clientTicks++;
 
         long dropped = UPDATE_QUEUE.droppedCount();
@@ -217,8 +234,7 @@ public final class SceneExtractionBridge {
     }
 
     private static void endExtraction(LevelExtractionContext context) {
-        // Native profiles do not consume Totem frame snapshots or CPU voxel extraction. Keep
-        // chunk/block events queued so switching back to Totem can populate the existing scene.
+        // Native/raster profiles do not consume full Totem voxel/model snapshots.
         if (!RendererSettings.rendererEnabled() || !sceneTrackingEnabled()) {
             return;
         }
@@ -328,6 +344,8 @@ public final class SceneExtractionBridge {
 
     private static void onLevelChanged(ClientLevel level) {
         UPDATE_QUEUE.clear();
+        SCENE.apply(new SceneUpdate.LevelCleared(UPDATE_QUEUE.nextSequence()));
+        catchupIndex = Integer.MAX_VALUE;
         LATEST_FRAME.set(null);
         synchronized (SNAPSHOT_LOCK) {
             PRIORITY_SECTION_SNAPSHOTS.clear();
@@ -346,6 +364,13 @@ public final class SceneExtractionBridge {
 
         String dimensionId = dimensionId(level);
         offer(new SceneUpdate.LevelChanged(UPDATE_QUEUE.nextSequence(), dimensionId));
+        var client = Minecraft.getInstance();
+        if (client.player != null) {
+            catchupRadius = Math.min(32, Math.max(2, client.options.renderDistance().get() + 1));
+            catchupX = Math.floorDiv(client.player.blockPosition().getX(), 16);
+            catchupZ = Math.floorDiv(client.player.blockPosition().getZ(), 16);
+            catchupIndex = 0;
+        }
         TotemLumenClient.LOGGER.info("Totem Lumen scene attached to {}", dimensionId);
     }
 
@@ -421,7 +446,7 @@ public final class SceneExtractionBridge {
     }
 
     private static boolean sceneTrackingEnabled() {
-        return RendererBootstrap.state() != RendererState.DISABLED_NON_VULKAN;
+        return RendererSettings.rendererEnabled() && RendererBootstrap.state() != RendererState.DISABLED_NON_VULKAN;
     }
 
     public static RayScene scene() {

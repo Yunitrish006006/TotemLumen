@@ -14,6 +14,9 @@ import dev.totem.lumen.integration.MinecraftBlockModelMeshResolver;
 import dev.totem.lumen.integration.P13EnvironmentCapture;
 import dev.totem.lumen.integration.RgbLatencyDiagnostics;
 import dev.totem.lumen.integration.SceneExtractionBridge;
+import dev.totem.lumen.integration.RasterLightingScene;
+import dev.totem.lumen.integration.RasterLightingRenderer;
+import dev.totem.lumen.integration.RasterMaterialCapture;
 import dev.totem.lumen.integration.VanillaRgbLighting;
 import dev.totem.lumen.network.GameplayLightSectionsPayload;
 import dev.totem.lumen.network.LightingWorldRulesPayload;
@@ -68,7 +71,8 @@ public final class TotemLumenClient implements ClientModInitializer {
         ClientPlayNetworking.registerGlobalReceiver(LightingWorldRulesPayload.TYPE, (payload, context) -> {
             if (ClientLightingWorldRules.apply(payload.rules(), payload.tuning())) {
                 SceneExtractionBridge.refreshLightingWorldRules();
-                ClientGameplayLightPredictor.requestRebuild();
+                if (RendererSettings.rasterLightingEnabled()) RasterLightingScene.requestRefresh();
+                if (RendererSettings.renderProfile() == RendererSettings.RenderProfile.MINECRAFT_RGB) ClientGameplayLightPredictor.requestRebuild();
             }
             LOGGER.info(
                     "Applied {} server-authoritative lighting world rule(s)",
@@ -93,6 +97,8 @@ public final class TotemLumenClient implements ClientModInitializer {
             }
         });
         ClientPlayConnectionEvents.DISCONNECT.register((listener, client) -> {
+            // This callback can run on Netty. Raster scene/GPU cleanup belongs to the
+            // client tick/level-change/CLIENT_STOPPING hooks, never this network callback.
             if (ClientLightingWorldRules.reset()) {
                 LOGGER.info("Cleared server-authoritative lighting world rules after disconnect");
             }
@@ -140,14 +146,25 @@ public final class TotemLumenClient implements ClientModInitializer {
         // scene bridge constructs the immutable FrameSnapshot for the same frame.
         P13EnvironmentCapture.initialize();
         SceneExtractionBridge.initialize();
-        ClientChunkEvents.CHUNK_LOAD.register(ClientGameplayLightPredictor::onChunkLoaded);
-        ClientChunkEvents.CHUNK_UNLOAD.register(ClientGameplayLightPredictor::onChunkUnloaded);
+        net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLevelEvents.AFTER_CLIENT_LEVEL_CHANGE.register((client, level) -> RasterLightingScene.clear());
+        ClientChunkEvents.CHUNK_LOAD.register((level, chunk) -> {
+            RasterLightingScene.onChunkChanged(level, chunk.getPos().x(), chunk.getPos().z());
+            if (RendererSettings.renderProfile() == RendererSettings.RenderProfile.MINECRAFT_RGB) ClientGameplayLightPredictor.onChunkLoaded(level, chunk);
+        });
+        ClientChunkEvents.CHUNK_UNLOAD.register((level, chunk) -> {
+            RasterLightingScene.onChunkChanged(level, chunk.getPos().x(), chunk.getPos().z());
+            if (RendererSettings.renderProfile() == RendererSettings.RenderProfile.MINECRAFT_RGB) ClientGameplayLightPredictor.onChunkUnloaded(level, chunk);
+        });
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
+            dev.totem.lumen.vulkan.VulkanDeferredDestruction.drain();
             RendererBootstrap.tick();
             RendererSettings.RenderProfile renderProfile = RendererSettings.renderProfile();
             if (renderProfile != lastRenderProfile) {
-                if (client.level != null) {
+                ClientGameplayLightPredictor.clear();
+                RasterLightingScene.clear();
+                if (client.level != null && (renderProfile == RendererSettings.RenderProfile.MINECRAFT_RGB
+                        || lastRenderProfile == RendererSettings.RenderProfile.MINECRAFT_RGB)) {
                     ClientGameplayLightPredictor.onProfileChanged(client.level, client.player);
                 }
                 if (RendererSettings.rendererEnabled()) {
@@ -164,7 +181,7 @@ public final class TotemLumenClient implements ClientModInitializer {
                 if (renderProfile == RendererSettings.RenderProfile.MINECRAFT_RGB) {
                     VanillaRgbLighting.updateSkyPalette(client.level);
                 }
-                ClientGameplayLightPredictor.tick(client.level, client.player);
+                if (renderProfile == RendererSettings.RenderProfile.MINECRAFT_RGB) ClientGameplayLightPredictor.tick(client.level, client.player);
                 long dirtyEnqueueStart = System.nanoTime();
                 var sectionsToRefresh = ClientGameplayLightField.drainDirtySections(dimensionId, 32);
                 for (ClientGameplayLightField.SectionCoordinate section : sectionsToRefresh) {
@@ -191,13 +208,19 @@ public final class TotemLumenClient implements ClientModInitializer {
             }
             // P14C watches Minecraft's model-set identity independently of block updates so a
             // resource-pack reload schedules bounded section re-extraction even in a static world.
-            MinecraftBlockModelMeshResolver.checkModelSetReload();
-            LabPbrTextureRegistry.tick(client);
+            if (RendererSettings.rendererEnabled()) {
+                MinecraftBlockModelMeshResolver.checkModelSetReload();
+                LabPbrTextureRegistry.tick(client);
+            }
             SceneExtractionBridge.tick();
+            RasterLightingScene.tick(client);
+            RasterLightingRenderer.tickLifecycle(client);
+            RasterMaterialCapture.tickLifecycle(client);
             P5StableLookupRenderer.tickLifecycle(client);
             RendererCompileProgressNotifier.tick(client);
 
             while (cycleDebugMode.consumeClick()) {
+                if (!RendererSettings.rendererEnabled()) continue;
                 P5StableLookupRenderer.DebugMode mode = P5StableLookupRenderer.cycleMode();
                 if (client.player != null) {
                     client.player.sendSystemMessage(Component.literal("Totem Lumen debug: " + mode.label()));
@@ -205,6 +228,7 @@ public final class TotemLumenClient implements ClientModInitializer {
                 LOGGER.info("P5 stable lookup debug mode changed to {}", mode.label());
             }
             while (cyclePerformanceProbe.consumeClick()) {
+                if (!RendererSettings.rendererEnabled()) continue;
                 P5StableLookupRenderer.DebugMode mode = P5StableLookupRenderer.cyclePerformanceProbeMode();
                 if (client.player != null) {
                     client.player.sendSystemMessage(Component.literal(
@@ -253,11 +277,15 @@ public final class TotemLumenClient implements ClientModInitializer {
         );
 
         ClientLifecycleEvents.CLIENT_STOPPING.register(client -> {
+            RasterLightingScene.clear();
+            RasterLightingRenderer.close();
+            RasterMaterialCapture.close();
             RendererCompileProgressNotifier.reset();
             ClientGameplayLightPredictor.clear();
             FluidRenderGeometryCache.clear();
             EntityRenderGeometryCache.clear();
             P5StableLookupRenderer.shutdown();
+            dev.totem.lumen.vulkan.VulkanDeferredDestruction.drain();
             VulkanComputeProgram.shutdownPipelineCaches();
         });
     }

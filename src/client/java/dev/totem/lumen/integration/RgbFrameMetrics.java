@@ -1,108 +1,101 @@
 package dev.totem.lumen.integration;
 
 import dev.totem.lumen.TotemLumenClient;
+import dev.totem.lumen.render.FrameIntervalWindow;
 import dev.totem.lumen.render.RendererSettings;
+import dev.totem.lumen.vulkan.P5StableLookupRenderer;
 import net.minecraft.client.Minecraft;
 
-import java.util.Arrays;
-
-/** Opt-in wall-clock frame sampling for matched Minecraft Pure/RGB runtime runs. */
+/** Opt-in frame-start interval sampling, shared by every profile. Client-thread only. */
 public final class RgbFrameMetrics {
-    private static final boolean ENABLED = Boolean.getBoolean("totem.lumen.rgb.frameMetrics");
-    private static final int WARMUP_FRAMES = 200;
-    private static final int SAMPLE_FRAMES = 600;
-    private static final long[] INTERVALS = new long[SAMPLE_FRAMES];
-    private static final long[] RENDER_TIMES = new long[SAMPLE_FRAMES];
-
+    // Keep the original property as an alias for existing developer launch configurations.
+    private static final boolean ENABLED = Boolean.getBoolean("totem.lumen.frameMetrics")
+            || Boolean.getBoolean("totem.lumen.rgb.frameMetrics");
+    private static final FrameIntervalWindow WINDOW = ENABLED
+            ? new FrameIntervalWindow(20_000_000_000L, 60_000_000_000L, 120_000) : null;
+    private static Object level;
     private static RendererSettings.RenderProfile profile;
-    private static String dimension;
-    private static int warmup;
-    private static int samples;
-    private static long lastStart;
-    private static long frameStart;
-    private static boolean sampleReady;
+    private static long revision;
+    private static int width, height, renderDistance, simulationDistance, fpsLimit;
+    private static boolean vsync;
 
-    private RgbFrameMetrics() {
-    }
+    private RgbFrameMetrics() { }
 
     public static void frameStart(Minecraft client, boolean renderLevel) {
-        if (!ENABLED) {
-            return;
-        }
-        RendererSettings.RenderProfile current = RendererSettings.renderProfile();
-        String currentDimension = client.level == null
-                ? null : client.level.dimension().identifier().toString();
-        if (currentDimension == null || !renderLevel || client.isPaused()
-                || (current != RendererSettings.RenderProfile.MINECRAFT_PURE
-                && current != RendererSettings.RenderProfile.MINECRAFT_RGB)) {
+        if (!ENABLED) return;
+        if (!eligible(client, renderLevel)) {
             reset();
             return;
         }
-        if (current != profile || !currentDimension.equals(dimension)) {
+        var current = RendererSettings.renderProfile();
+        int w = client.getWindow().getWidth(), h = client.getWindow().getHeight();
+        int rd = client.options.renderDistance().get(), sd = client.options.simulationDistance().get();
+        int cap = client.options.framerateLimit().get();
+        boolean sync = client.options.enableVsync().get();
+        long currentRevision = RendererSettings.revision();
+        if (client.level != level || current != profile || currentRevision != revision
+                || w != width || h != height || rd != renderDistance || sd != simulationDistance
+                || cap != fpsLimit || sync != vsync) {
             reset();
+            level = client.level;
             profile = current;
-            dimension = currentDimension;
+            revision = currentRevision;
+            width = w;
+            height = h;
+            renderDistance = rd;
+            simulationDistance = sd;
+            fpsLimit = cap;
+            vsync = sync;
         }
-        long now = System.nanoTime();
-        frameStart = now;
-        sampleReady = false;
-        if (lastStart != 0L) {
-            if (warmup < WARMUP_FRAMES) {
-                warmup++;
-            } else if (samples < SAMPLE_FRAMES) {
-                INTERVALS[samples] = now - lastStart;
-                sampleReady = true;
-            }
+        var state = WINDOW.recordFrame(System.nanoTime());
+        if (state == FrameIntervalWindow.State.OVERFLOW) {
+            TotemLumenClient.LOGGER.warn("Frame metrics window discarded: 120000-sample capacity exceeded");
+            reset();
+        } else if (state == FrameIntervalWindow.State.COMPLETE) {
+            var result = WINDOW.summary();
+            Runtime runtime = Runtime.getRuntime();
+            TotemLumenClient.LOGGER.info(
+                    "Profile frame metrics: profile={}, samples={}, seconds={}, averageFps={}, onePercentLowFps={}, "
+                            + "intervalP95Ms={}, viewport={}x{}, renderDistance={}, simulationDistance={}, "
+                            + "fpsLimit={}, vsync={}, gi={}, shadow={}, rayDistance={}, internalResolution={}, "
+                            + "reflections={}, temporal={}, denoise={}, rasterMaterialLighting={}, heapUsedMiB={}, heapCommittedMiB={}, heapMaxMiB={}",
+                    profile, result.samples(), rounded(result.seconds()), rounded(result.averageFps()),
+                    rounded(result.onePercentLowFps()), rounded(result.intervalP95Ms()), width, height,
+                    renderDistance, simulationDistance, fpsLimit, vsync, RendererSettings.giQuality(),
+                    RendererSettings.rasterLightingEnabled() ? (RasterMaterialCapture.lightingPreviewRequested()
+                            ? "DIRECT_RGB_POINT_SHADOWS" : "AMBIENT_OCCLUSION_ONLY") : RendererSettings.shadowQuality(), RendererSettings.rasterLightingEnabled()
+                            ? dev.totem.lumen.render.RasterLightingVolume.RAY_DISTANCE : RendererSettings.rayDistance(), RendererSettings.internalResolution(),
+                    !RendererSettings.rasterLightingEnabled() && RendererSettings.reflectionsEnabled(),
+                    RendererSettings.rasterLightingEnabled() ? "OFF" : RendererSettings.temporalQuality(),
+                    RendererSettings.rasterLightingEnabled() ? "OFF" : RendererSettings.denoiseQuality(),
+                    RendererSettings.rasterLightingEnabled() && RasterMaterialCapture.lightingPreviewRequested(),
+                    (runtime.totalMemory() - runtime.freeMemory()) / 1048576L,
+                    runtime.totalMemory() / 1048576L, runtime.maxMemory() / 1048576L);
+            // Sorting/logging is outside sampling; the next window gets a fresh warmup.
+            reset();
         }
-        lastStart = now;
     }
 
     public static void frameEnd(Minecraft client, boolean renderLevel) {
-        if (!ENABLED || !sampleReady || frameStart == 0L || client.level == null
-                || !renderLevel || client.isPaused() || samples >= SAMPLE_FRAMES) {
-            return;
-        }
-        RENDER_TIMES[samples] = System.nanoTime() - frameStart;
-        samples++;
-        if (samples == SAMPLE_FRAMES) {
-            TotemLumenClient.LOGGER.info(
-                    "RGB frame metrics: profile={}, dimension={}, renderDistance={}, samples={}, "
-                            + "intervalAvgMs={}, intervalP50Ms={}, intervalP95Ms={}, intervalP99Ms={}, "
-                            + "renderAvgMs={}, renderP95Ms={}",
-                    profile, dimension, client.options.renderDistance().get(), samples,
-                    millis(average(INTERVALS)), millis(percentile(INTERVALS, 0.50)),
-                    millis(percentile(INTERVALS, 0.95)), millis(percentile(INTERVALS, 0.99)),
-                    millis(average(RENDER_TIMES)), millis(percentile(RENDER_TIMES, 0.95))
-            );
-            samples = 0;
-        }
+        if (ENABLED && !eligible(client, renderLevel)) reset();
     }
 
-    private static long average(long[] values) {
-        long total = 0L;
-        for (long value : values) {
-            total += value;
-        }
-        return total / values.length;
+    private static boolean eligible(Minecraft client, boolean renderLevel) {
+        if (client.level == null || !renderLevel || client.isPaused() || client.gui.screen() != null
+                || client.gui.overlay() != null || !client.isWindowActive()) return false;
+        if (RendererSettings.rasterLightingEnabled()) return RasterLightingRenderer.ready();
+        return RendererSettings.renderProfile() != RendererSettings.RenderProfile.TOTEM_LUMEN
+                || (P5StableLookupRenderer.readyForWorldTakeover()
+                && P5StableLookupRenderer.mode() == P5StableLookupRenderer.DebugMode.GI_COMPOSITE);
     }
 
-    private static long percentile(long[] values, double fraction) {
-        long[] ordered = values.clone();
-        Arrays.sort(ordered);
-        return ordered[(int) Math.ceil(fraction * ordered.length) - 1];
-    }
-
-    private static double millis(long nanos) {
-        return Math.round(nanos / 10_000.0) / 100.0;
+    private static double rounded(double value) {
+        return Math.round(value * 100) / 100.0;
     }
 
     private static void reset() {
+        WINDOW.reset();
+        level = null;
         profile = null;
-        dimension = null;
-        warmup = 0;
-        samples = 0;
-        lastStart = 0L;
-        frameStart = 0L;
-        sampleReady = false;
     }
 }

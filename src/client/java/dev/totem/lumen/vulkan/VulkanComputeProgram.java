@@ -3,6 +3,7 @@ package dev.totem.lumen.vulkan;
 import com.mojang.renderpearl.backend.vulkan.VulkanDevice;
 import dev.totem.lumen.TotemLumenClient;
 import dev.totem.lumen.vulkan.resource.VulkanOwnedBuffer;
+import dev.totem.lumen.vulkan.resource.SharedResourceLifetime;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.system.MemoryUtil;
 import org.lwjgl.util.shaderc.Shaderc;
@@ -44,7 +45,7 @@ public final class VulkanComputeProgram implements AutoCloseable {
     private final long pipeline;
     private final long descriptorPool;
     private final long descriptorSet;
-    private final boolean ownsPipelineObjects;
+    private final Runnable releasePipeline;
     private boolean closed;
 
     private VulkanComputeProgram(
@@ -54,7 +55,7 @@ public final class VulkanComputeProgram implements AutoCloseable {
             long pipeline,
             long descriptorPool,
             long descriptorSet,
-            boolean ownsPipelineObjects
+            Runnable releasePipeline
     ) {
         this.device = device;
         this.descriptorSetLayout = descriptorSetLayout;
@@ -62,7 +63,7 @@ public final class VulkanComputeProgram implements AutoCloseable {
         this.pipeline = pipeline;
         this.descriptorPool = descriptorPool;
         this.descriptorSet = descriptorSet;
-        this.ownsPipelineObjects = ownsPipelineObjects;
+        this.releasePipeline = releasePipeline;
     }
 
     /**
@@ -131,7 +132,7 @@ public final class VulkanComputeProgram implements AutoCloseable {
             mainGiPipelinePrewarmStarted = true;
         }
 
-        Thread worker = new Thread(() -> {
+        VulkanDeviceLifetime.startWorker(device, "TotemLumen-PipelinePrewarm", () -> {
             long startedAt = System.nanoTime();
             try {
                 MAIN_GI_SHADER_DONE.await();
@@ -172,9 +173,7 @@ public final class VulkanComputeProgram implements AutoCloseable {
                         failure
                 );
             }
-        }, "TotemLumen-PipelinePrewarm");
-        worker.setDaemon(true);
-        worker.start();
+        });
     }
 
     public static boolean mainGiShaderPrewarmReady() {
@@ -197,6 +196,15 @@ public final class VulkanComputeProgram implements AutoCloseable {
         VulkanPipelineCacheStore.shutdown();
     }
 
+    /** Called only after all native workers finish and before Minecraft destroys the device. */
+    static void retireMainGiPipeline() {
+        synchronized (MAIN_GI_PIPELINE_LOCK) {
+            PreparedPipeline prepared = mainGiPreparedPipeline;
+            mainGiPreparedPipeline = null;
+            if (prepared != null) prepared.close();
+        }
+    }
+
     public static VulkanComputeProgram create(VulkanDevice device, String name, String glsl, VulkanOwnedBuffer storage) {
         if (MAIN_GI_SHADER.equals(name)) {
             PreparedPipeline prepared = mainGiPreparedPipeline;
@@ -216,13 +224,14 @@ public final class VulkanComputeProgram implements AutoCloseable {
         PipelineHandles handles = null;
         try {
             handles = createPipelineHandles(device, shaderModule, name);
+            PipelineHandles ownedHandles = handles;
             return bindStorage(
                     device,
                     handles.descriptorSetLayout,
                     handles.pipelineLayout,
                     handles.pipeline,
                     storage,
-                    true
+                    () -> destroyPipelineHandles(device, ownedHandles)
             );
         } catch (Throwable failure) {
             if (handles != null) {
@@ -317,7 +326,7 @@ public final class VulkanComputeProgram implements AutoCloseable {
             long pipelineLayout,
             long pipeline,
             VulkanOwnedBuffer storage,
-            boolean ownsPipelineObjects
+            Runnable releasePipeline
     ) {
         long descriptorPool = 0L;
         try (MemoryStack stack = MemoryStack.stackPush()) {
@@ -358,7 +367,7 @@ public final class VulkanComputeProgram implements AutoCloseable {
                     pipeline,
                     descriptorPool,
                     descriptorSet,
-                    ownsPipelineObjects
+                    releasePipeline
             );
         } catch (Throwable failure) {
             if (descriptorPool != 0L) VK10.vkDestroyDescriptorPool(device.vkDevice(), descriptorPool, null);
@@ -480,16 +489,14 @@ public final class VulkanComputeProgram implements AutoCloseable {
     }
 
     @Override
-    public void close() {
+    public synchronized void close() {
         if (closed) return;
         closed = true;
-        VK10.vkDeviceWaitIdle(device.vkDevice());
-        VK10.vkDestroyDescriptorPool(device.vkDevice(), descriptorPool, null);
-        if (ownsPipelineObjects) {
-            VK10.vkDestroyPipeline(device.vkDevice(), pipeline, null);
-            VK10.vkDestroyPipelineLayout(device.vkDevice(), pipelineLayout, null);
-            VK10.vkDestroyDescriptorSetLayout(device.vkDevice(), descriptorSetLayout, null);
-        }
+        // Minecraft retires this only after submissions that used the descriptor have completed.
+        VulkanDeferredDestruction.retire(device, () -> {
+            VK10.vkDestroyDescriptorPool(device.vkDevice(), descriptorPool, null);
+            releasePipeline.run();
+        });
     }
 
     private static void destroyPipelineHandles(VulkanDevice device, PipelineHandles handles) {
@@ -512,7 +519,7 @@ public final class VulkanComputeProgram implements AutoCloseable {
         private final long descriptorSetLayout;
         private final long pipelineLayout;
         private final long pipeline;
-        private boolean closed;
+        private final SharedResourceLifetime lifetime;
 
         private PreparedPipeline(
                 VulkanDevice device,
@@ -524,34 +531,29 @@ public final class VulkanComputeProgram implements AutoCloseable {
             this.descriptorSetLayout = descriptorSetLayout;
             this.pipelineLayout = pipelineLayout;
             this.pipeline = pipeline;
+            this.lifetime = new SharedResourceLifetime(() -> destroyPipelineHandles(
+                    device, new PipelineHandles(descriptorSetLayout, pipelineLayout, pipeline)));
         }
 
         VulkanComputeProgram bind(VulkanDevice requestedDevice, VulkanOwnedBuffer storage) {
-            if (closed) {
-                throw new IllegalStateException("Prepared Vulkan pipeline is already closed");
-            }
             if (device.vkDevice() != requestedDevice.vkDevice()) {
                 throw new IllegalStateException("Prepared Vulkan pipeline belongs to a different device");
             }
-            return bindStorage(
-                    requestedDevice,
-                    descriptorSetLayout,
-                    pipelineLayout,
-                    pipeline,
-                    storage,
-                    false
-            );
+            SharedResourceLifetime.Lease lease = lifetime.retain();
+            try {
+                return bindStorage(
+                        requestedDevice, descriptorSetLayout, pipelineLayout, pipeline,
+                        storage, lease::close
+                );
+            } catch (Throwable failure) {
+                lease.close();
+                throw failure;
+            }
         }
 
         @Override
         public void close() {
-            if (closed) return;
-            closed = true;
-            VK10.vkDeviceWaitIdle(device.vkDevice());
-            destroyPipelineHandles(
-                    device,
-                    new PipelineHandles(descriptorSetLayout, pipelineLayout, pipeline)
-            );
+            lifetime.close();
         }
     }
 }

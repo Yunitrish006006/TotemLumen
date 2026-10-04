@@ -7,7 +7,7 @@ import dev.totem.lumen.world.LightingWorldRule;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.block.state.BlockState;
 
-/** Brightens only Minecraft RGB's visual source field; server gameplay light stays unchanged. */
+/** Stateless source rules shared by Minecraft RGB and Raster Ray; server gameplay light is unchanged. */
 final class ClientRgbVisualLightSource {
     private ClientRgbVisualLightSource() {
     }

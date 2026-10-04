@@ -45,6 +45,8 @@ final class P18TexturedSurfaceShaderPatch {
                 const uint P18_SURFACE_RECORD_WORDS = %du;
                 const uint P18_SURFACE_RECORD_BASE = %du;
                 const uint P18_SURFACE_FACE_WORDS = %du;
+                const uint P18_SURFACE_FACE_TINT_WORD = %du;
+                const uint P18_MODEL_TINT_WORD = %du;
 
                 uint p18SurfaceSceneBase() {
                     uint pixelCount = scene.data[51] * scene.data[52];
@@ -256,7 +258,9 @@ final class P18TexturedSurfaceShaderPatch {
                 GpuPbrSurfaceSetScene.MAX_STORAGE_WORDS,
                 GpuPbrSurfaceSetScene.RECORD_WORDS,
                 GpuPbrSurfaceSetScene.RECORD_BASE_WORD,
-                GpuPbrSurfaceSetScene.FACE_WORDS
+                GpuPbrSurfaceSetScene.FACE_WORDS,
+                GpuPbrSurfaceSetScene.FACE_TINT_WORD,
+                P14ModelMeshGpuLayout.QUAD_TINT_WORD
         );
         source = source.replace(modelBaseMarker, p18Helpers + modelBaseMarker);
 
@@ -358,7 +362,7 @@ final class P18TexturedSurfaceShaderPatch {
                     vec3 blockOrigin = vec3(voxel);
                     uint quadPool = p14ModelQuadBase();
                     for (uint quadIndex = 0u; quadIndex < quadCount; quadIndex++) {
-                        uint quadWord = quadPool + (firstQuad + quadIndex) * 21u;
+                        uint quadWord = quadPool + (firstQuad + quadIndex) * P14_MODEL_QUAD_WORDS;
                         vec3 v0 = blockOrigin + p14ModelVertex(quadWord);
                         vec3 v1 = blockOrigin + p14ModelVertex(quadWord + 3u);
                         vec3 v2 = blockOrigin + p14ModelVertex(quadWord + 6u);

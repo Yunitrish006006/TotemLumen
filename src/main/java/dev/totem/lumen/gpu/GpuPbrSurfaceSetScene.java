@@ -9,10 +9,11 @@ import java.util.Objects;
 
 /** Fixed-index P18 surface table for canonical full-cube AABB hits. */
 public final class GpuPbrSurfaceSetScene {
-    public static final int ABI_VERSION = 1;
+    public static final int ABI_VERSION = 2;
     public static final int MAX_SURFACE_SETS = BlockSurfaceSetRegistry.MAX_SURFACE_SET_ID + 1;
     public static final int FACE_COUNT = 6;
-    public static final int FACE_WORDS = 9; // texture handle + four (u,v) pairs
+    public static final int FACE_TINT_WORD = 9;
+    public static final int FACE_WORDS = 10; // texture handle + four (u,v) pairs + RGB tint
     public static final int RECORD_WORDS = 2 + FACE_COUNT * FACE_WORDS;
     public static final int HEADER_WORDS = 8;
     public static final int RECORD_BASE_WORD = HEADER_WORDS;
@@ -62,6 +63,7 @@ public final class GpuPbrSurfaceSetScene {
                         : 0;
                 if (handle < 0) handle = 0;
                 putWord(buffer, faceWord, handle);
+                putWord(buffer, faceWord + FACE_TINT_WORD, surface.tintRgb());
                 if (handle > 0) texturedFaces++;
 
                 for (int vertex = 0; vertex < 4; vertex++) {

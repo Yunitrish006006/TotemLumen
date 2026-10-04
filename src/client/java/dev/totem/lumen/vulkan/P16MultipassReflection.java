@@ -54,21 +54,15 @@ public final class P16MultipassReflection {
             workerGeneration = generation;
         }
 
-        Thread worker = new Thread(
-                () -> buildPreparedPipeline(device, workerGeneration),
-                WORKER_NAME
-        );
-        worker.setDaemon(true);
-        worker.start();
+        VulkanDeviceLifetime.startWorker(device, WORKER_NAME,
+                () -> buildPreparedPipeline(device, workerGeneration));
     }
 
     private static void buildPreparedPipeline(VulkanDevice device, long workerGeneration) {
         VulkanComputeProgram.PreparedPipeline created = null;
         long startedAt = System.nanoTime();
         try {
-            String geometrySource = P14EFluidShaderPatch.apply(P16ReflectionPassShader.build());
-            String entitySource = P17ShaderIntegration.apply(geometrySource);
-            String source = P14EFluidOpticsPatch.apply(entitySource);
+            String source = buildRuntimeSource();
             TotemLumenClient.LOGGER.info(
                     "Reflection pipeline prewarm START: shader={}, sourceChars={}",
                     P16ReflectionPassShader.SHADER_NAME,
@@ -132,19 +126,15 @@ public final class P16MultipassReflection {
         }
         closeAsync(staleProgram, "TotemLumen-P16OldBindingCleanup");
 
-        Thread worker = new Thread(
-                () -> bindPreparedPipeline(device, scene, workerGeneration),
-                "TotemLumen-P16Bind"
-        );
-        worker.setDaemon(true);
-        worker.start();
+        VulkanDeviceLifetime.startWorker(device, "TotemLumen-P16Bind",
+                () -> bindPreparedPipeline(device, scene, workerGeneration));
     }
 
     /** Drop a scene binding before its storage buffer is destroyed; retain the prepared pipeline. */
     public static void detach(VulkanOwnedBuffer scene) {
         VulkanComputeProgram staleProgram;
         synchronized (LOCK) {
-            if (attachedScene != scene) return;
+            if (scene == null || attachedScene != scene) return;
             attachedScene = null;
             staleProgram = activeProgram;
             activeProgram = null;
@@ -293,17 +283,22 @@ public final class P16MultipassReflection {
         closePreparedAsync(prepared, "TotemLumen-P16ShutdownPreparedCleanup");
     }
 
+    static String buildSourceForVerification() {
+        return P14EFluidOpticsPatch.apply(P17ShaderIntegration.apply(
+                P14EFluidShaderPatch.apply(P16ReflectionPassShader.build())));
+    }
+
+    static String buildRuntimeSource() {
+        return LumenShaderVariant.runtimeSource("reflection", buildSourceForVerification());
+    }
+
     private static void closeAsync(VulkanComputeProgram program, String threadName) {
         if (program == null) return;
-        Thread cleanup = new Thread(() -> {
-            try {
-                program.close();
-            } catch (Throwable closeFailure) {
-                TotemLumenClient.LOGGER.warn("Failed to close stale P16 binding cleanly", closeFailure);
-            }
-        }, threadName);
-        cleanup.setDaemon(true);
-        cleanup.start();
+        try {
+            program.close();
+        } catch (Throwable closeFailure) {
+            TotemLumenClient.LOGGER.warn("Failed to retire P16 binding: " + threadName, closeFailure);
+        }
     }
 
     private static void closePreparedAsync(
@@ -311,14 +306,10 @@ public final class P16MultipassReflection {
             String threadName
     ) {
         if (prepared == null) return;
-        Thread cleanup = new Thread(() -> {
-            try {
-                prepared.close();
-            } catch (Throwable closeFailure) {
-                TotemLumenClient.LOGGER.warn("Failed to close prepared reflection pipeline cleanly", closeFailure);
-            }
-        }, threadName);
-        cleanup.setDaemon(true);
-        cleanup.start();
+        try {
+            prepared.close();
+        } catch (Throwable closeFailure) {
+            TotemLumenClient.LOGGER.warn("Failed to retire reflection pipeline: " + threadName, closeFailure);
+        }
     }
 }

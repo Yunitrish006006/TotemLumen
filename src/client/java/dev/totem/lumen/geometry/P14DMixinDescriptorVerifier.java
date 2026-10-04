@@ -288,6 +288,13 @@ public final class P14DMixinDescriptorVerifier {
                         "Missing LevelRenderer world-takeover callback"
                 ));
 
+        Method hybrid = Arrays.stream(LevelRendererTakeoverMixin.class.getDeclaredMethods())
+                .filter(method -> method.getName().equals("totemLumen$compositeNearLighting"))
+                .findFirst().orElseThrow(() -> new IllegalStateException("Missing hybrid terrain callback"));
+        if (!Arrays.equals(handler.getParameterTypes(), hybrid.getParameterTypes())) {
+            throw new IllegalStateException("Hybrid terrain callback must match the verified level render signature");
+        }
+
         Class<?>[] callback = handler.getParameterTypes();
         if (callback.length != LEVEL_RENDER_26_3.length + 1) {
             throw new IllegalStateException(

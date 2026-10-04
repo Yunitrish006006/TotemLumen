@@ -205,6 +205,7 @@ final class P18LabPbrShadingPatch {
                         vec3 rayDirection,
                         uint meshId,
                         out uint textureHandle,
+                        out vec3 surfaceTint,
                         out vec2 surfaceUv,
                         out vec3 tangent,
                         out vec3 bitangent,
@@ -222,7 +223,7 @@ final class P18LabPbrShadingPatch {
                     uint quadPool = p14ModelQuadBase();
 
                     for (uint quadIndex = 0u; quadIndex < quadCount; quadIndex++) {
-                        uint quadWord = quadPool + (firstQuad + quadIndex) * 21u;
+                        uint quadWord = quadPool + (firstQuad + quadIndex) * P14_MODEL_QUAD_WORDS;
                         vec3 v0 = blockOrigin + p14ModelVertex(quadWord);
                         vec3 v1 = blockOrigin + p14ModelVertex(quadWord + 3u);
                         vec3 v2 = blockOrigin + p14ModelVertex(quadWord + 6u);
@@ -252,6 +253,7 @@ final class P18LabPbrShadingPatch {
                         ) && candidateError < bestError) {
                             bestError = candidateError;
                             textureHandle = candidateHandle;
+                            surfaceTint = p18ArgbRgb(scene.data[quadWord + P18_MODEL_TINT_WORD]);
                             surfaceUv = candidateUv;
                             tangent = candidateTangent;
                             bitangent = candidateBitangent;
@@ -272,6 +274,7 @@ final class P18LabPbrShadingPatch {
                         ) && candidateError < bestError) {
                             bestError = candidateError;
                             textureHandle = candidateHandle;
+                            surfaceTint = p18ArgbRgb(scene.data[quadWord + P18_MODEL_TINT_WORD]);
                             surfaceUv = candidateUv;
                             tangent = candidateTangent;
                             bitangent = candidateBitangent;
@@ -406,6 +409,7 @@ final class P18LabPbrShadingPatch {
                     vec3 tangent;
                     vec3 bitangent;
                     bool resolved = false;
+                    vec3 surfaceTint = vec3(1.0);
 
                     if (family == 0xB000u) {
                         vec2 fallback = p18CubeFallbackSurfaceProperties(params);
@@ -418,6 +422,10 @@ final class P18LabPbrShadingPatch {
                             vec3 hitPoint = rayOrigin + rayDirection * hit.distance;
                             vec3 localHit = hitPoint - vec3(hit.voxel);
                             surface.textureHandle = p18CubeTextureHandle(params, face);
+                            uint faceWord = p18SurfaceSceneBase() + P18_SURFACE_RECORD_BASE
+                                    + params * P18_SURFACE_RECORD_WORDS
+                                    + 2u + uint(face) * P18_SURFACE_FACE_WORDS;
+                            surfaceTint = p18ArgbRgb(scene.data[faceWord + P18_SURFACE_FACE_TINT_WORD]);
                             surface.uv = p18CubeFaceUv(params, face, localHit);
                             p18CubeBasis(
                                 params,
@@ -436,6 +444,7 @@ final class P18LabPbrShadingPatch {
                             rayDirection,
                             params,
                             surface.textureHandle,
+                            surfaceTint,
                             surface.uv,
                             tangent,
                             bitangent,
@@ -459,7 +468,7 @@ final class P18LabPbrShadingPatch {
                     surface.reflectionScale *= textureReflectionScale;
 
                     uint albedoArgb = p18SampleTextureWord(surface.textureHandle, surface.uv, 0u);
-                    surface.albedo = p18ArgbRgb(albedoArgb);
+                    surface.albedo = p18ArgbRgb(albedoArgb) * surfaceTint;
 
                     if ((flags & P18_TEXTURE_FLAG_HAS_NORMAL) != 0u) {
                         uint normalArgb = p18SampleTextureWord(surface.textureHandle, surface.uv, 1u);

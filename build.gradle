@@ -26,6 +26,14 @@ loom {
             // Keep 26.2 test worlds intact; Minecraft world upgrades are not reversible.
             runDir('run/client-26.3')
             vmArgs '-Xmx16G'
+            // Explicit developer opt-in; never changes the default or persistent user config.
+            if (providers.gradleProperty('lumenShaderVariant').isPresent()) {
+                def variant = providers.gradleProperty('lumenShaderVariant').get()
+                if (!(variant in ['baseline', 'shared-filtered-trace'])) {
+                    throw new GradleException("Unknown lumenShaderVariant: ${variant}")
+                }
+                vmArgs "-Dtotem.lumen.shaderVariant=${variant}"
+            }
             programArg('--graphicsBackend=VULKAN')
         }
     }
@@ -126,6 +134,19 @@ tasks.register('verifyRuntimeShader', JavaExec) {
     dependsOn tasks.named('clientClasses')
     classpath = sourceSets.client.runtimeClasspath + sourceSets.main.runtimeClasspath
     mainClass = 'dev.totem.lumen.vulkan.P14ShaderCompileVerifier'
+    systemProperty 'totem.lumen.shaderVariant', 'baseline'
+}
+
+tasks.register('verifyCandidateRuntimeShader', JavaExec) {
+    group = 'verification'
+    dependsOn tasks.named('clientClasses')
+    classpath = sourceSets.client.runtimeClasspath + sourceSets.main.runtimeClasspath
+    mainClass = 'dev.totem.lumen.vulkan.P14ShaderCompileVerifier'
+    systemProperty 'totem.lumen.shaderVariant', 'shared-filtered-trace'
+}
+
+tasks.named('check') {
+    dependsOn tasks.named('verifyCandidateRuntimeShader')
 }
 
 tasks.register('verifyP14DDynamicMeshes', JavaExec) {
@@ -152,6 +173,49 @@ tasks.register('verifyHeldLightShader', JavaExec) {
     classpath = sourceSets.client.runtimeClasspath + sourceSets.main.runtimeClasspath
     mainClass = 'dev.totem.lumen.integration.HeldLightShaderVerifier'
 }
+
+tasks.register('verifyHybridTerrainShader', JavaExec) {
+    group = 'verification'
+    dependsOn tasks.named('clientClasses')
+    classpath = sourceSets.client.runtimeClasspath + sourceSets.main.runtimeClasspath
+    mainClass = 'dev.totem.lumen.vulkan.P14ShaderCompileVerifier'
+    systemProperty 'totem.lumen.hybridTerrain', 'true'
+}
+
+tasks.named('check') { dependsOn tasks.named('verifyHybridTerrainShader') }
+
+tasks.register('verifyHybridCandidateTerrainShader', JavaExec) {
+    group = 'verification'
+    dependsOn tasks.named('clientClasses')
+    classpath = sourceSets.client.runtimeClasspath + sourceSets.main.runtimeClasspath
+    mainClass = 'dev.totem.lumen.vulkan.P14ShaderCompileVerifier'
+    systemProperty 'totem.lumen.hybridTerrain', 'true'
+    systemProperty 'totem.lumen.shaderVariant', 'shared-filtered-trace'
+}
+
+tasks.named('check') { dependsOn tasks.named('verifyHybridCandidateTerrainShader') }
+
+tasks.register('verifyPrimarySurfaceReuse', JavaExec) {
+    group = 'verification'
+    dependsOn tasks.named('clientClasses')
+    classpath = sourceSets.client.runtimeClasspath + sourceSets.main.runtimeClasspath
+    mainClass = 'dev.totem.lumen.vulkan.PrimarySurfaceReuseVerifier'
+}
+
+['baseline', 'shared-filtered-trace'].each { variant ->
+    def suffix = variant == 'baseline' ? 'Baseline' : 'Candidate'
+    tasks.register("verifyPrimarySurfaceReuse${suffix}", JavaExec) {
+        group = 'verification'
+        dependsOn tasks.named('clientClasses')
+        classpath = sourceSets.client.runtimeClasspath + sourceSets.main.runtimeClasspath
+        mainClass = 'dev.totem.lumen.vulkan.P14ShaderCompileVerifier'
+        systemProperty 'totem.lumen.shaderVariant', variant
+        systemProperty 'totem.lumen.reusePrimarySurface', 'true'
+        systemProperty 'totem.lumen.hybridTerrain', 'true'
+    }
+    tasks.named('check') { dependsOn tasks.named("verifyPrimarySurfaceReuse${suffix}") }
+}
+tasks.named('check') { dependsOn tasks.named('verifyPrimarySurfaceReuse') }
 
 tasks.register('verifyRgbSectionRefresh', JavaExec) {
     group = 'verification'
@@ -211,4 +275,76 @@ publishing {
             from components.java
         }
     }
+}
+
+
+// Isolated developer tools: never part of the player JAR. Only deterministic verification runs in check.
+sourceSets {
+    research {
+        compileClasspath += sourceSets.main.output + sourceSets.client.output + sourceSets.client.compileClasspath
+        runtimeClasspath += sourceSets.main.runtimeClasspath + sourceSets.client.runtimeClasspath
+    }
+}
+
+tasks.register('prepareCompileResearch') {
+    group = 'verification'
+    description = 'Compiles isolated shader research tools and writes their launch classpath.'
+    dependsOn tasks.named('researchClasses')
+    doLast {
+        def target = layout.buildDirectory.file('compile-research/classpath.txt').get().asFile
+        target.parentFile.mkdirs()
+        target.text = sourceSets.research.runtimeClasspath.asPath
+    }
+}
+
+tasks.register('exportCompileResearch', JavaExec) {
+    group = 'verification'
+    description = 'Exports and measures exact O0 production shaders without loading a world.'
+    dependsOn tasks.named('prepareCompileResearch')
+    classpath = sourceSets.research.runtimeClasspath
+    mainClass = 'dev.totem.lumen.vulkan.ShaderCompileResearch'
+    args file(providers.gradleProperty('researchOutput')
+        .getOrElse("build/reports/compile-research/export-${System.currentTimeMillis()}")).absolutePath
+    args providers.gradleProperty("researchVariant").getOrElse("baseline")
+}
+
+tasks.register('verifyWorkerShutdownResearch', JavaExec) {
+    group = 'verification'
+    description = 'Verifies the isolated worker shutdown probe, including interruption and failure.'
+    dependsOn tasks.named('prepareCompileResearch')
+    classpath = sourceSets.research.runtimeClasspath
+    mainClass = 'dev.totem.lumen.vulkan.VulkanWorkerShutdownResearch'
+}
+
+tasks.register('verifyPipelineCacheFailure', JavaExec) {
+    group = 'verification'
+    description = 'Checks production cache bookkeeping for exceptional pipeline creation without a GPU.'
+    dependsOn tasks.named('researchClasses')
+    classpath = sourceSets.research.runtimeClasspath
+    mainClass = 'dev.totem.lumen.vulkan.PipelineCacheFailureVerifier'
+}
+
+tasks.register('verifyBlockTint', JavaExec) {
+    group = 'verification'
+    dependsOn tasks.named('researchClasses')
+    classpath = sourceSets.research.runtimeClasspath
+    mainClass = 'dev.totem.lumen.vulkan.BlockTintVerifier'
+}
+
+tasks.named('check') {
+    dependsOn tasks.named('verifyPipelineCacheFailure')
+    dependsOn tasks.named('verifyBlockTint')
+}
+
+['baseline', 'shared-filtered-trace'].each { variant ->
+    def taskName = variant == 'baseline' ? 'verifyDefaultShaderVariant' : 'verifyOptInShaderVariant'
+    tasks.register(taskName, JavaExec) {
+        group = 'verification'
+        dependsOn tasks.named('researchClasses')
+        classpath = sourceSets.research.runtimeClasspath
+        mainClass = 'dev.totem.lumen.vulkan.ShaderVariantVerifier'
+        args variant
+        if (variant != 'baseline') systemProperty 'totem.lumen.shaderVariant', variant
+    }
+    tasks.named('check') { dependsOn tasks.named(taskName) }
 }

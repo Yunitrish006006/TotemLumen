@@ -205,6 +205,7 @@ public final class TotemLumenVideoSettingsScreen extends Screen {
             case MINECRAFT_PURE -> "screen.totem-lumen.render_profile.minecraft_pure";
             case MINECRAFT_RGB -> "screen.totem-lumen.render_profile.minecraft_rgb";
             case TOTEM_LUMEN -> "screen.totem-lumen.render_profile.totem";
+            case RASTER_RAY -> "screen.totem-lumen.render_profile.raster_ray";
         };
         return Component.translatable(
                 "screen.totem-lumen.render_profile",

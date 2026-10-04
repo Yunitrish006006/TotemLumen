@@ -21,6 +21,9 @@ import dev.totem.lumen.integration.LabPbrTextureRegistry;
 import dev.totem.lumen.integration.RendererRuntimeTuningRegistry;
 import dev.totem.lumen.integration.SceneExtractionBridge;
 import dev.totem.lumen.render.RendererSettings;
+import dev.totem.lumen.render.HybridTerrainPolicy;
+import dev.totem.lumen.integration.HybridTerrainRenderer;
+import net.minecraft.client.renderer.state.level.CameraRenderState;
 import dev.totem.lumen.scene.FrameSnapshot;
 import dev.totem.lumen.scene.SectionKey;
 import dev.totem.lumen.scene.SectionSnapshot;
@@ -1235,6 +1238,10 @@ public final class P5StableLookupRenderer {
                     historyWriteIndex,
                     submitStartedNanos
             ));
+            // Compute and the later world composite are ordered on Minecraft's graphics queue.
+            // Associate metadata with the queued output, not the older completion callback.
+            r.outputFrame = frame;
+            r.outputRayDistance = RendererSettings.rayDistance();
         } catch (Throwable failure) {
             inFlight = false;
             sceneUploadRequired |= fullSceneUpload;
@@ -1243,7 +1250,7 @@ public final class P5StableLookupRenderer {
     }
 
     public static void tickLifecycle(Minecraft client) {
-        if (client.level == null) {
+        if (client.level == null || !RendererSettings.rendererEnabled()) {
             ready = false;
             if (resources != null) {
                 if (inFlight) {
@@ -1343,6 +1350,13 @@ public final class P5StableLookupRenderer {
                     activeRenderHeight
             );
         }
+    }
+
+    public static void presentHybridTerrain(CameraRenderState camera) {
+        Resources r = resources;
+        if (!HybridTerrainPolicy.ENABLED || !readyForWorldTakeover() || r.outputFrame == null) return;
+        HybridTerrainRenderer.render(camera, r.view, r.outputFrame, cameraBasis(r.outputFrame),
+                r.width, r.height, r.outputRayDistance);
     }
 
     public static void drawHud(GuiGraphicsExtractor graphics) {
@@ -1652,7 +1666,9 @@ public final class P5StableLookupRenderer {
         putWord(buffer, 49, Float.floatToRawIntBits(RendererSettings.temporalQuality().directHistoryWeight()));
         putWord(buffer, 50, RendererSettings.denoiseQuality().radius());
         putWord(buffer, 51, resources.width);
-        putWord(buffer, 52, resources.height);
+        // P14/P17/P18 CPU packers and shaders locate their tails using words 51/52.
+        // Include the depth plane here as well as in allocation, or it overwrites model data.
+        putWord(buffer, 52, HybridTerrainPolicy.outputRows(resources.height, HybridTerrainPolicy.ENABLED));
         putWord(buffer, 53, (int) currentAnimationTick(frame));
 
         RendererRuntimeTuningRegistry.ensureLoaded(Minecraft.getInstance().getResourceManager());
@@ -2039,7 +2055,7 @@ public final class P5StableLookupRenderer {
                     .dstQueueFamilyIndex(VK10.VK_QUEUE_FAMILY_IGNORED)
                     .buffer(r.scene.vkBuffer())
                     .offset(pixelOffset)
-                    .size((long) renderWidth * renderHeight * Integer.BYTES);
+                    .size((long) renderWidth * HybridTerrainPolicy.outputRows(renderHeight, HybridTerrainPolicy.ENABLED) * Integer.BYTES);
             VK10.vkCmdPipelineBarrier(
                     commandBuffer,
                     VK10.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
@@ -2071,12 +2087,13 @@ public final class P5StableLookupRenderer {
             copy.get(0)
                     .bufferOffset(pixelOffset)
                     .bufferRowLength(renderWidth)
-                    .bufferImageHeight(renderHeight);
+                    .bufferImageHeight(HybridTerrainPolicy.outputRows(renderHeight, HybridTerrainPolicy.ENABLED));
             copy.get(0).imageSubresource()
                     .aspectMask(VK10.VK_IMAGE_ASPECT_COLOR_BIT)
                     .mipLevel(0).baseArrayLayer(0).layerCount(1);
             copy.get(0).imageOffset().set(0, 0, 0);
-            copy.get(0).imageExtent().set(renderWidth, renderHeight, 1);
+            copy.get(0).imageExtent().set(renderWidth,
+                    HybridTerrainPolicy.outputRows(renderHeight, HybridTerrainPolicy.ENABLED), 1);
             VK10.vkCmdCopyBufferToImage(
                     commandBuffer, r.scene.vkBuffer(), r.vkImage,
                     VK10.VK_IMAGE_LAYOUT_GENERAL, copy
@@ -2170,6 +2187,8 @@ public final class P5StableLookupRenderer {
         final GpuTexture texture;
         final GpuTextureView view;
         final long vkImage;
+        FrameSnapshot outputFrame;
+        int outputRayDistance;
 
         private Resources(
                 int width,
@@ -2213,8 +2232,10 @@ public final class P5StableLookupRenderer {
             int history0BaseWord = STATIC_DATA_END_WORD;
             int history1BaseWord = Math.addExact(history0BaseWord, historyWords);
             int pixelBaseWord = Math.addExact(history1BaseWord, historyWords);
-            int pixelBytes = Math.multiplyExact(pixelCount, Integer.BYTES);
-            int totalWords = Math.addExact(pixelBaseWord, pixelCount);
+            int outputRows = HybridTerrainPolicy.outputRows(height, HybridTerrainPolicy.ENABLED);
+            int outputWords = Math.multiplyExact(width, outputRows);
+            int pixelBytes = Math.multiplyExact(outputWords, Integer.BYTES);
+            int totalWords = Math.addExact(pixelBaseWord, outputWords);
             int totalBytes = Math.multiplyExact(totalWords, Integer.BYTES);
 
             VulkanOwnedBuffer upload = null;
@@ -2232,7 +2253,7 @@ public final class P5StableLookupRenderer {
                         "Totem Lumen P12 one-bounce GI target",
                         GpuTexture.USAGE_COPY_DST | GpuTexture.USAGE_TEXTURE_BINDING,
                         GpuFormat.RGBA8_UNORM,
-                        width, height, 1, 1
+                        width, outputRows, 1, 1
                 );
                 view = RenderSystem.getDevice().createTextureView(texture);
                 if (!(texture instanceof VulkanGpuTexture vulkanTexture)) {
@@ -2255,6 +2276,8 @@ public final class P5StableLookupRenderer {
                         vulkanTexture.vkImage()
                 );
             } catch (Throwable failure) {
+                // Program creation may already have started asynchronous P12/P16 binding.
+                P12FullBasePipeline.detach(scene);
                 closeQuietly(view);
                 closeQuietly(texture);
                 closeQuietly(program);

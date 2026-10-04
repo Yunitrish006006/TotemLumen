@@ -101,6 +101,7 @@
   "screen.totem-lumen.render_profile.minecraft_pure": "Minecraft 純原版",
   "screen.totem-lumen.render_profile.minecraft_rgb": "Minecraft 原版 + RGB 光源",
   "screen.totem-lumen.render_profile.totem": "Totem Lumen",
+  "screen.totem-lumen.render_profile.raster_ray": "原版＋次級射線（實驗／24 格）",
   "message.totem-lumen.config.reloaded": "Totem Lumen 伺服器光照設定已重新載入。",
   "message.totem-lumen.config.unchanged": "Totem Lumen 伺服器光照設定沒有變更。",
   "message.totem-lumen.config.invalid": "伺服器光照設定無效：%s",

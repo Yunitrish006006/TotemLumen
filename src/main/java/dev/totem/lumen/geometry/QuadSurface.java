@@ -16,8 +16,15 @@ public record QuadSurface(
         float u2,
         float v2,
         float u3,
-        float v3
+        float v3,
+        int tintRgb
 ) {
+    /** Untinted callers retain their existing appearance; tint is RGB, never alpha/lighting. */
+    public QuadSurface(String spriteId, float u0, float v0, float u1, float v1,
+                       float u2, float v2, float u3, float v3) {
+        this(spriteId, u0, v0, u1, v1, u2, v2, u3, v3, 0xFFFFFF);
+    }
+
     public static final QuadSurface UNTEXTURED = new QuadSurface(
             "",
             0.0f, 0.0f,
@@ -27,6 +34,7 @@ public record QuadSurface(
     );
 
     public QuadSurface {
+        tintRgb &= 0xFFFFFF;
         if (spriteId == null) {
             throw new IllegalArgumentException("spriteId cannot be null");
         }

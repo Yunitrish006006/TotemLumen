@@ -85,19 +85,15 @@ public final class P12FullBasePipeline {
         }
         closePreparedAsync(stalePrepared, "TotemLumen-P12FullOldPreparedCleanup");
 
-        Thread worker = new Thread(
-                () -> buildPreparedPipeline(device, workerGeneration),
-                WORKER_NAME
-        );
-        worker.setDaemon(true);
-        worker.start();
+        VulkanDeviceLifetime.startWorker(device, WORKER_NAME,
+                () -> buildPreparedPipeline(device, workerGeneration));
     }
 
     private static void buildPreparedPipeline(VulkanDevice device, long workerGeneration) {
         VulkanComputeProgram.PreparedPipeline created = null;
         long startedAt = System.nanoTime();
         try {
-            String source = buildSourceForVerification();
+            String source = buildRuntimeSource();
             prewarmStage = PrewarmStage.SPIRV_AND_DRIVER;
             TotemLumenClient.LOGGER.info(
                     "Full lighting pipeline prewarm START: shader={}, sourceChars={}",
@@ -129,9 +125,13 @@ public final class P12FullBasePipeline {
                     elapsedMs
             );
 
-            // Dynamic-entity nearest-hit tracing is compiled directly into this one production
-            // lighting pipeline. Reflection remains an independent pass and may prewarm now.
-            P16MultipassReflection.prewarm(device);
+            // Shutdown must also invalidate this continuation, not only scene binding workers.
+            synchronized (LOCK) {
+                if (workerGeneration == generation && preparedDevice == device
+                        && dev.totem.lumen.render.RendererSettings.rendererEnabled()) {
+                    P16MultipassReflection.prewarm(device);
+                }
+            }
         } catch (Throwable buildFailure) {
             synchronized (LOCK) {
                 if (workerGeneration == generation) {
@@ -175,19 +175,15 @@ public final class P12FullBasePipeline {
         }
         closeAsync(staleProgram, "TotemLumen-P12FullOldBindingCleanup");
 
-        Thread worker = new Thread(
-                () -> bindPreparedPipeline(device, scene, workerGeneration),
-                "TotemLumen-P12FullBind"
-        );
-        worker.setDaemon(true);
-        worker.start();
+        VulkanDeviceLifetime.startWorker(device, "TotemLumen-P12FullBind",
+                () -> bindPreparedPipeline(device, scene, workerGeneration));
     }
 
     /** Drop scene descriptors before the owning renderer closes the storage buffer. */
     public static void detach(VulkanOwnedBuffer scene) {
         VulkanComputeProgram staleProgram;
         synchronized (LOCK) {
-            if (attachedScene != scene) return;
+            if (scene == null || attachedScene != scene) return;
             attachedScene = null;
             staleProgram = activeProgram;
             activeProgram = null;
@@ -293,6 +289,18 @@ public final class P12FullBasePipeline {
         return P14EFluidOpticsPatch.apply(entityAwareGeometry);
     }
 
+    static String buildRuntimeSource() {
+        String source = buildSourceForVerification();
+        if (PrimarySurfaceReuseShaderPatch.ENABLED) {
+            source = PrimarySurfaceReuseShaderPatch.apply(source);
+            TotemLumenClient.LOGGER.info("Primary surface reuse candidate active: GI hit material decoded once, invocation-local values, no cross-frame cache");
+        }
+        if (dev.totem.lumen.render.HybridTerrainPolicy.ENABLED) {
+            source = HybridTerrainShaderPatch.apply(source);
+        }
+        return LumenShaderVariant.runtimeSource("full", source);
+    }
+
 
     public static void beginDispatch() {
         DISPATCH_PROGRAM.set(activeProgram);
@@ -352,12 +360,12 @@ public final class P12FullBasePipeline {
     }
 
     public static void shutdown() {
-        P16MultipassReflection.shutdown();
-
         VulkanComputeProgram program;
         VulkanComputeProgram.PreparedPipeline prepared;
         synchronized (LOCK) {
             ++generation;
+            // Binding and prewarm continuations use the same P12 -> P16 lock order.
+            P16MultipassReflection.shutdown();
             attachedScene = null;
             program = activeProgram;
             activeProgram = null;
@@ -377,15 +385,12 @@ public final class P12FullBasePipeline {
 
     private static void closeAsync(VulkanComputeProgram program, String threadName) {
         if (program == null) return;
-        Thread cleanup = new Thread(() -> {
-            try {
-                program.close();
-            } catch (Throwable closeFailure) {
-                TotemLumenClient.LOGGER.warn("Failed to close stale full-base binding cleanly", closeFailure);
-            }
-        }, threadName);
-        cleanup.setDaemon(true);
-        cleanup.start();
+        try {
+            // close only schedules GPU-safe retirement; no cleanup worker or idle wait is needed.
+            program.close();
+        } catch (Throwable closeFailure) {
+            TotemLumenClient.LOGGER.warn("Failed to retire full-base binding: " + threadName, closeFailure);
+        }
     }
 
     private static void closePreparedAsync(
@@ -393,14 +398,10 @@ public final class P12FullBasePipeline {
             String threadName
     ) {
         if (prepared == null) return;
-        Thread cleanup = new Thread(() -> {
-            try {
-                prepared.close();
-            } catch (Throwable closeFailure) {
-                TotemLumenClient.LOGGER.warn("Failed to close prepared full-base pipeline cleanly", closeFailure);
-            }
-        }, threadName);
-        cleanup.setDaemon(true);
-        cleanup.start();
+        try {
+            prepared.close();
+        } catch (Throwable closeFailure) {
+            TotemLumenClient.LOGGER.warn("Failed to retire full-base pipeline: " + threadName, closeFailure);
+        }
     }
 }

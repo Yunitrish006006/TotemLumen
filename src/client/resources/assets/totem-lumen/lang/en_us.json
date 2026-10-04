@@ -101,6 +101,7 @@
   "screen.totem-lumen.render_profile.minecraft_pure": "Minecraft Vanilla",
   "screen.totem-lumen.render_profile.minecraft_rgb": "Minecraft + RGB Lighting",
   "screen.totem-lumen.render_profile.totem": "Totem Lumen",
+  "screen.totem-lumen.render_profile.raster_ray": "Raster Ray (experimental, 24 blocks)",
   "message.totem-lumen.config.reloaded": "Totem Lumen server lighting settings reloaded.",
   "message.totem-lumen.config.unchanged": "Totem Lumen server lighting settings are unchanged.",
   "message.totem-lumen.config.invalid": "Invalid server lighting settings: %s",

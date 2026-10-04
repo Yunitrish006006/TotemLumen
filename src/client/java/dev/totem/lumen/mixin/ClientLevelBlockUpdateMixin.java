@@ -3,6 +3,8 @@ package dev.totem.lumen.mixin;
 import dev.totem.lumen.integration.FluidRenderGeometryCache;
 import dev.totem.lumen.integration.SceneExtractionBridge;
 import dev.totem.lumen.integration.ClientGameplayLightPredictor;
+import dev.totem.lumen.integration.RasterLightingScene;
+import dev.totem.lumen.render.RendererSettings;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.state.BlockState;
@@ -30,8 +32,11 @@ abstract class ClientLevelBlockUpdateMixin {
             int updateFlags,
             CallbackInfo ci
     ) {
-        FluidRenderGeometryCache.invalidateNeighborhood(pos);
+        if (RendererSettings.rendererEnabled()) FluidRenderGeometryCache.invalidateNeighborhood(pos);
         SceneExtractionBridge.onBlockChanged(pos, updateFlags);
-        ClientGameplayLightPredictor.onBlockChanged((ClientLevel) (Object) this, pos, oldState, newState);
+        RasterLightingScene.onBlockChanged((ClientLevel) (Object) this, pos);
+        if (RendererSettings.renderProfile() == RendererSettings.RenderProfile.MINECRAFT_RGB) {
+            ClientGameplayLightPredictor.onBlockChanged((ClientLevel) (Object) this, pos, oldState, newState);
+        }
     }
 }

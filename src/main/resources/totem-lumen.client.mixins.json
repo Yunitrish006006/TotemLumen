@@ -3,6 +3,7 @@
   "package": "dev.totem.lumen.mixin",
   "client": [
     "GpuDeviceAccessor",
+    "VulkanDeviceLifetimeMixin",
     "ClientLevelBlockUpdateMixin",
     "FluidRendererCaptureMixin",
     "BlockEntityRenderDispatcherMixin",
@@ -16,6 +17,8 @@
     "MinecraftBlockModelMeshResolverMixin",
     "OptionsSubScreenAccessor",
     "LevelRendererTakeoverMixin",
+    "RasterMaterialCaptureMixin",
+    "RasterMaterialLayersInvoker",
     "SceneExtractionBridgeBlockEntityMixin",
     "P5StableLookupRendererMixin",
     "P5StableLookupRendererP17Mixin",

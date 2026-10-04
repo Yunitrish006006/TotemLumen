@@ -11,9 +11,10 @@ public final class P14ModelMeshGpuLayout {
     public static final int QUAD_UV_WORDS = 8;
     public static final int QUAD_TEXTURE_HANDLE_WORDS = 1;
     public static final int QUAD_WORDS_PER_RECORD =
-            QUAD_POSITION_WORDS + QUAD_UV_WORDS + QUAD_TEXTURE_HANDLE_WORDS;
+            QUAD_POSITION_WORDS + QUAD_UV_WORDS + QUAD_TEXTURE_HANDLE_WORDS + 1;
     public static final int QUAD_UV_BASE_WORD = QUAD_POSITION_WORDS;
     public static final int QUAD_TEXTURE_HANDLE_WORD = QUAD_POSITION_WORDS + QUAD_UV_WORDS;
+    public static final int QUAD_TINT_WORD = QUAD_TEXTURE_HANDLE_WORD + 1;
     public static final int QUAD_POOL_WORDS = BlockModelMeshRegistry.MAX_QUADS * QUAD_WORDS_PER_RECORD;
     public static final int MAX_STORAGE_WORDS = MESH_DESCRIPTOR_WORDS + QUAD_POOL_WORDS;
     public static final long MAX_STORAGE_BYTES = (long) MAX_STORAGE_WORDS * Integer.BYTES;

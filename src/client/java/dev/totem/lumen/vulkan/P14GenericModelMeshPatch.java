@@ -27,7 +27,8 @@ final class P14GenericModelMeshPatch {
             throw new IllegalStateException("P14C generic model marker missing: p14IntersectVoxelGeometry");
         }
 
-        String helpers = """
+        String helpers = "const uint P14_MODEL_QUAD_WORDS = "
+                + P14ModelMeshGpuLayout.QUAD_WORDS_PER_RECORD + "u;\n" + """
                 uint p14ModelDescriptorBase() {
                     uint pixelCount = scene.data[51] * scene.data[52];
                     return scene.data[3] + pixelCount;
@@ -107,7 +108,7 @@ final class P14GenericModelMeshPatch {
                     vec3 blockOrigin = vec3(voxel);
                     uint quadPool = p14ModelQuadBase();
                     for (uint quadIndex = 0u; quadIndex < quadCount; quadIndex++) {
-                        uint quadWord = quadPool + (firstQuad + quadIndex) * 21u;
+                        uint quadWord = quadPool + (firstQuad + quadIndex) * P14_MODEL_QUAD_WORDS;
                         vec3 v0 = blockOrigin + p14ModelVertex(quadWord);
                         vec3 v1 = blockOrigin + p14ModelVertex(quadWord + 3u);
                         vec3 v2 = blockOrigin + p14ModelVertex(quadWord + 6u);

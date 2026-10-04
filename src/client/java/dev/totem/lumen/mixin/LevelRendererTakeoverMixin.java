@@ -3,6 +3,9 @@ package dev.totem.lumen.mixin;
 import com.mojang.renderpearl.api.buffers.GpuBufferSlice;
 import com.mojang.blaze3d.resource.GraphicsResourceAllocator;
 import dev.totem.lumen.vulkan.P5StableLookupRenderer;
+import dev.totem.lumen.render.HybridTerrainPolicy;
+import dev.totem.lumen.integration.RasterLightingRenderer;
+import dev.totem.lumen.integration.RasterMaterialCapture;
 import net.minecraft.client.renderer.LevelRenderer;
 import net.minecraft.client.renderer.state.level.CameraRenderState;
 import org.joml.Vector4f;
@@ -31,11 +34,23 @@ public abstract class LevelRendererTakeoverMixin {
             boolean shouldRenderWeather,
             CallbackInfo ci
     ) {
-        if (!P5StableLookupRenderer.readyForWorldTakeover()) {
+        RasterMaterialCapture.beginFrame();
+        if (HybridTerrainPolicy.ENABLED || !P5StableLookupRenderer.readyForWorldTakeover()) {
             return;
         }
 
         P5StableLookupRenderer.presentToWorldTarget();
         ci.cancel();
+    }
+
+    @Inject(method = "render", at = @At("RETURN"))
+    private void totemLumen$compositeNearLighting(
+            GraphicsResourceAllocator resourceAllocator, boolean renderOutline,
+            CameraRenderState cameraState, GpuBufferSlice terrainFog, Vector4f fogColor,
+            boolean shouldRenderSky, boolean shouldRenderWeather, CallbackInfo ci
+    ) {
+        if (HybridTerrainPolicy.ENABLED) P5StableLookupRenderer.presentHybridTerrain(cameraState);
+        RasterMaterialCapture.render();
+        RasterLightingRenderer.render(cameraState);
     }
 }

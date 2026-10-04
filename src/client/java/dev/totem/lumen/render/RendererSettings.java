@@ -16,7 +16,8 @@ public final class RendererSettings {
     public enum RenderProfile {
         MINECRAFT_PURE,
         MINECRAFT_RGB,
-        TOTEM_LUMEN;
+        TOTEM_LUMEN,
+        RASTER_RAY;
 
         public RenderProfile next() {
             RenderProfile[] values = values();
@@ -284,6 +285,10 @@ public final class RendererSettings {
         // wait for Totem Lumen's monolithic Vulkan pipeline. Only the dedicated Totem profile
         // owns the Vulkan renderer lifecycle.
         return renderProfile == RenderProfile.TOTEM_LUMEN;
+    }
+
+    public static synchronized boolean rasterLightingEnabled() {
+        return renderProfile == RenderProfile.RASTER_RAY;
     }
 
     /** Legacy compatibility for callers that still think in terms of an enable toggle. */

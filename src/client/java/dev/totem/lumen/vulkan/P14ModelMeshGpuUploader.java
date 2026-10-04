@@ -108,6 +108,7 @@ public final class P14ModelMeshGpuUploader {
                         quadWord + P14ModelMeshGpuLayout.QUAD_TEXTURE_HANDLE_WORD,
                         textureHandle
                 );
+                putWord(buffer, quadWord + P14ModelMeshGpuLayout.QUAD_TINT_WORD, surface.tintRgb());
             }
         }
 

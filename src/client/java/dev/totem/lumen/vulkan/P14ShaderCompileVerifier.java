@@ -16,7 +16,11 @@ public final class P14ShaderCompileVerifier {
         String bootstrapSource = P5BootstrapShader.source();
         verifyBootstrapSource(bootstrapSource);
 
-        String baseSource = P12FullBasePipeline.buildSourceForVerification();
+        String baseSource = P12FullBasePipeline.buildRuntimeSource();
+        boolean hybridDepth = baseSource.contains("scene.data[pixelBase + width * height +");
+        if (hybridDepth != dev.totem.lumen.render.HybridTerrainPolicy.ENABLED) {
+            throw new IllegalStateException("Hybrid output depth plane does not match resource allocation policy");
+        }
         verifyP13NightSkySource(baseSource);
         verifyUnifiedFullLighting(baseSource);
         verifyP14EFluidSource(baseSource, "full base pass");
@@ -29,9 +33,7 @@ public final class P14ShaderCompileVerifier {
 
         verifyP17DynamicEntitySource(baseSource, "unified full lighting pass");
 
-        String reflectionGeometry = P14EFluidShaderPatch.apply(P16ReflectionPassShader.build());
-        String reflectionEntity = P17ShaderIntegration.apply(reflectionGeometry);
-        String reflectionSource = P14EFluidOpticsPatch.apply(reflectionEntity);
+        String reflectionSource = P16MultipassReflection.buildRuntimeSource();
         verifyP13NightSkySource(reflectionSource);
         verifyP14EFluidSource(reflectionSource, "P16 reflection pass");
         verifyP14EFluidOptics(reflectionSource, "P16 reflection pass", true);
@@ -384,6 +386,19 @@ public final class P14ShaderCompileVerifier {
             String label,
             boolean reflectionPass
     ) {
+        requireSourceMarker(source, "const uint P14_MODEL_QUAD_WORDS = "
+                + P14ModelMeshGpuLayout.QUAD_WORDS_PER_RECORD + "u;", label + " shared mesh stride");
+        requireSourceMarker(source, "const uint P18_MODEL_TINT_WORD = "
+                + P14ModelMeshGpuLayout.QUAD_TINT_WORD + "u;", label + " mesh tint offset");
+        requireSourceMarker(source, "surfaceTint = p18ArgbRgb(scene.data[faceWord + P18_SURFACE_FACE_TINT_WORD]);",
+                label + " cube tint lookup");
+        String meshTint = "surfaceTint = p18ArgbRgb(scene.data[quadWord + P18_MODEL_TINT_WORD]);";
+        if (source.split(java.util.regex.Pattern.quote(meshTint), -1).length - 1 != 2) {
+            throw new IllegalStateException(label + " both mesh triangles must retain their tint");
+        }
+        if (source.contains("(firstQuad + quadIndex) * 21u")) {
+            throw new IllegalStateException(label + " stale model stride");
+        }
         requireSourceMarker(
                 source,
                 "struct P18SurfaceSample {",
@@ -396,7 +411,7 @@ public final class P14ShaderCompileVerifier {
         );
         requireSourceMarker(
                 source,
-                "surface.albedo = p18ArgbRgb(albedoArgb);",
+                "surface.albedo = p18ArgbRgb(albedoArgb) * surfaceTint;",
                 label + " resource-pack albedo"
         );
         requireSourceMarker(

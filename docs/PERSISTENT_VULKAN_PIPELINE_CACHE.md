@@ -1,6 +1,66 @@
 # Persistent Vulkan Pipeline Cache
 
-Status: **Alpha 38 implementation / Apple M4 runtime validation pending**
+Status: **Current disk reliability follow-up below; historical Alpha 38 design retained for context.**
+
+## 2026-10-03: concurrent cache file reliability
+
+The current implementation uses a session-wide cache, unlike the historical
+short-lived design described below. This follow-up changes only opaque cache
+file I/O; the cache key, Vulkan handle lifetime, shaders and GPU dispatch are
+unchanged.
+
+- `PipelineCacheFiles` opens one file handle for both size checking and reading.
+  Reads retain a 64 MiB payload limit even if another writer grows the file;
+  at most one extra byte is read to detect overflow.
+- Each save stages in its own uniquely named file beside the target, writes
+  the complete blob, forces its contents to storage, and atomically replaces
+  the target. Two game processes no longer share/truncate the same `.tmp` file.
+- If atomic replacement is unavailable or fails, saving reports an I/O failure
+  instead of attempting non-atomic replacement. The old cache remains usable.
+  Cleanup removes only this operation's staging file.
+- Unreadable, invalid-sized or driver-rejected data is ignored, not deleted:
+  another process may already have replaced the pathname with a valid cache.
+  Normal compilation can still proceed with an empty cache.
+- Saves are **last successful writer wins**, not a cross-process cache merge.
+  An abrupt process exit can leave a unique staging file. This is not a
+  directory-fsync/power-loss durability guarantee.
+
+Seven deterministic tests cover missing files, complete replacement, read-size
+bounds, invalid writes, unsupported atomic replacement, injected I/O failure,
+and overlapping writers with bounded readers. The isolated native compiler
+probe now imports/exports through this same helper and records its compiled
+class hashes. Neither unit tests nor compiler probes establish in-world
+startup speed, visual correctness, FPS, or Apple Silicon/MoltenVK acceptance.
+
+### Validation evidence
+
+- Java 25.0.3 / Gradle 9.6.1: final `--offline build prepareCompileResearch`
+  passed (159 tests, zero failures/errors). Shader compilation, configured
+  Minecraft 26.3 mixin descriptors and RGB verifiers passed. The separate
+  worker shutdown verifier also passed before the final non-file guard update.
+  This checkout has no Gradle wrapper; the documented local distribution was used.
+- Final RTX 5060 Ti compiler probes:
+  `build/reports/compile-research/cache-files-bootstrap-empty-final-20261003/`
+  and `cache-files-bootstrap-import-final-20261003/`. Both completed with
+  `vkResult=0` and `deviceDestroyed=true`. The first saved 21,980 bytes; the
+  second process read the same SHA-256 and reported `applicationCacheHit=true`.
+  Native creation times were 31.467 ms and 25.875 ms respectively; these are
+  single compiler observations, **not** before/after performance evidence.
+  The driver-internal cache was uncontrolled. No world or GPU dispatch ran.
+- Dedicated-server entrypoint smoke: Minecraft 26.3 / Loader 0.19.5 / Fabric
+  API 0.160.5+26.3 loaded Lumen and logged server gameplay registration, then
+  exited at the expected EULA gate. The new empty run directory also logged
+  missing `server.properties`; no existing world or EULA acceptance was used.
+  Evidence: `/tmp/lumen-cache-server-smoke.kWKZZ1/run/logs/latest.log`.
+  This is a load check, not world-tick/gameplay acceptance. `jdeps` confirms
+  the new helper depends only on `java.base`; research classes are absent
+  from the player JAR.
+- Remaining gates: actual Minecraft cache-save/relaunch and rendering lifecycle,
+  Apple Silicon/MoltenVK, visual acceptance and FPS. No shared contracts,
+  Observer UI/transport, gameplay-light rules or network payloads changed.
+  This patch does not close their broader runtime matrices or authorize release.
+
+## Historical Alpha 38 notes
 
 ## Motivation
 
