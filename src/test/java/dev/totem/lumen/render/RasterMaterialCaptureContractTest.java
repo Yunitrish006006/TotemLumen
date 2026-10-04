@@ -57,13 +57,15 @@ class RasterMaterialCaptureContractTest {
         String hook = Files.readString(root.resolve("mixin/LevelRendererTakeoverMixin.java"));
         assertTrue(capture.contains("ENABLED && RGB_PREVIEW"));
         assertTrue(capture.contains("ENABLED && PREVIEW && !RGB_PREVIEW"));
-        assertTrue(capture.contains("beginFrame() { capturedThisFrame = false;"));
-        assertTrue(capture.contains("!capturedThisFrame || device != gpu"));
-        assertTrue(capture.contains("encoder.submit(); capturedThisFrame = true;"));
+        assertTrue(capture.contains("capturedFrameSerial = -1;"));
+        assertTrue(capture.contains("capturedFrameSerial != frameSerial"));
+        assertTrue(capture.contains("capturedFrameSerial = frameSerial;"));
+        assertTrue(capture.contains("return new RasterSurfaceFrame("));
         assertTrue(capture.contains("private static void retireTargets() {\n        capturedThisFrame = false;"));
         assertTrue(renderer.contains("if (materialPreview && material == null) return;"));
         assertTrue(renderer.contains("if (!materialPreview) encoder.copyTextureToTexture"));
-        assertTrue(renderer.contains("materialPreview ? material.color() : sceneView"));
+        assertTrue(renderer.contains("materialPreview ? material.baseColor() : sceneView"));
+        assertTrue(renderer.contains("StagedRenderPlan.rasterMaterialPreview()"));
         assertEquals(2, renderer.split("materialPreview \\? material.depth\\(\\) : target.getDepthTextureView\\(\\)", -1).length - 1);
         assertTrue(hook.indexOf("RasterMaterialCapture.render();") < hook.indexOf("RasterLightingRenderer.render(cameraState);"));
     }
