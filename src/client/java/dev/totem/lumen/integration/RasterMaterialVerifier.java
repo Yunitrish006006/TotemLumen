@@ -1,5 +1,6 @@
 package dev.totem.lumen.integration;
 
+import net.minecraft.client.renderer.state.level.CameraRenderState;
 import org.lwjgl.util.shaderc.Shaderc;
 
 import java.io.IOException;
@@ -17,24 +18,35 @@ public final class RasterMaterialVerifier {
     }
 
     public static void verify() throws Exception {
-        var capture = RasterSurfaceCapture.class.getDeclaredMethod("capture");
+        var capture = RasterSurfaceCapture.class.getDeclaredMethod("capture", CameraRenderState.class);
         if (capture.getReturnType() != RasterSurfaceFrame.class) {
             throw new IllegalStateException("Raster surface capture must publish RasterSurfaceFrame");
         }
 
-        String path = "assets/totem-lumen/shaders/core/raster_surface_depth.fsh";
-        String source = resource(path);
-        if (!source.contains("uniform sampler2D DepthSampler")
-                || !source.contains("float depth = texture(DepthSampler, texCoord).r")) {
+        String depthPath = "assets/totem-lumen/shaders/core/raster_surface_depth.fsh";
+        String depthSource = resource(depthPath);
+        if (!depthSource.contains("uniform sampler2D DepthSampler")
+                || !depthSource.contains("float depth = texture(DepthSampler, texCoord).r")) {
             throw new IllegalStateException("Owned depth capture shader contract drift");
         }
-        compile(path, source);
+        compile(depthPath, depthSource);
+
+        String normalPath = "assets/totem-lumen/shaders/core/raster_surface_normal.fsh";
+        String normalSource = resource(normalPath);
+        String dynamicTransforms = resource("assets/minecraft/shaders/include/dynamictransforms.glsl");
+        String directive = "#include <minecraft:dynamictransforms.glsl>";
+        if (!normalSource.contains(directive)
+                || !normalSource.contains("vec3 n = cross(dx, dy)")
+                || !normalSource.contains("fragColor = vec4(n * 0.5 + 0.5, 1.0)")) {
+            throw new IllegalStateException("Owned normal capture shader contract drift");
+        }
+        compile(normalPath, normalSource.replace(directive, dynamicTransforms));
 
         if (!RasterSurfaceFrame.ColorSemantic.NATIVE_LIT_COLOR.name().equals("NATIVE_LIT_COLOR")) {
             throw new IllegalStateException("Raster surface color semantic drift");
         }
 
-        System.out.println("Raster surface verification PASS: owned color/depth handoff and depth shader compile; NOT runtime/visual acceptance");
+        System.out.println("Raster surface verification PASS: owned color/depth/normal handoff and surface shader compile; NOT runtime/visual acceptance");
     }
 
     private static String resource(String path) throws IOException {
