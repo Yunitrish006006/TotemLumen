@@ -53,7 +53,7 @@ Implemented first:
 - `StagedRenderPlan` validates producer/consumer ordering, duplicate stage identity and exclusive
   logical-output ownership;
 - the current owned Raster path is represented as
-  `SURFACE_CAPTURE -> DIRECT_LIGHT -> COMPOSITE`;
+  `SURFACE_CAPTURE -> INDIRECT_GI -> COMPOSITE`;
 - `RasterSurfaceFrame` is the first concrete stage ABI. It carries the producing device, extent,
   frame serial, color semantic, base-colour view and depth view.
 - Raster lighting consumes this frame token rather than reaching back into Minecraft's target or
@@ -110,11 +110,22 @@ their input ABI changes.
 
 ## Phase 4 — split lighting
 
-Create independent producers:
+The first split is now implemented for the active safe Raster path:
 
-1. DIRECT_LIGHT: sun/moon/sky visibility and bounded RGB emitters.
-2. INDIRECT_GI: secondary diffuse transport only.
-3. REFLECTION: optional specular/reflection transport.
+- `RasterIndirectGiStage` owns the voxel atlas, `raster_indirect_gi` pipeline and
+  reduced-resolution radiance target;
+- `RasterLightingFrame` is the frame-local INDIRECT_GI -> COMPOSITE ABI;
+- `RasterCompositeStage` owns the presentation pipeline and is the only staged Raster pass that
+  writes the main world color target;
+- the old combined `raster_ray` shader has been removed. Its dormant direct-RGB/material branch,
+  `LightSampler`, point-light visibility loop and emitter upload path are not part of the active
+  shader compilation unit.
+
+Remaining independent producers:
+
+1. DIRECT_LIGHT: sun/moon/sky visibility and bounded RGB emitters, after MATERIAL_RESOLVE can provide
+   unlit material input.
+2. REFLECTION: optional specular/reflection transport.
 
 All consume surface/material records and the shared ray-scene backend. Primary camera visibility must
 not be retraced by these stages. Secondary visibility may call the shared scene tracer.
