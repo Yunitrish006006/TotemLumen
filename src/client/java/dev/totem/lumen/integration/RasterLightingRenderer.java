@@ -72,7 +72,6 @@ public final class RasterLightingRenderer {
         if (!RendererSettings.rasterLightingEnabled() || failed || surface == null) return;
         ready = false;
         independentLightingActive = false;
-        independentLightingActive = false;
         var volume = RasterLightingScene.snapshot();
         if (camera == null || !camera.initialized || volume == null) { ready = false; return; }
         var target = Minecraft.getInstance().gameRenderer.mainRenderTarget();
@@ -189,6 +188,7 @@ public final class RasterLightingRenderer {
 
     public static void close() {
         ready = false;
+        independentLightingActive = false;
         if (atlas == null && lighting == null) return;
         // RenderPearl owns deferred GPU retirement; never destroy raw Vulkan handles here.
         if (atlasView != null) atlasView.close(); if (atlas != null) atlas.close();
