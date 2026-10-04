@@ -46,7 +46,7 @@ class RasterLightingVolumeTest {
         assertTrue(settings.contains("return renderProfile == RenderProfile.TOTEM_LUMEN;"));
         assertTrue(settings.contains("return renderProfile == RenderProfile.RASTER_RAY;"));
         String renderer = source("integration/RasterLightingRenderer.java");
-        assertTrue(renderer.contains("if (!RendererSettings.rasterLightingEnabled() || failed) return;"));
+        assertTrue(renderer.contains("if (!RendererSettings.rasterLightingEnabled() || failed || surface == null) return;"));
         assertFalse(renderer.contains("P5StableLookupRenderer"));
         assertFalse(renderer.contains("ClientLevel"));
         assertFalse(renderer.contains("getBlockState"));
@@ -78,6 +78,7 @@ class RasterLightingVolumeTest {
         assertFalse(callback.contains("RasterLightingRenderer.close()"));
         assertFalse(callback.contains("RasterLightingScene.clear()"));
         assertTrue(client.contains("RasterLightingRenderer.tickLifecycle(client)"));
+        assertTrue(client.contains("RasterSurfaceCapture.tickLifecycle(client)"));
     }
 
     private static String source(String path) throws Exception {
