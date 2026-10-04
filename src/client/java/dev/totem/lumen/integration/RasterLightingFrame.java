@@ -11,6 +11,7 @@ public record RasterLightingFrame(
         int width,
         int height,
         long surfaceFrameSerial,
+        long voxelEpoch,
         boolean completeScene,
         GpuTextureView radiance
 ) {
@@ -19,6 +20,7 @@ public record RasterLightingFrame(
         Objects.requireNonNull(radiance, "radiance");
         if (width <= 0 || height <= 0) throw new IllegalArgumentException("Non-positive lighting extent");
         if (surfaceFrameSerial <= 0) throw new IllegalArgumentException("Invalid surface frame serial");
+        if (voxelEpoch < 0) throw new IllegalArgumentException("Invalid voxel epoch");
     }
 
     public boolean matches(RasterSurfaceFrame surface) {
