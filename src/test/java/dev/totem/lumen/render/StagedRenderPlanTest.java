@@ -9,8 +9,8 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class StagedRenderPlanTest {
     @Test
-    void rasterPreviewHasExplicitCoarseStageBoundaries() {
-        var plan = StagedRenderPlan.rasterMaterialPreview();
+    void ownedRasterSurfacePathHasExplicitCoarseStageBoundaries() {
+        var plan = StagedRenderPlan.rasterOwnedSurfacePath();
         assertEquals(List.of(
                 LumenRenderStage.SURFACE_CAPTURE,
                 LumenRenderStage.DIRECT_LIGHT,
