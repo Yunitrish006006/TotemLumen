@@ -59,4 +59,18 @@ class RasterMaterialResolveContractTest {
         int indirect = renderer.indexOf("RasterIndirectGiStage.record(");
         assertTrue(materialCatch >= 0 && indirect > materialCatch);
     }
+
+    @Test
+    void materialLutResizeDoesNotRetireIndependentSurfaceSetLut() throws Exception {
+        String stage = read("src/client/java/dev/totem/lumen/integration/RasterMaterialResolveStage.java");
+        int resize = stage.indexOf("if (lutChanged) {");
+        int upload = stage.indexOf("private static void uploadLutIfNeeded");
+        assertTrue(resize >= 0 && upload > resize);
+        String resizeBody = stage.substring(resize, upload);
+        assertTrue(resizeBody.contains("materialLutView.close()"));
+        assertTrue(resizeBody.contains("materialLut.close()"));
+        assertFalse(resizeBody.contains("surfaceSetLutView.close()"));
+        assertFalse(resizeBody.contains("surfaceSetLut.close()"));
+        assertTrue(stage.contains("uploadedSurfaceRevision = Long.MIN_VALUE;"));
+    }
 }
