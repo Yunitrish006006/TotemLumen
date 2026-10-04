@@ -139,19 +139,25 @@ The active safe Raster path now uses an explicit shared ray-scene boundary:
 - `RasterCompositeStage` owns the presentation pipeline and is the only staged Raster pass that
   writes the main world color target.
 
-An independent `RasterDirectLightStage` is also implemented behind
+An independent `RasterDirectLightStage` is implemented behind
 `-Dtotem.lumen.rasterDirectLightStage=true` together with MATERIAL_RESOLVE. It owns its full-resolution
 direct-radiance target and bounded 32-emitter payload, consumes material coverage plus the shared
-voxel scene, and traces at most four selected shadow rays per covered pixel. Its
-`RasterDirectLightFrame` output is deliberately **not consumed by COMPOSITE yet**, so enabling the
-diagnostic cannot replace native lighting or change the accepted safe composition path.
+voxel scene, and traces at most four selected shadow rays per covered pixel.
+
+A second opt-in `RasterDirectCompositeStage` now exists behind
+`-Dtotem.lumen.rasterDirectLightComposite=true`. It is a separate pipeline rather than a mutation of
+the accepted `RasterCompositeStage`. Only near-field pixels with explicit unlit-material coverage
+and matching DIRECT_LIGHT output use `unlitAlbedo * (diagnostic ambient + direct RGB)`; uncovered,
+far, unsupported or unresolved surfaces continue through the native-lit + INDIRECT_GI fallback.
+The preview still does not count as full independent lighting because material coverage is partial
+and sun/moon/sky are absent.
 
 Remaining work:
 
-1. promote DIRECT_LIGHT from isolated producer to coverage-aware composite input only after native
-   visual/lifecycle acceptance;
-2. extend direct lighting beyond bounded RGB emitters to sun/moon/sky;
-3. add REFLECTION as an optional specular transport producer.
+1. native visual/lifecycle acceptance for the coverage composite before any default/profile change;
+2. extend material coverage to generic meshes, animated textures, fluids and entities;
+3. extend DIRECT_LIGHT beyond bounded RGB emitters to sun/moon/sky;
+4. add REFLECTION as an optional specular transport producer.
 
 All lighting stages consume explicit surface/material/scene records. Primary camera visibility must
 not be retraced by these stages. Secondary visibility uses the shared scene backend instead of
