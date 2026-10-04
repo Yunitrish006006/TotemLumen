@@ -107,6 +107,27 @@ This is a compilation/ownership separation, not a claim that the current native-
 correction equals the future independent-lighting renderer.
 
 
+### Stage 2g implementation: partial unlit material coverage
+
+The optional MATERIAL_RESOLVE development stage now publishes two additional owned full-resolution
+outputs without replaying Minecraft draw buffers.
+
+- `baseProperties` is RGBA16F and decodes the existing MaterialDefinition ABI as base
+  roughness / metallic / opacity / normalized emission level.
+- `unlitAlbedo` is RGBA16F and is currently valid only for static canonical textured cubes.
+  The stage reuses the existing P18 cube surface-set ABI (face UVs, texture handle and captured
+  biome/block tint) plus the packed P18 texture-scene ABI. RGB is unlit sampled albedo multiplied by
+  tint; alpha is **coverage**, not permission to replace every raster surface.
+- Surface-set ID zero, missing/unloaded texture handles, animated textures, unsupported geometry and
+  unresolved pixels return zero coverage and therefore require native-lit fallback.
+- The large P18 texture scene is uploaded only when the P18 texture registry revision changes.
+  Material-LUT resizing, surface-set LUT lifetime and P18 texture LUT lifetime are independent.
+
+This is deliberately not DIRECT_LIGHT activation. Generic meshes, fluids, entities and animated
+textures still lack complete unlit surface coverage, and P18 sampled normal/specular/AO data has not
+yet been promoted to resolved per-pixel outputs. The active safe renderer remains
+`SURFACE_CAPTURE -> INDIRECT_GI -> COMPOSITE`; MATERIAL_RESOLVE is an opt-in development producer.
+
 ### Stage 2d candidate: stable publication and light payload order
 
 Unchanged section refreshes previously published a fresh volume every tick, so the
