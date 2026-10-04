@@ -92,6 +92,7 @@ final class RasterIndirectGiStage {
                 lightingWidth,
                 lightingHeight,
                 surface.frameSerial(),
+                voxelScene.epoch(),
                 voxelScene.completeScene(),
                 radianceView
         );
