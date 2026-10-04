@@ -13,6 +13,10 @@ public final class RasterMaterialVerifier {
     private RasterMaterialVerifier() { }
 
     public static void main(String[] args) throws Exception {
+        verify();
+    }
+
+    public static void verify() throws Exception {
         var capture = RasterSurfaceCapture.class.getDeclaredMethod("capture");
         if (capture.getReturnType() != RasterSurfaceFrame.class) {
             throw new IllegalStateException("Raster surface capture must publish RasterSurfaceFrame");
