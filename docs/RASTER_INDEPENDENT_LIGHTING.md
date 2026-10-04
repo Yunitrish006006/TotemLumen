@@ -46,6 +46,32 @@ lighting is not removed. Current preview is not full-world lighting or path trac
 
 ## Rendering paths and staged limits
 
+### Stage 2e implementation: owned surface handoff replaces material replay
+
+The staged-render branch supersedes the Stage 2a-2d **material replay mechanism** while preserving
+those sections below as historical experiment evidence. The crash-producing path is removed from the
+active mixin list and its replay classes/shaders are deleted.
+
+After Minecraft completes world drawing, `RasterSurfaceCapture` now creates a frame-local owned
+surface:
+
+- native scene color -> Totem-owned color texture via GPU copy;
+- native depth -> Totem-owned `R32_FLOAT` texture via a small fullscreen depth-capture pipeline;
+- `RasterSurfaceFrame` carries device, extent, frame serial, color semantic, color view and depth
+  view to the lighting stage;
+- Raster lighting no longer reads the main target depth directly and no longer owns its own duplicate
+  scene-copy resource;
+- client tick/stop lifecycle explicitly retires the surface stage.
+
+The published color semantic is `NATIVE_LIT_COLOR`. Therefore the earlier diagnostic independent
+RGB/material mode is intentionally not active on this safe path: multiplying Totem independent light
+over already-lit vanilla color would be a false material model. A future MATERIAL_RESOLVE stage must
+produce `UNLIT_MATERIAL_COLOR` plus owned normal/material identity before that lighting mode returns.
+
+This change is an architectural/lifetime fix, not visual or FPS acceptance. Required native gates:
+resize, profile switch, disconnect/rejoin, world exit/re-entry and shutdown with no closed-buffer or
+render-pass errors, followed by fixed-scene output checks. Apple/MoltenVK remains a separate gate.
+
 ### Stage 2d candidate: stable publication and light payload order
 
 Unchanged section refreshes previously published a fresh volume every tick, so the
