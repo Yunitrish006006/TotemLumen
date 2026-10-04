@@ -44,7 +44,8 @@ public final class RasterLightingScene {
     }
 
     public static void tick(Minecraft client) {
-        if (!RendererSettings.rasterLightingEnabled() || RasterLightingRenderer.unavailable() || client.level == null || client.player == null) {
+        if (!RendererSettings.rasterLightingEnabled() || RasterLightingRenderer.unavailable()
+                || RasterSurfaceCapture.unavailable() || client.level == null || client.player == null) {
             if (level != null) clear();
             return;
         }
