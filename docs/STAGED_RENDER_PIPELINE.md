@@ -97,18 +97,27 @@ authoritative for the raster-primary path.
 
 ## Phase 3 — material resolve
 
-Create an independent MATERIAL_RESOLVE pipeline/resource ABI. Move P18-facing decode work that can
-operate from captured material identity into this stage:
+The first MATERIAL_RESOLVE implementation is now present behind the development opt-in.
 
-- albedo/tint;
-- roughness;
-- metallic;
-- emission;
-- AO;
-- transmission flags/parameters where available.
+It owns a separate visible-surface identity pass plus material/P18 LUT uploads. The stage now also
+publishes a full-resolution RGBA16F **base-property plane** containing:
 
-Changing material fidelity must not invalidate primary visibility or GI traversal pipelines unless
-their input ABI changes.
+- R = base roughness;
+- G = base metallic;
+- B = base opacity;
+- A = normalized base emission level.
+
+These values are decoded from the existing lossless 64-byte MaterialDefinition GPU ABI inside
+MATERIAL_RESOLVE, so later stages do not need to repeat that base-property decode. Material-LUT
+capacity changes and the independent P18 surface-set LUT now have separate resource lifetimes.
+
+This is still **metadata-only**, not completed independent material shading. Unlit albedo/tint,
+texture UV identity, P18 sampled texture overrides, AO and transmission/refraction surface data are
+not yet published as resolved per-pixel outputs. Consequently DIRECT_LIGHT remains disabled and the
+active safe renderer continues to composite INDIRECT_GI over NATIVE_LIT_COLOR.
+
+Changing material fidelity should not invalidate primary visibility or GI traversal pipelines unless
+their explicit stage ABI changes.
 
 ## Phase 4 — split lighting
 
