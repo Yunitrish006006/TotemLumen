@@ -8,8 +8,9 @@ import java.util.Objects;
 /**
  * Frame-local MATERIAL_RESOLVE output.
  *
- * <p>The visible-material texture stores the exact 16-bit session material ID in R/G bytes.
- * The LUT stores each 32-bit MaterialDefinition ABI word losslessly across one RGBA8 texel;
+ * <p>The visible-surface texture stores exact 16-bit session material ID in R/G and exact
+ * 16-bit P18 surface-set ID in B/A. The LUT stores each 32-bit MaterialDefinition ABI word
+ * losslessly across one RGBA8 texel;
  * consumers reconstruct raw words instead of accepting an 8-bit float quantization.</p>
  */
 public record RasterMaterialFrame(
@@ -19,12 +20,12 @@ public record RasterMaterialFrame(
         long surfaceFrameSerial,
         long materialRevision,
         int materialCount,
-        GpuTextureView visibleMaterialIds,
+        GpuTextureView visibleSurfaceIdentity,
         GpuTextureView materialLut
 ) {
     public RasterMaterialFrame {
         Objects.requireNonNull(device, "device");
-        Objects.requireNonNull(visibleMaterialIds, "visibleMaterialIds");
+        Objects.requireNonNull(visibleSurfaceIdentity, "visibleSurfaceIdentity");
         Objects.requireNonNull(materialLut, "materialLut");
         if (width <= 0 || height <= 0) throw new IllegalArgumentException("Non-positive material extent");
         if (surfaceFrameSerial <= 0) throw new IllegalArgumentException("Invalid surface frame serial");
