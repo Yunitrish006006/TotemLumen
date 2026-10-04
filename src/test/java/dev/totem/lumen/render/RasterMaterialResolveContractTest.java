@@ -124,4 +124,20 @@ class RasterMaterialResolveContractTest {
         assertTrue(stage.contains("if (pbrTextureWords == null)"));
         assertTrue(stage.contains("pbrTextureWords = null;"));
     }
+
+    @Test
+    void rawLutUploadsReadTheirOwnPackedBuffers() throws Exception {
+        String stage = read("src/client/java/dev/totem/lumen/integration/RasterMaterialResolveStage.java");
+        int surfaceStart = stage.indexOf("private static void uploadSurfaceLutIfNeeded");
+        int textureStart = stage.indexOf("private static void uploadPbrTextureLutIfNeeded");
+        int closeStart = stage.indexOf("static void close()", textureStart);
+        assertTrue(surfaceStart >= 0 && textureStart > surfaceStart && closeStart > textureStart);
+        String surfaceUpload = stage.substring(surfaceStart, textureStart);
+        String textureUpload = stage.substring(textureStart, closeStart);
+        assertTrue(surfaceUpload.contains("ByteBuffer words = ByteBuffer.allocate"));
+        assertTrue(surfaceUpload.contains("? words.getInt(pixel * Integer.BYTES)"));
+        assertFalse(surfaceUpload.contains("? pbrTextureWords.getInt(pixel * Integer.BYTES)"));
+        assertTrue(textureUpload.contains("GpuPbrTextureScene.pack(pbrTextureWords"));
+        assertTrue(textureUpload.contains("? pbrTextureWords.getInt(pixel * Integer.BYTES)"));
+    }
 }
