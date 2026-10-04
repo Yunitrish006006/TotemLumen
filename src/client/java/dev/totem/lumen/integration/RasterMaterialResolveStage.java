@@ -16,12 +16,15 @@ import com.mojang.renderpearl.api.textures.GpuSampler;
 import com.mojang.renderpearl.api.textures.GpuTexture;
 import com.mojang.renderpearl.api.textures.GpuTextureView;
 import dev.totem.lumen.TotemLumenClient;
+import dev.totem.lumen.geometry.BlockSurfaceSetRegistry;
 import dev.totem.lumen.gpu.GpuMaterialPacker;
+import dev.totem.lumen.gpu.GpuPbrSurfaceSetScene;
 import dev.totem.lumen.material.MaterialDefinition;
 import dev.totem.lumen.render.RasterLightingVolume;
 import dev.totem.lumen.render.RasterLightingWindow;
 import dev.totem.lumen.render.RasterMaterialRegistry;
 import dev.totem.lumen.render.RasterMaterialGpuLayout;
+import dev.totem.lumen.render.RasterRawWordTextureLayout;
 import net.minecraft.client.renderer.BindGroupLayouts;
 import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.resources.Identifier;
@@ -44,6 +47,8 @@ final class RasterMaterialResolveStage {
     private static final boolean ENABLED = Boolean.getBoolean(PROPERTY);
     private static final int WORDS_PER_MATERIAL = RasterMaterialGpuLayout.WORDS_PER_MATERIAL;
     private static final int LUT_WIDTH = RasterMaterialGpuLayout.LUT_WIDTH;
+    private static final int SURFACE_LUT_ROWS =
+            RasterRawWordTextureLayout.rowsForWords(GpuPbrSurfaceSetScene.MAX_STORAGE_WORDS);
 
     private static final RenderPipeline PIPELINE = RenderPipeline.builder()
             .withLocation(Identifier.fromNamespaceAndPath("totem-lumen", "pipeline/raster_material_resolve"))
@@ -61,15 +66,16 @@ final class RasterMaterialResolveStage {
             .build();
 
     private static GpuDevice device;
-    private static GpuTexture materialAtlas, visibleIds, materialLut;
-    private static GpuTextureView materialAtlasView, visibleIdsView, materialLutView;
-    private static NativeImage materialTile, lutPixels;
+    private static GpuTexture materialAtlas, visibleIds, materialLut, surfaceSetLut;
+    private static GpuTextureView materialAtlasView, visibleIdsView, materialLutView, surfaceSetLutView;
+    private static NativeImage materialTile, lutPixels, surfaceSetPixels;
     private static final RasterLightingVolume.Section[] uploaded =
             new RasterLightingVolume.Section[RasterLightingVolume.SLOTS];
     private static long epoch = -1;
     private static long uploadedMaterialRevision = Long.MIN_VALUE;
+    private static long uploadedSurfaceRevision = Long.MIN_VALUE;
     private static int lutRows, uploadedMaterialCount;
-    private static long frames, atlasUploadBytes, lutUploadBytes;
+    private static long frames, atlasUploadBytes, lutUploadBytes, surfaceLutUploadBytes;
     private static boolean logged, failed;
 
     private RasterMaterialResolveStage() { }
@@ -97,8 +103,10 @@ final class RasterMaterialResolveStage {
     ) {
         if (!enabled()) return null;
         RasterMaterialRegistry.Snapshot materials = RasterLightingScene.materialSnapshot();
+        BlockSurfaceSetRegistry.Snapshot surfaces = BlockSurfaceSetRegistry.snapshot();
         ensureTargets(gpu, surface.width(), surface.height(), requiredLutRows(materials));
         uploadLutIfNeeded(encoder, materials);
+        uploadSurfaceLutIfNeeded(encoder, surfaces);
 
         if (epoch != volume.epoch) {
             java.util.Arrays.fill(uploaded, null);
@@ -162,8 +170,10 @@ final class RasterMaterialResolveStage {
                 surface.frameSerial(),
                 materials.revision(),
                 materials.entries().size(),
+                surfaces.revision(),
                 visibleIdsView,
-                materialLutView
+                materialLutView,
+                surfaceSetLutView
         );
     }
 
@@ -195,6 +205,17 @@ final class RasterMaterialResolveStage {
                     1, 1);
             materialAtlasView = gpu.createTextureView(materialAtlas);
             materialTile = new NativeImage(16, 256, false);
+            surfaceSetLut = gpu.createTexture(
+                    "Raster P18 surface-set LUT",
+                    GpuTexture.USAGE_COPY_DST | GpuTexture.USAGE_TEXTURE_BINDING,
+                    GpuFormat.RGBA8_UNORM,
+                    RasterRawWordTextureLayout.WIDTH,
+                    SURFACE_LUT_ROWS,
+                    1, 1);
+            surfaceSetLutView = gpu.createTextureView(surfaceSetLut);
+            surfaceSetPixels = new NativeImage(
+                    RasterRawWordTextureLayout.WIDTH, SURFACE_LUT_ROWS, false);
+            uploadedSurfaceRevision = Long.MIN_VALUE;
         }
 
         if (surfaceChanged) {
@@ -210,7 +231,9 @@ final class RasterMaterialResolveStage {
 
         if (lutChanged) {
             if (materialLutView != null) materialLutView.close();
+        if (surfaceSetLutView != null) surfaceSetLutView.close();
             if (materialLut != null) materialLut.close();
+        if (surfaceSetLut != null) surfaceSetLut.close();
             if (lutPixels != null) lutPixels.close();
             lutRows = requiredRows;
             materialLut = gpu.createTexture(
@@ -221,6 +244,7 @@ final class RasterMaterialResolveStage {
             materialLutView = gpu.createTextureView(materialLut);
             lutPixels = new NativeImage(LUT_WIDTH, lutRows, false);
             uploadedMaterialRevision = Long.MIN_VALUE;
+        uploadedSurfaceRevision = Long.MIN_VALUE;
         }
     }
 
@@ -264,6 +288,30 @@ final class RasterMaterialResolveStage {
         lutUploadBytes += (long) LUT_WIDTH * lutRows * 4;
     }
 
+    private static void uploadSurfaceLutIfNeeded(
+            CommandEncoder encoder,
+            BlockSurfaceSetRegistry.Snapshot snapshot
+    ) {
+        if (uploadedSurfaceRevision == snapshot.revision()) return;
+
+        ByteBuffer words = ByteBuffer.allocate(Math.toIntExact(GpuPbrSurfaceSetScene.MAX_STORAGE_BYTES))
+                .order(ByteOrder.LITTLE_ENDIAN);
+        GpuPbrSurfaceSetScene.pack(words, 0, snapshot);
+        int totalPixels = RasterRawWordTextureLayout.WIDTH * SURFACE_LUT_ROWS;
+        for (int pixel = 0; pixel < totalPixels; pixel++) {
+            int raw = pixel < GpuPbrSurfaceSetScene.MAX_STORAGE_WORDS
+                    ? words.getInt(pixel * Integer.BYTES)
+                    : 0;
+            surfaceSetPixels.setPixelABGR(
+                    RasterRawWordTextureLayout.x(pixel),
+                    RasterRawWordTextureLayout.y(pixel),
+                    raw);
+        }
+        encoder.writeToTexture(surfaceSetLut, surfaceSetPixels, 0, 0, 0, 0);
+        uploadedSurfaceRevision = snapshot.revision();
+        surfaceLutUploadBytes += (long) totalPixels * 4;
+    }
+
     static void close() {
         if (materialAtlasView != null) materialAtlasView.close();
         if (visibleIdsView != null) visibleIdsView.close();
@@ -273,9 +321,10 @@ final class RasterMaterialResolveStage {
         if (materialLut != null) materialLut.close();
         if (materialTile != null) materialTile.close();
         if (lutPixels != null) lutPixels.close();
-        materialAtlasView = visibleIdsView = materialLutView = null;
-        materialAtlas = visibleIds = materialLut = null;
-        materialTile = lutPixels = null;
+        if (surfaceSetPixels != null) surfaceSetPixels.close();
+        materialAtlasView = visibleIdsView = materialLutView = surfaceSetLutView = null;
+        materialAtlas = visibleIds = materialLut = surfaceSetLut = null;
+        materialTile = lutPixels = surfaceSetPixels = null;
         device = null;
         java.util.Arrays.fill(uploaded, null);
         epoch = -1;
@@ -283,10 +332,10 @@ final class RasterMaterialResolveStage {
         lutRows = uploadedMaterialCount = 0;
         if (logged) {
             TotemLumenClient.LOGGER.info(
-                    "Raster MATERIAL_RESOLVE resources retired: frames={}, atlasUploadBytes={}, lutUploadBytes={}",
-                    frames, atlasUploadBytes, lutUploadBytes);
+                    "Raster MATERIAL_RESOLVE resources retired: frames={}, atlasUploadBytes={}, lutUploadBytes={}, surfaceLutUploadBytes={}",
+                    frames, atlasUploadBytes, lutUploadBytes, surfaceLutUploadBytes);
         }
-        frames = atlasUploadBytes = lutUploadBytes = 0;
+        frames = atlasUploadBytes = lutUploadBytes = surfaceLutUploadBytes = 0;
         logged = false;
     }
 }
