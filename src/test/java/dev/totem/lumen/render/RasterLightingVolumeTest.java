@@ -58,7 +58,7 @@ class RasterLightingVolumeTest {
     }
 
     @Test void shadersHaveSecondaryRayBudgetAndKeepFarGeometry() throws Exception {
-        String lighting = Files.readString(Path.of("src/client/resources/assets/totem-lumen/shaders/core/raster_ray.fsh"));
+        String lighting = Files.readString(Path.of("src/client/resources/assets/totem-lumen/shaders/core/raster_indirect_gi.fsh"));
         String composite = Files.readString(Path.of("src/client/resources/assets/totem-lumen/shaders/core/raster_ray_composite.fsh"));
         assertTrue(lighting.contains("i < 64"));
         assertTrue(lighting.contains("i < 3"));
