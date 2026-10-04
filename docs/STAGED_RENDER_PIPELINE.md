@@ -52,36 +52,46 @@ Implemented first:
 - `LumenStageResource` names stable logical resources;
 - `StagedRenderPlan` validates producer/consumer ordering, duplicate stage identity and exclusive
   logical-output ownership;
-- the current Raster material-lighting preview is represented as
+- the current owned Raster path is represented as
   `SURFACE_CAPTURE -> DIRECT_LIGHT -> COMPOSITE`;
 - `RasterSurfaceFrame` is the first concrete stage ABI. It carries the producing device, extent,
-  frame serial, base-colour view and depth view. It is borrowed for one matching frame only.
-- Raster lighting consumes this frame token rather than depending on a pair of capture-owned views
-  with no explicit generation identity.
+  frame serial, color semantic, base-colour view and depth view.
+- Raster lighting consumes this frame token rather than reaching back into Minecraft's target or
+  capture implementation.
+- color semantics are explicit: the first safe producer publishes `NATIVE_LIT_COLOR`; only a
+  future material producer may publish `UNLIT_MATERIAL_COLOR` and enable independent-lighting
+  composition.
 
-The Raster surface currently contains opaque/cutout base colour with baked vertex shade plus depth.
-It is not yet the final unlit material G-buffer and does not claim MATERIAL_RESOLVE completion.
+The first owned Raster surface is intentionally conservative: completed native scene color is copied
+to a Totem-owned texture and native depth is sampled into a Totem-owned R32_FLOAT texture. It is not
+the final unlit material G-buffer and does not claim MATERIAL_RESOLVE completion.
 
 ## Phase 2 — owned raster surface capture
 
-Current blocking defect: the experimental material capture replays Minecraft chunk draws after the
-native world pass and borrows native draw buffers. A resize/lifecycle run reproduced a closed
-slot-0 vertex buffer followed by an unbalanced render-pass failure.
+Initial implementation is now in the branch.
 
-Do not add more lighting stages on top of this borrowed-draw implementation. Replace replay with an
-owned surface-capture output created at a lifetime-safe point. Acceptance requires resize,
-profile-switch, disconnect/rejoin and normal shutdown without borrowed-buffer access or open render
-passes after failure.
+The unsafe post-world material replay has been removed from the active mixin chain. The old path
+retained `ChunkSectionsToRender`/atlas/projection state and replayed native draw buffers after
+Minecraft's pass closed; a resize run reproduced a closed slot-0 vertex buffer and render-pass
+cleanup failure. Those replay classes/shaders are removed rather than left behind an opt-in flag.
 
-The owned output should initially provide:
+The replacement `RasterSurfaceCapture` runs after native world drawing and owns every resource it
+publishes:
 
-- depth;
-- geometric/shading normal;
-- stable material identity;
-- unlit/tinted base colour;
-- surface flags needed for cutout/opaque classification.
+- completed native scene color is copied into a Totem-owned texture;
+- native depth is sampled once into a Totem-owned `R32_FLOAT` texture;
+- downstream lighting receives only `RasterSurfaceFrame`;
+- resize/profile/world lifecycle retirement is owned by the capture stage;
+- no chunk draw list, vertex/index buffer, lightmap, atlas or projection slice is retained.
 
-Minecraft visibility and distant terrain remain authoritative for the raster-primary path.
+This closes the borrowed-buffer architectural defect in code, but native lifecycle acceptance is
+still required. It also deliberately does **not** solve independent material lighting: native color
+is already visually lit, so the frame is tagged `NATIVE_LIT_COLOR` and cannot activate the
+independent direct-RGB path.
+
+The next surface/material increment must add owned normal/material identity/unlit base data without
+reintroducing native draw-buffer replay. Minecraft visibility and distant terrain remain
+authoritative for the raster-primary path.
 
 ## Phase 3 — material resolve
 
