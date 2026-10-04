@@ -105,11 +105,24 @@ public final class RasterMaterialVerifier {
         }
         compile(directPath, directSource.replace(directive, dynamicTransforms));
 
+        String directCompositePath = "assets/totem-lumen/shaders/core/raster_direct_composite.fsh";
+        String directCompositeSource = resource(directCompositePath);
+        if (!directCompositeSource.contains(directive)
+                || !directCompositeSource.contains("uniform sampler2D IndirectSampler")
+                || !directCompositeSource.contains("uniform sampler2D NativeSceneSampler")
+                || !directCompositeSource.contains("uniform sampler2D UnlitAlbedoSampler")
+                || !directCompositeSource.contains("uniform sampler2D DirectSampler")
+                || !directCompositeSource.contains("albedo.a > 0.0 && direct.a > 0.0")
+                || !directCompositeSource.contains("texture(NativeSceneSampler, texCoord).rgb * indirect.rgb")) {
+            throw new IllegalStateException("DIRECT_LIGHT composite shader contract drift");
+        }
+        compile(directCompositePath, directCompositeSource.replace(directive, dynamicTransforms));
+
         if (!RasterSurfaceFrame.ColorSemantic.NATIVE_LIT_COLOR.name().equals("NATIVE_LIT_COLOR")) {
             throw new IllegalStateException("Raster surface color semantic drift");
         }
 
-        System.out.println("Raster staged verification PASS: owned surface + material identity/base-property/covered-unlit-cube + direct-light diagnostic shaders compile; NOT runtime/visual acceptance");
+        System.out.println("Raster staged verification PASS: owned surface + material identity/base-property/covered-unlit-cube + direct-light producer/composite diagnostic shaders compile; NOT runtime/visual acceptance");
     }
 
     private static String resource(String path) throws IOException {
