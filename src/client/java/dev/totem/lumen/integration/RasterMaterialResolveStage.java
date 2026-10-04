@@ -100,6 +100,7 @@ final class RasterMaterialResolveStage {
     private static GpuTexture materialAtlas, visibleIds, baseProperties, unlitAlbedo, materialLut, surfaceSetLut, pbrTextureLut;
     private static GpuTextureView materialAtlasView, visibleIdsView, basePropertiesView, unlitAlbedoView, materialLutView, surfaceSetLutView, pbrTextureLutView;
     private static NativeImage materialTile, lutPixels, surfaceSetPixels, pbrTexturePixels;
+    private static ByteBuffer pbrTextureWords;
     private static final RasterLightingVolume.Section[] uploaded =
             new RasterLightingVolume.Section[RasterLightingVolume.SLOTS];
     private static long epoch = -1;
@@ -379,7 +380,7 @@ final class RasterMaterialResolveStage {
         int totalPixels = RasterRawWordTextureLayout.WIDTH * SURFACE_LUT_ROWS;
         for (int pixel = 0; pixel < totalPixels; pixel++) {
             int raw = pixel < GpuPbrSurfaceSetScene.MAX_STORAGE_WORDS
-                    ? words.getInt(pixel * Integer.BYTES)
+                    ? pbrTextureWords.getInt(pixel * Integer.BYTES)
                     : 0;
             surfaceSetPixels.setPixelABGR(
                     RasterRawWordTextureLayout.x(pixel),
@@ -396,11 +397,13 @@ final class RasterMaterialResolveStage {
         long revision = LabPbrTextureRegistry.revision();
         if (uploadedTextureRevision == revision && pbrTextureLut != null) return;
 
-        ByteBuffer words = ByteBuffer
-                .allocate(Math.toIntExact(GpuPbrTextureScene.MAX_STORAGE_BYTES))
-                .order(ByteOrder.LITTLE_ENDIAN);
+        if (pbrTextureWords == null) {
+            pbrTextureWords = ByteBuffer
+                    .allocate(Math.toIntExact(GpuPbrTextureScene.MAX_STORAGE_BYTES))
+                    .order(ByteOrder.LITTLE_ENDIAN);
+        }
         GpuPbrTextureScene.PackResult packed =
-                GpuPbrTextureScene.pack(words, 0, LabPbrTextureRegistry.snapshot());
+                GpuPbrTextureScene.pack(pbrTextureWords, 0, LabPbrTextureRegistry.snapshot());
         int requiredRows = RasterRawWordTextureLayout.rowsForWords(packed.usedWords());
 
         if (pbrTextureLut == null || textureRows != requiredRows) {
@@ -453,6 +456,7 @@ final class RasterMaterialResolveStage {
         materialAtlasView = visibleIdsView = basePropertiesView = unlitAlbedoView = materialLutView = surfaceSetLutView = pbrTextureLutView = null;
         materialAtlas = visibleIds = baseProperties = unlitAlbedo = materialLut = surfaceSetLut = pbrTextureLut = null;
         materialTile = lutPixels = surfaceSetPixels = pbrTexturePixels = null;
+        pbrTextureWords = null;
         device = null;
         java.util.Arrays.fill(uploaded, null);
         epoch = -1;
