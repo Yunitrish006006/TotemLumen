@@ -39,7 +39,7 @@ public final class RasterSurfaceCapture {
                     .build())
             .withPrimitiveTopology(PrimitiveTopology.TRIANGLES)
             .withColorTargetState(new ColorTargetState(
-                    Optional.empty(), GpuFormat.RGBA16_FLOAT, ColorTargetState.WRITE_ALL))
+                    Optional.empty(), GpuFormat.R32_FLOAT, ColorTargetState.WRITE_ALL))
             .build();
 
     private static GpuDevice device;
@@ -125,7 +125,7 @@ public final class RasterSurfaceCapture {
         depth = gpu.createTexture(
                 "Totem raster owned surface depth",
                 GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_TEXTURE_BINDING,
-                GpuFormat.RGBA16_FLOAT,
+                GpuFormat.R32_FLOAT,
                 width, height, 1, 1);
         colorView = gpu.createTextureView(color);
         depthView = gpu.createTextureView(depth);
