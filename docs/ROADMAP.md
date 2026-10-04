@@ -56,16 +56,16 @@ Historical Alpha 59 validated/runtime baseline (Minecraft 26.2):
 
 Current high-priority remaining work:
 
-1. Migrate the renderer toward the staged pipeline in [STAGED_RENDER_PIPELINE.md](STAGED_RENDER_PIPELINE.md): explicit Surface -> Material -> Direct/GI/Reflection -> Temporal -> Denoise -> Composite ownership, while keeping the current full compute renderer as the correctness/reference baseline.
-2. Replace the Raster material experiment's borrowed native draw replay with an owned, lifetime-safe surface-capture output before extending the staged lighting path.
-3. Continue compiler-complexity reduction (including the shared-filtered-trace direction) and obtain matched primary-surface-reuse A/B timings without adding new work to the full mega shader.
-4. Finish P17 coverage for dropped items, vehicles, projectiles, leashes/flames, display/text/custom renderers, armor/equipment, alpha silhouettes and first-person hand/held items.
-5. Complete P14D specialized block-entity command families, P14E fluid runtime validation and P18D entity/block-entity material fidelity as staged-path coverage gates.
-6. Fix P17 temporal-history invalidation so moving entities do not invalidate the entire frame history globally.
-5. Continue GPU performance work: avoid repeated primary-hit/material resolution, introduce a reusable primary-hit/G-buffer path, reduce P16 full-frame primary retrace, and split the O0 mega-shader into smaller optimizable passes where measurements justify it.
-6. Run GL4 gameplay-light profiling/scale validation, then GL5 hardening.
-7. After the compute baseline is stable, evaluate P19+ hardware RT, ReSTIR/adaptive sampling and dynamic-resolution/upscaling work.
-
+1. Runtime-validate the staged owned-surface path in [STAGED_RENDER_PIPELINE.md](STAGED_RENDER_PIPELINE.md): resize, profile switch, disconnect/rejoin, world exit/re-entry and shutdown on native Vulkan, then Apple Silicon/MoltenVK.
+2. Add a true MATERIAL_RESOLVE boundary with stable material identity and unlit/tinted base data; SURFACE_CAPTURE already owns depth and approximate normals.
+3. Add DIRECT_LIGHT as an independent consumer only after unlit material input exists; keep INDIRECT_GI and COMPOSITE independent.
+4. Continue compiler-complexity reduction (including the shared-filtered-trace direction) and obtain matched primary-surface-reuse A/B timings without adding new work to the full mega shader.
+5. Finish P17 coverage for dropped items, vehicles, projectiles, leashes/flames, display/text/custom renderers, armor/equipment, alpha silhouettes and first-person hand/held items.
+6. Complete P14D specialized block-entity command families, P14E fluid runtime validation and P18D entity/block-entity material fidelity as staged-path coverage gates.
+7. Fix P17 temporal-history invalidation so moving entities do not invalidate the entire frame history globally.
+8. Continue GPU performance work by migrating reusable primary-surface/material data into staged passes and reducing remaining full-frame retrace where measurements justify it.
+9. Run GL4 gameplay-light profiling/scale validation, then GL5 hardening.
+10. After the compute baseline is stable, evaluate P19+ hardware RT, ReSTIR/adaptive sampling and dynamic-resolution/upscaling work.
 
 ## P0 - Vulkan-only bootstrap
 Status: **Apple Silicon runtime verified on Apple M4 / MoltenVK 1.4.2**; native Windows/Linux Vulkan validation still pending.
