@@ -17,7 +17,7 @@ class RasterMaterialResolveContractTest {
         String stage = read("src/client/java/dev/totem/lumen/integration/RasterMaterialResolveStage.java");
         assertTrue(stage.contains("GpuMaterialPacker.pack(definitions)"));
         assertTrue(stage.contains("ByteOrder.LITTLE_ENDIAN"));
-        assertTrue(stage.contains("RasterMaterialGpuLayout.materialIdTexel(id)"));
+        assertTrue(stage.contains("RasterMaterialGpuLayout.surfaceIdentityTexel(materialId, surfaceSetId)"));
         assertTrue(stage.contains("lutPixels.setPixelABGR(RasterMaterialGpuLayout.lutX(id, word), y, raw)"));
         assertFalse(stage.contains("Math.round(material.roughness() * 255"));
         assertFalse(stage.contains("Math.round(material.metallic() * 255"));
@@ -29,9 +29,11 @@ class RasterMaterialResolveContractTest {
         String shader = read("src/client/resources/assets/totem-lumen/shaders/core/raster_material_resolve.fsh");
         assertTrue(stage.contains("RasterLightingScene.materialSnapshot()"));
         assertTrue(stage.contains("section.materialId(i)"));
+        assertTrue(stage.contains("section.surfaceSetId(i)"));
         assertTrue(stage.contains("surface.depth()"));
         assertTrue(stage.contains("surface.normal()"));
         assertTrue(shader.contains("uniform sampler2D MaterialIdAtlas"));
+        assertTrue(shader.contains("vec4 surfaceIdentity(ivec3 cell)"));
         assertTrue(shader.contains("p + ModelOffset - normal * 0.08"));
         assertFalse(stage.contains("ChunkSectionsToRender"));
         assertFalse(stage.contains("getBlockState"));
