@@ -20,9 +20,6 @@ import org.joml.Vector4f;
  * frame, creates shared frame uniforms, records the stage sequence and owns fail-closed readiness.</p>
  */
 public final class RasterLightingRenderer {
-    private static final StagedRenderPlan STAGE_PLAN = RasterMaterialResolveStage.enabled()
-            ? StagedRenderPlan.rasterMaterialMetadataPath()
-            : StagedRenderPlan.rasterOwnedSurfacePath();
     private static boolean failed, ready, logged;
 
     private RasterLightingRenderer() { }
@@ -35,9 +32,21 @@ public final class RasterLightingRenderer {
         return failed;
     }
 
-    /** DIRECT_LIGHT is intentionally absent until MATERIAL_RESOLVE can publish unlit material. */
+    /**
+     * DIRECT_LIGHT may run as an isolated diagnostic producer, but COMPOSITE does not consume it
+     * yet. Therefore the renderer still cannot replace native lighting.
+     */
     public static boolean independentLightingActive() {
         return false;
+    }
+
+    private static StagedRenderPlan stagePlan() {
+        if (RasterDirectLightStage.enabled()) {
+            return StagedRenderPlan.rasterDirectLightDiagnosticPath();
+        }
+        return RasterMaterialResolveStage.enabled()
+                ? StagedRenderPlan.rasterMaterialMetadataPath()
+                : StagedRenderPlan.rasterOwnedSurfacePath();
     }
 
     public static void tickLifecycle(Minecraft client) {
@@ -99,6 +108,26 @@ public final class RasterLightingRenderer {
                     RasterMaterialResolveStage.fail(materialFailure);
                 }
             }
+
+            // Diagnostic producer only: output is intentionally not consumed by COMPOSITE yet.
+            if (material != null && RasterDirectLightStage.enabled()) {
+                try {
+                    RasterDirectLightStage.record(
+                            encoder,
+                            gpu,
+                            surface,
+                            material,
+                            voxelScene,
+                            volume,
+                            uniforms,
+                            nearest,
+                            offset.x,
+                            offset.y,
+                            offset.z);
+                } catch (RuntimeException directFailure) {
+                    RasterDirectLightStage.fail(directFailure);
+                }
+            }
             RasterLightingFrame lighting = RasterIndirectGiStage.record(
                     encoder, gpu, surface, voxelScene, uniforms, nearest);
             if (lighting == null) {
@@ -121,7 +150,7 @@ public final class RasterLightingRenderer {
                 logged = true;
                 TotemLumenClient.LOGGER.info(
                         "RASTER staged renderer ACTIVE: stages={}, surfaceSemantic={}, primaryRays=0",
-                        STAGE_PLAN.stages(),
+                        stagePlan().stages(),
                         surface.colorSemantic()
                 );
             }
@@ -136,6 +165,7 @@ public final class RasterLightingRenderer {
 
     public static void close() {
         ready = false;
+        RasterDirectLightStage.close();
         RasterMaterialResolveStage.close();
         RasterIndirectGiStage.close();
         RasterVoxelSceneGpu.close();
