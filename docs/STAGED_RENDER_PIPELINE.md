@@ -129,26 +129,33 @@ their explicit stage ABI changes.
 
 ## Phase 4 — split lighting
 
-The first split is now implemented for the active safe Raster path:
+The active safe Raster path now uses an explicit shared ray-scene boundary:
 
-- `RasterIndirectGiStage` owns the voxel atlas, `raster_indirect_gi` pipeline and
-  reduced-resolution radiance target; it consumes the captured normal field rather than reconstructing
-  primary normals itself;
+- `RasterVoxelSceneGpu` is the sole GPU owner of the voxel atlas and budgeted section uploads;
+- `RasterVoxelSceneFrame` is the frame-local VOXEL_SCENE input shared by lighting stages;
+- `RasterIndirectGiStage` owns only the `raster_indirect_gi` pipeline and reduced-resolution
+  radiance target. It consumes the captured normal field plus the shared voxel-scene frame;
 - `RasterLightingFrame` is the frame-local INDIRECT_GI -> COMPOSITE ABI;
 - `RasterCompositeStage` owns the presentation pipeline and is the only staged Raster pass that
-  writes the main world color target;
-- the old combined `raster_ray` shader has been removed. Its dormant direct-RGB/material branch,
-  `LightSampler`, point-light visibility loop and emitter upload path are not part of the active
-  shader compilation unit.
+  writes the main world color target.
 
-Remaining independent producers:
+An independent `RasterDirectLightStage` is also implemented behind
+`-Dtotem.lumen.rasterDirectLightStage=true` together with MATERIAL_RESOLVE. It owns its full-resolution
+direct-radiance target and bounded 32-emitter payload, consumes material coverage plus the shared
+voxel scene, and traces at most four selected shadow rays per covered pixel. Its
+`RasterDirectLightFrame` output is deliberately **not consumed by COMPOSITE yet**, so enabling the
+diagnostic cannot replace native lighting or change the accepted safe composition path.
 
-1. DIRECT_LIGHT: sun/moon/sky visibility and bounded RGB emitters, after MATERIAL_RESOLVE can provide
-   unlit material input.
-2. REFLECTION: optional specular/reflection transport.
+Remaining work:
 
-All consume surface/material records and the shared ray-scene backend. Primary camera visibility must
-not be retraced by these stages. Secondary visibility may call the shared scene tracer.
+1. promote DIRECT_LIGHT from isolated producer to coverage-aware composite input only after native
+   visual/lifecycle acceptance;
+2. extend direct lighting beyond bounded RGB emitters to sun/moon/sky;
+3. add REFLECTION as an optional specular transport producer.
+
+All lighting stages consume explicit surface/material/scene records. Primary camera visibility must
+not be retraced by these stages. Secondary visibility uses the shared scene backend instead of
+duplicating GPU atlas ownership.
 
 The existing `shared-filtered-trace` result remains a compiler-complexity reference: reducing one
 large static trace call site materially reduced native reflection cold-pipeline creation despite only
