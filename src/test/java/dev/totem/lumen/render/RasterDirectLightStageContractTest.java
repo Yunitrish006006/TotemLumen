@@ -26,17 +26,20 @@ class RasterDirectLightStageContractTest {
     }
 
     @Test
-    void directLightIsDiagnosticAndCannotReplaceNativeLightingYet() throws Exception {
+    void directLightingRemainsPartialEvenWithOptInCoverageComposite() throws Exception {
         String stage = read("src/client/java/dev/totem/lumen/integration/RasterDirectLightStage.java");
         String renderer = read("src/client/java/dev/totem/lumen/integration/RasterLightingRenderer.java");
-        String composite = read("src/client/java/dev/totem/lumen/integration/RasterCompositeStage.java");
+        String safeComposite = read("src/client/java/dev/totem/lumen/integration/RasterCompositeStage.java");
+        String directComposite = read("src/client/java/dev/totem/lumen/integration/RasterDirectCompositeStage.java");
 
         assertTrue(stage.contains("totem.lumen.rasterDirectLightStage"));
-        assertTrue(stage.contains("compositeConsumer=false"));
         assertTrue(renderer.contains("public static boolean independentLightingActive()"));
         assertTrue(renderer.contains("return false;"));
         assertTrue(renderer.contains("RasterDirectLightStage.record("));
-        assertFalse(composite.contains("RasterDirectLightFrame"));
+        assertTrue(renderer.contains("RasterDirectCompositeStage.record("));
+        assertTrue(directComposite.contains("totem.lumen.rasterDirectLightComposite"));
+        assertTrue(directComposite.contains("coverageOnly=true"));
+        assertFalse(safeComposite.contains("RasterDirectLightFrame"));
     }
 
     @Test
@@ -65,5 +68,14 @@ class RasterDirectLightStageContractTest {
         assertTrue(shader.contains("for (int i = 0; i < 32; i++)"));
         assertTrue(shader.contains("for (int j = 0; j < 4; j++)"));
         assertTrue(shader.contains("fragColor = vec4(direct, coverage)"));
+    }
+
+    @Test
+    void directCompositePreservesFallbackOutsideExplicitCoverage() throws Exception {
+        String shader = read("src/client/resources/assets/totem-lumen/shaders/core/raster_direct_composite.fsh");
+        assertTrue(shader.contains("distance < TextureMat[0].x && albedo.a > 0.0 && direct.a > 0.0"));
+        assertTrue(shader.contains("texture(NativeSceneSampler, texCoord).rgb * indirect.rgb"));
+        assertTrue(shader.contains("if (!nearIndirect) discard;"));
+        assertTrue(shader.contains("vec3 ambient = vec3(0.08) * giCorrection"));
     }
 }
