@@ -123,10 +123,15 @@ outputs without replaying Minecraft draw buffers.
 - The large P18 texture scene is uploaded only when the P18 texture registry revision changes.
   Material-LUT resizing, surface-set LUT lifetime and P18 texture LUT lifetime are independent.
 
-This is deliberately not DIRECT_LIGHT activation. Generic meshes, fluids, entities and animated
-textures still lack complete unlit surface coverage, and P18 sampled normal/specular/AO data has not
-yet been promoted to resolved per-pixel outputs. The active safe renderer remains
-`SURFACE_CAPTURE -> INDIRECT_GI -> COMPOSITE`; MATERIAL_RESOLVE is an opt-in development producer.
+Generic meshes, fluids, entities and animated textures still lack complete unlit surface coverage,
+and P18 sampled normal/specular/AO data has not yet been promoted to resolved per-pixel outputs.
+
+An isolated DIRECT_LIGHT diagnostic producer now exists behind
+`-Dtotem.lumen.rasterDirectLightStage=true` together with MATERIAL_RESOLVE. It reuses the shared
+VOXEL_SCENE GPU atlas, selects at most 32 RGB emitters and traces at most four bounded visibility
+rays for material-covered pixels. Its output is not read by COMPOSITE yet. Therefore the active
+accepted renderer remains `SURFACE_CAPTURE -> INDIRECT_GI -> COMPOSITE`, and unsupported pixels
+continue to use native-lit fallback.
 
 ### Stage 2d candidate: stable publication and light payload order
 
