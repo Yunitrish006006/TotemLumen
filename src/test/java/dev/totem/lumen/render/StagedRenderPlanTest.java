@@ -66,6 +66,20 @@ class StagedRenderPlanTest {
     }
 
     @Test
+    void directLightCompositePathConsumesDirectAndMaterialOutputs() {
+        var plan = StagedRenderPlan.rasterDirectLightCompositePath();
+        var composite = plan.passes().stream()
+                .filter(pass -> pass.stage() == LumenRenderStage.COMPOSITE)
+                .findFirst().orElseThrow();
+        assertEquals(Set.of(
+                LumenStageResource.SURFACE,
+                LumenStageResource.MATERIAL,
+                LumenStageResource.DIRECT_RADIANCE,
+                LumenStageResource.INDIRECT_RADIANCE), composite.reads());
+        assertEquals(Set.of(LumenStageResource.FINAL_COLOR), composite.writes());
+    }
+
+    @Test
     void rejectsReadsBeforeProducer() {
         var pass = new StagedRenderPlan.Pass(
                 LumenRenderStage.INDIRECT_GI,
