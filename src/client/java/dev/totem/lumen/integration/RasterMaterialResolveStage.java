@@ -116,9 +116,12 @@ final class RasterMaterialResolveStage {
                 continue;
             }
             for (int i = 0; i < 4096; i++) {
-                int id = section == null ? 0 : section.materialId(i);
+                int materialId = section == null ? 0 : section.materialId(i);
+                int surfaceSetId = section == null ? 0 : section.surfaceSetId(i);
                 materialTile.setPixelABGR(
-                        i & 15, i >>> 4, RasterMaterialGpuLayout.materialIdTexel(id));
+                        i & 15,
+                        i >>> 4,
+                        RasterMaterialGpuLayout.surfaceIdentityTexel(materialId, surfaceSetId));
             }
             encoder.writeToTexture(
                     materialAtlas,
@@ -147,7 +150,7 @@ final class RasterMaterialResolveStage {
         if (!logged) {
             logged = true;
             TotemLumenClient.LOGGER.info(
-                    "RASTER MATERIAL_RESOLVE ACTIVE: materials={}, revision={}, idBits=16, lutWordEncoding=RGBA8_RAW32, unlitAlbedo=false",
+                    "RASTER MATERIAL_RESOLVE ACTIVE: materials={}, revision={}, materialIdBits=16, surfaceSetIdBits=16, lutWordEncoding=RGBA8_RAW32, unlitAlbedo=false",
                     materials.entries().size(),
                     materials.revision()
             );
