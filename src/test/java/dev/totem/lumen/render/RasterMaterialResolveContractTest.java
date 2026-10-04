@@ -73,4 +73,22 @@ class RasterMaterialResolveContractTest {
         assertFalse(resizeBody.contains("surfaceSetLut.close()"));
         assertTrue(stage.contains("uploadedSurfaceRevision = Long.MIN_VALUE;"));
     }
+
+    @Test
+    void materialResolvePublishesDecodedBasePropertyPlane() throws Exception {
+        String stage = read("src/client/java/dev/totem/lumen/integration/RasterMaterialResolveStage.java");
+        String frame = read("src/client/java/dev/totem/lumen/integration/RasterMaterialFrame.java");
+        String shader = read("src/client/resources/assets/totem-lumen/shaders/core/raster_material_properties.fsh");
+        assertTrue(stage.contains("raster_material_properties"));
+        assertTrue(stage.contains("Raster resolved base material properties"));
+        assertTrue(stage.contains("GpuFormat.RGBA16_FLOAT"));
+        assertTrue(stage.contains("basePropertiesView"));
+        assertTrue(frame.contains("GpuTextureView baseProperties"));
+        assertTrue(shader.contains("rasterMaterialFloat(MaterialLut, materialId, 2u)"));
+        assertTrue(shader.contains("rasterMaterialFloat(MaterialLut, materialId, 3u)"));
+        assertTrue(shader.contains("rasterMaterialFloat(MaterialLut, materialId, 4u)"));
+        assertTrue(shader.contains("rasterMaterialWord(MaterialLut, materialId, 1u)"));
+        assertTrue(shader.contains("fragColor = vec4(roughness, metallic, opacity, emission)"));
+        assertTrue(shader.contains("unlit albedo"));
+    }
 }
