@@ -49,7 +49,7 @@ public abstract class LevelRendererTakeoverMixin {
             boolean shouldRenderSky, boolean shouldRenderWeather, CallbackInfo ci
     ) {
         if (HybridTerrainPolicy.ENABLED) P5StableLookupRenderer.presentHybridTerrain(cameraState);
-        var surface = RasterSurfaceCapture.capture();
+        var surface = RasterSurfaceCapture.capture(cameraState);
         RasterLightingRenderer.render(cameraState, surface);
     }
 }
