@@ -33,14 +33,17 @@ public final class RasterLightingRenderer {
     }
 
     /**
-     * DIRECT_LIGHT may run as an isolated diagnostic producer, but COMPOSITE does not consume it
-     * yet. Therefore the renderer still cannot replace native lighting.
+     * A coverage-aware direct composite may run as an opt-in diagnostic, but material coverage is
+     * partial and sun/sky are absent. This is not full independent-lighting readiness.
      */
     public static boolean independentLightingActive() {
         return false;
     }
 
     private static StagedRenderPlan stagePlan() {
+        if (RasterDirectCompositeStage.enabled()) {
+            return StagedRenderPlan.rasterDirectLightCompositePath();
+        }
         if (RasterDirectLightStage.enabled()) {
             return StagedRenderPlan.rasterDirectLightDiagnosticPath();
         }
@@ -109,10 +112,10 @@ public final class RasterLightingRenderer {
                 }
             }
 
-            // Diagnostic producer only: output is intentionally not consumed by COMPOSITE yet.
+            RasterDirectLightFrame direct = null;
             if (material != null && RasterDirectLightStage.enabled()) {
                 try {
-                    RasterDirectLightStage.record(
+                    direct = RasterDirectLightStage.record(
                             encoder,
                             gpu,
                             surface,
@@ -136,13 +139,25 @@ public final class RasterLightingRenderer {
                 return;
             }
 
-            RasterCompositeStage.record(
-                    encoder,
-                    target.getColorTextureView(),
-                    uniforms,
-                    nearest,
-                    surface,
-                    lighting);
+            if (RasterDirectCompositeStage.enabled() && material != null && direct != null) {
+                RasterDirectCompositeStage.record(
+                        encoder,
+                        target.getColorTextureView(),
+                        uniforms,
+                        nearest,
+                        surface,
+                        material,
+                        lighting,
+                        direct);
+            } else {
+                RasterCompositeStage.record(
+                        encoder,
+                        target.getColorTextureView(),
+                        uniforms,
+                        nearest,
+                        surface,
+                        lighting);
+            }
             encoder.submit();
 
             ready = lighting.completeScene();
@@ -165,6 +180,7 @@ public final class RasterLightingRenderer {
 
     public static void close() {
         ready = false;
+        RasterDirectCompositeStage.close();
         RasterDirectLightStage.close();
         RasterMaterialResolveStage.close();
         RasterIndirectGiStage.close();
