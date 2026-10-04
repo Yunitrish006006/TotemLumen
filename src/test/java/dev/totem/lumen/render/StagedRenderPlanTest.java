@@ -13,7 +13,7 @@ class StagedRenderPlanTest {
         var plan = StagedRenderPlan.rasterOwnedSurfacePath();
         assertEquals(List.of(
                 LumenRenderStage.SURFACE_CAPTURE,
-                LumenRenderStage.DIRECT_LIGHT,
+                LumenRenderStage.INDIRECT_GI,
                 LumenRenderStage.COMPOSITE
         ), plan.stages());
         assertEquals(Set.of(LumenStageResource.NATIVE_DEPTH, LumenStageResource.VOXEL_SCENE),
