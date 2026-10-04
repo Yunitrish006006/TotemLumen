@@ -6,16 +6,19 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class RasterMaterialGpuLayoutTest {
     @Test
-    void materialIdsRoundTripAllUnsigned16BitValues() {
-        for (int id : new int[]{0, 1, 255, 256, 4095, 32768, 65535}) {
-            int texel = RasterMaterialGpuLayout.materialIdTexel(id);
-            assertEquals(id, RasterMaterialGpuLayout.materialIdFromTexel(texel));
-            assertEquals(255, texel >>> 24);
+    void materialAndSurfaceIdsRoundTripAllUnsigned16BitValues() {
+        int[] values = {0, 1, 255, 256, 4095, 32768, 65535};
+        for (int materialId : values) {
+            for (int surfaceSetId : values) {
+                int texel = RasterMaterialGpuLayout.surfaceIdentityTexel(materialId, surfaceSetId);
+                assertEquals(materialId, RasterMaterialGpuLayout.materialIdFromTexel(texel));
+                assertEquals(surfaceSetId, RasterMaterialGpuLayout.surfaceSetIdFromTexel(texel));
+            }
         }
         assertThrows(IllegalArgumentException.class,
-                () -> RasterMaterialGpuLayout.materialIdTexel(-1));
+                () -> RasterMaterialGpuLayout.surfaceIdentityTexel(-1, 0));
         assertThrows(IllegalArgumentException.class,
-                () -> RasterMaterialGpuLayout.materialIdTexel(65536));
+                () -> RasterMaterialGpuLayout.surfaceIdentityTexel(0, 65536));
     }
 
     @Test
