@@ -70,12 +70,21 @@ final class RasterMaterialResolveStage {
     private static long uploadedMaterialRevision = Long.MIN_VALUE;
     private static int lutRows, uploadedMaterialCount;
     private static long frames, atlasUploadBytes, lutUploadBytes;
-    private static boolean logged;
+    private static boolean logged, failed;
 
     private RasterMaterialResolveStage() { }
 
     static boolean enabled() {
-        return ENABLED;
+        return ENABLED && !failed;
+    }
+
+    static void fail(Throwable failure) {
+        if (failed) return;
+        failed = true;
+        TotemLumenClient.LOGGER.error(
+                "Raster MATERIAL_RESOLVE disabled for this session; INDIRECT_GI/COMPOSITE remain available",
+                failure);
+        close();
     }
 
     static RasterMaterialFrame record(
@@ -86,7 +95,7 @@ final class RasterMaterialResolveStage {
             GpuBufferSlice uniforms,
             GpuSampler nearest
     ) {
-        if (!ENABLED) return null;
+        if (!enabled()) return null;
         RasterMaterialRegistry.Snapshot materials = RasterLightingScene.materialSnapshot();
         ensureTargets(gpu, surface.width(), surface.height(), requiredLutRows(materials));
         uploadLutIfNeeded(encoder, materials);
