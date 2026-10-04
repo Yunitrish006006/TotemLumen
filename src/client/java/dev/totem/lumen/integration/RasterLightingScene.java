@@ -86,7 +86,7 @@ public final class RasterLightingScene {
             RasterLightingVolume.Section old = window.section(slot);
             boolean changed = old == null;
             if (!changed) for (int i = 0; i < 4096; i++) if (old.voxel(i) != pixels[i]) { changed = true; break; }
-            window.put(slot, changed ? new RasterLightingVolume.Section(pixels, RasterMaterialCapture.lightingPreviewRequested()) : old);
+            window.put(slot, changed ? new RasterLightingVolume.Section(pixels) : old);
             extracted++;
             if (System.nanoTime() - started >= 2_000_000L) break;
         }
