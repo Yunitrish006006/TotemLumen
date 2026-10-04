@@ -22,12 +22,14 @@ public record RasterMaterialFrame(
         int materialCount,
         long surfaceSetRevision,
         GpuTextureView visibleSurfaceIdentity,
+        GpuTextureView baseProperties,
         GpuTextureView materialLut,
         GpuTextureView surfaceSetLut
 ) {
     public RasterMaterialFrame {
         Objects.requireNonNull(device, "device");
         Objects.requireNonNull(visibleSurfaceIdentity, "visibleSurfaceIdentity");
+        Objects.requireNonNull(baseProperties, "baseProperties");
         Objects.requireNonNull(materialLut, "materialLut");
         Objects.requireNonNull(surfaceSetLut, "surfaceSetLut");
         if (width <= 0 || height <= 0) throw new IllegalArgumentException("Non-positive material extent");
