@@ -6,8 +6,10 @@ import dev.totem.lumen.render.RasterLightingVolume;
 import dev.totem.lumen.render.RasterLightingWindow;
 import dev.totem.lumen.render.RasterMaterialRegistry;
 import dev.totem.lumen.render.RendererSettings;
+import dev.totem.lumen.scene.BlockGeometryCode;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
 
 import java.util.Arrays;
@@ -75,6 +77,7 @@ public final class RasterLightingScene {
             int slot = window.next();
             int[] pixels = new int[4096];
             char[] materialIds = new char[4096];
+            char[] surfaceSetIds = RasterMaterialResolveStage.enabled() ? new char[4096] : null;
             var chunk = level.getChunkSource().getChunk(window.sectionX(slot), window.sectionZ(slot), ChunkStatus.FULL, false);
             if (chunk != null) {
                 int sectionIndex = chunk.getSectionIndexFromSectionY(window.sectionY(slot));
@@ -83,24 +86,36 @@ public final class RasterLightingScene {
                 } else {
                     var section = chunk.getSections()[sectionIndex];
                     HashMap<BlockState, CellData> resolved = new HashMap<>();
+                    BlockPos.MutableBlockPos worldPos = surfaceSetIds == null ? null : new BlockPos.MutableBlockPos();
+                    int baseX = window.sectionX(slot) << 4;
+                    int baseY = window.sectionY(slot) << 4;
+                    int baseZ = window.sectionZ(slot) << 4;
                     for (int ly = 0; ly < 16; ly++) for (int lz = 0; lz < 16; lz++) for (int lx = 0; lx < 16; lx++) {
                         BlockState state = section.getBlockState(lx, ly, lz);
                         CellData cell = resolved.computeIfAbsent(state, RasterLightingScene::pack);
                         int index = RasterLightingVolume.index(lx, ly, lz);
                         pixels[index] = cell.voxel();
                         materialIds[index] = (char) cell.materialId();
+                        if (surfaceSetIds != null && !state.isAir()) {
+                            worldPos.set(baseX + lx, baseY + ly, baseZ + lz);
+                            surfaceSetIds[index] = (char) texturedCubeSurfaceSetId(state, worldPos);
+                        }
                     }
                 }
             }
             RasterLightingVolume.Section old = window.section(slot);
             boolean changed = old == null;
             if (!changed) for (int i = 0; i < 4096; i++) {
-                if (old.voxel(i) != pixels[i] || old.materialId(i) != materialIds[i]) {
+                int surfaceSetId = surfaceSetIds == null ? 0 : surfaceSetIds[i];
+                if (old.voxel(i) != pixels[i] || old.materialId(i) != materialIds[i]
+                        || old.surfaceSetId(i) != surfaceSetId) {
                     changed = true;
                     break;
                 }
             }
-            window.put(slot, changed ? new RasterLightingVolume.Section(pixels, materialIds) : old);
+            window.put(slot, changed
+                    ? new RasterLightingVolume.Section(pixels, materialIds, surfaceSetIds)
+                    : old);
             extracted++;
             if (System.nanoTime() - started >= 2_000_000L) break;
         }
@@ -108,6 +123,19 @@ public final class RasterLightingScene {
         if (extracted == 2 || extracted % 1200 == 0) {
             TotemLumenClient.LOGGER.info("Raster ray extraction: sectionsPerTick=2, total={}, cpuMs={}, rayDistance={}",
                     extracted, (System.nanoTime() - started) / 1_000_000.0, RasterLightingVolume.RAY_DISTANCE);
+        }
+    }
+
+    private static int texturedCubeSurfaceSetId(BlockState state, BlockPos pos) {
+        try {
+            int geometry = MinecraftBlockModelMeshResolver.geometryCode(state, level, pos);
+            return BlockGeometryCode.family(geometry) == BlockGeometryCode.TEXTURED_CUBE
+                    ? BlockGeometryCode.texturedCubeSurfaceSetId(geometry)
+                    : 0;
+        } catch (RuntimeException failure) {
+            // Material metadata is optional development coverage. Unsupported model geometry keeps
+            // its material ID but does not invent a textured-cube surface identity.
+            return 0;
         }
     }
 
