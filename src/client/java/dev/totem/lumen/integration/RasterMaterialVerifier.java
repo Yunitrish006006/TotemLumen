@@ -90,11 +90,26 @@ public final class RasterMaterialVerifier {
                         .replace(decodeDirective, decodeSource)
         );
 
+        String directPath = "assets/totem-lumen/shaders/core/raster_direct_light.fsh";
+        String directSource = resource(directPath);
+        if (!directSource.contains(directive)
+                || !directSource.contains("uniform sampler2D UnlitAlbedoSampler")
+                || !directSource.contains("uniform sampler2D VoxelSampler")
+                || !directSource.contains("uniform sampler2D LightSampler")
+                || !directSource.contains("for (int i = 0; i < 64; i++)")
+                || !directSource.contains("for (int i = 0; i < 32; i++)")
+                || !directSource.contains("for (int j = 0; j < 4; j++)")
+                || !directSource.contains("float coverage = texture(UnlitAlbedoSampler, texCoord).a")
+                || !directSource.contains("fragColor = vec4(direct, coverage)")) {
+            throw new IllegalStateException("DIRECT_LIGHT shader contract drift");
+        }
+        compile(directPath, directSource.replace(directive, dynamicTransforms));
+
         if (!RasterSurfaceFrame.ColorSemantic.NATIVE_LIT_COLOR.name().equals("NATIVE_LIT_COLOR")) {
             throw new IllegalStateException("Raster surface color semantic drift");
         }
 
-        System.out.println("Raster staged verification PASS: owned surface + material identity/base-property/covered-unlit-cube shaders compile; NOT runtime/visual acceptance");
+        System.out.println("Raster staged verification PASS: owned surface + material identity/base-property/covered-unlit-cube + direct-light diagnostic shaders compile; NOT runtime/visual acceptance");
     }
 
     private static String resource(String path) throws IOException {
