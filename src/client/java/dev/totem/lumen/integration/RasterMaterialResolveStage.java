@@ -17,11 +17,11 @@ import com.mojang.renderpearl.api.textures.GpuTexture;
 import com.mojang.renderpearl.api.textures.GpuTextureView;
 import dev.totem.lumen.TotemLumenClient;
 import dev.totem.lumen.gpu.GpuMaterialPacker;
-import dev.totem.lumen.gpu.GpuSceneAbi;
 import dev.totem.lumen.material.MaterialDefinition;
 import dev.totem.lumen.render.RasterLightingVolume;
 import dev.totem.lumen.render.RasterLightingWindow;
 import dev.totem.lumen.render.RasterMaterialRegistry;
+import dev.totem.lumen.render.RasterMaterialGpuLayout;
 import net.minecraft.client.renderer.BindGroupLayouts;
 import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.resources.Identifier;
@@ -42,15 +42,8 @@ import java.util.Optional;
 final class RasterMaterialResolveStage {
     static final String PROPERTY = "totem.lumen.rasterMaterialResolve";
     private static final boolean ENABLED = Boolean.getBoolean(PROPERTY);
-    private static final int WORDS_PER_MATERIAL = GpuSceneAbi.MATERIAL_STRIDE_BYTES / Integer.BYTES;
-    private static final int MATERIALS_PER_ROW = 256;
-    private static final int LUT_WIDTH = MATERIALS_PER_ROW * WORDS_PER_MATERIAL;
-
-    static {
-        if (GpuSceneAbi.MATERIAL_STRIDE_BYTES % Integer.BYTES != 0 || WORDS_PER_MATERIAL != 16) {
-            throw new IllegalStateException("Unexpected material ABI stride: " + GpuSceneAbi.MATERIAL_STRIDE_BYTES);
-        }
-    }
+    private static final int WORDS_PER_MATERIAL = RasterMaterialGpuLayout.WORDS_PER_MATERIAL;
+    private static final int LUT_WIDTH = RasterMaterialGpuLayout.LUT_WIDTH;
 
     private static final RenderPipeline PIPELINE = RenderPipeline.builder()
             .withLocation(Identifier.fromNamespaceAndPath("totem-lumen", "pipeline/raster_material_resolve"))
@@ -115,8 +108,8 @@ final class RasterMaterialResolveStage {
             }
             for (int i = 0; i < 4096; i++) {
                 int id = section == null ? 0 : section.materialId(i);
-                int encoded = 0xFF000000 | (id & 0xFF) | ((id >>> 8) & 0xFF) << 8;
-                materialTile.setPixelABGR(i & 15, i >>> 4, encoded);
+                materialTile.setPixelABGR(
+                        i & 15, i >>> 4, RasterMaterialGpuLayout.materialIdTexel(id));
             }
             encoder.writeToTexture(
                     materialAtlas,
@@ -166,7 +159,7 @@ final class RasterMaterialResolveStage {
         int maxId = snapshot.entries().isEmpty()
                 ? 0
                 : snapshot.entries().getLast().id();
-        return Math.max(1, (maxId / MATERIALS_PER_ROW) + 1);
+        return RasterMaterialGpuLayout.requiredRows(maxId);
     }
 
     private static void ensureTargets(GpuDevice gpu, int width, int height, int requiredRows) {
@@ -246,12 +239,11 @@ final class RasterMaterialResolveStage {
             }
         }
         for (int id = 0; id < definitions.size(); id++) {
-            int x0 = (id & 0xFF) * WORDS_PER_MATERIAL;
-            int y = id >>> 8;
+            int y = RasterMaterialGpuLayout.lutY(id);
             for (int word = 0; word < WORDS_PER_MATERIAL; word++) {
                 int raw = words.getInt((id * WORDS_PER_MATERIAL + word) * Integer.BYTES);
                 // NativeImage's ABGR integer uses low byte=R, matching the shader's byte rebuild.
-                lutPixels.setPixelABGR(x0 + word, y, raw);
+                lutPixels.setPixelABGR(RasterMaterialGpuLayout.lutX(id, word), y, raw);
             }
         }
         encoder.writeToTexture(materialLut, lutPixels, 0, 0, 0, 0);
