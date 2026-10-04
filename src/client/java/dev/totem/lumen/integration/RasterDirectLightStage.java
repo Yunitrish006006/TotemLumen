@@ -134,6 +134,10 @@ final class RasterDirectLightStage {
                 surface.width(),
                 surface.height(),
                 surface.frameSerial(),
+                material.materialRevision(),
+                material.surfaceSetRevision(),
+                material.pbrTextureRevision(),
+                voxelScene.epoch(),
                 selectedLights.size(),
                 radianceView
         );
