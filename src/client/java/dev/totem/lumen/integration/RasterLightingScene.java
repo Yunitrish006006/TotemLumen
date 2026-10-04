@@ -114,7 +114,8 @@ public final class RasterLightingScene {
                 }
             }
             window.put(slot, changed
-                    ? new RasterLightingVolume.Section(pixels, materialIds, surfaceSetIds)
+                    ? new RasterLightingVolume.Section(
+                            pixels, materialIds, surfaceSetIds, RasterDirectLightStage.requested())
                     : old);
             extracted++;
             if (System.nanoTime() - started >= 2_000_000L) break;
