@@ -38,6 +38,33 @@ class StagedRenderPlanTest {
         assertEquals(Set.of(LumenStageResource.MATERIAL), material.writes());
     }
 
+
+    @Test
+    void directLightDiagnosticPathAddsIndependentProducerWithoutChangingCompositeYet() {
+        var plan = StagedRenderPlan.rasterDirectLightDiagnosticPath();
+        assertEquals(List.of(
+                LumenRenderStage.SURFACE_CAPTURE,
+                LumenRenderStage.MATERIAL_RESOLVE,
+                LumenRenderStage.DIRECT_LIGHT,
+                LumenRenderStage.INDIRECT_GI,
+                LumenRenderStage.COMPOSITE
+        ), plan.stages());
+
+        var direct = plan.passes().stream()
+                .filter(pass -> pass.stage() == LumenRenderStage.DIRECT_LIGHT)
+                .findFirst().orElseThrow();
+        assertEquals(Set.of(
+                LumenStageResource.SURFACE,
+                LumenStageResource.MATERIAL,
+                LumenStageResource.VOXEL_SCENE), direct.reads());
+        assertEquals(Set.of(LumenStageResource.DIRECT_RADIANCE), direct.writes());
+
+        var composite = plan.passes().stream()
+                .filter(pass -> pass.stage() == LumenRenderStage.COMPOSITE)
+                .findFirst().orElseThrow();
+        assertFalse(composite.reads().contains(LumenStageResource.DIRECT_RADIANCE));
+    }
+
     @Test
     void rejectsReadsBeforeProducer() {
         var pass = new StagedRenderPlan.Pass(
