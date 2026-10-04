@@ -91,4 +91,33 @@ class RasterMaterialResolveContractTest {
         assertTrue(shader.contains("fragColor = vec4(roughness, metallic, opacity, emission)"));
         assertTrue(shader.contains("unlit albedo"));
     }
+
+    @Test
+    void unlitAlbedoIsCoverageBoundedToResolvableStaticTexturedCubes() throws Exception {
+        String stage = read("src/client/java/dev/totem/lumen/integration/RasterMaterialResolveStage.java");
+        String frame = read("src/client/java/dev/totem/lumen/integration/RasterMaterialFrame.java");
+        String shader = read("src/client/resources/assets/totem-lumen/shaders/core/raster_unlit_cube_albedo.fsh");
+        assertTrue(stage.contains("raster_unlit_cube_albedo"));
+        assertTrue(stage.contains("Raster P18 texture scene LUT"));
+        assertTrue(stage.contains("LabPbrTextureRegistry.snapshot()"));
+        assertTrue(stage.contains("GpuPbrTextureScene.pack("));
+        assertTrue(frame.contains("GpuTextureView unlitAlbedo"));
+        assertTrue(shader.contains("uint surfaceSetId = rasterSurfaceSetId(identity)"));
+        assertTrue(shader.contains("if (surfaceSetId == 0u"));
+        assertTrue(shader.contains("(flags & TEXTURE_FLAG_ANIMATED) != 0u"));
+        assertTrue(shader.contains("fragColor = vec4(albedo, alpha)"));
+        assertTrue(shader.contains("Alpha is coverage"));
+        assertFalse(stage.contains("independentLightingActive()"));
+    }
+
+    @Test
+    void pbrTextureLutHasIndependentRevisionAndLifetime() throws Exception {
+        String stage = read("src/client/java/dev/totem/lumen/integration/RasterMaterialResolveStage.java");
+        assertTrue(stage.contains("uploadedTextureRevision"));
+        assertTrue(stage.contains("LabPbrTextureRegistry.revision()"));
+        assertTrue(stage.contains("uploadedTextureRevision == revision && pbrTextureLut != null"));
+        assertTrue(stage.contains("pbrTextureLutView.close()"));
+        assertTrue(stage.contains("pbrTextureLut.close()"));
+        assertTrue(stage.contains("uploadedTextureRevision = Long.MIN_VALUE;"));
+    }
 }
