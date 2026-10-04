@@ -2,6 +2,7 @@
 #extension GL_ARB_separate_shader_objects : require
 #include <minecraft:dynamictransforms.glsl>
 uniform sampler2D DepthSampler;
+uniform sampler2D NormalSampler;
 uniform sampler2D VoxelSampler;
 layout(location = 0) in vec2 texCoord;
 layout(location = 0) out vec4 fragColor;
@@ -21,7 +22,8 @@ vec4 voxel(ivec3 cell) {
             (slot / 16) * 256 + local.y * 16 + local.z), 0);
 }
 
-// Secondary diffuse/occlusion traversal only. Primary visibility belongs to SURFACE_CAPTURE.
+// Secondary diffuse/occlusion traversal only. Primary visibility and normal reconstruction belong
+// to SURFACE_CAPTURE.
 vec4 secondary(vec3 origin, vec3 direction) {
     ivec3 cell = ivec3(floor(origin));
     ivec3 stepDirection = ivec3(sign(direction));
@@ -52,25 +54,15 @@ void main() {
     vec2 surfaceUv = (floor(texCoord / pixel) + 0.5) * pixel;
     float depth = texture(DepthSampler, surfaceUv).r;
     if (depth <= 0.000001) return;
+
+    vec4 packedNormal = texture(NormalSampler, surfaceUv);
+    if (packedNormal.a <= 0.0) return;
+    vec3 normal = normalize(packedNormal.rgb * 2.0 - 1.0);
+    if (any(isnan(normal)) || any(isinf(normal))) return;
+
     vec3 p = positionAt(surfaceUv, depth);
     float distance = length(p);
     if (isnan(distance) || isinf(distance) || distance >= TextureMat[0].x) return;
-
-    vec3 left = p - positionAt(surfaceUv - vec2(pixel.x, 0),
-            texture(DepthSampler, surfaceUv - vec2(pixel.x, 0)).r);
-    vec3 right = positionAt(surfaceUv + vec2(pixel.x, 0),
-            texture(DepthSampler, surfaceUv + vec2(pixel.x, 0)).r) - p;
-    vec3 down = p - positionAt(surfaceUv - vec2(0, pixel.y),
-            texture(DepthSampler, surfaceUv - vec2(0, pixel.y)).r);
-    vec3 up = positionAt(surfaceUv + vec2(0, pixel.y),
-            texture(DepthSampler, surfaceUv + vec2(0, pixel.y)).r) - p;
-    vec3 dx = dot(left,left) < dot(right,right) ? left : right;
-    vec3 dy = dot(down,down) < dot(up,up) ? down : up;
-    vec3 crossNormal = cross(dx,dy);
-    if (any(isnan(crossNormal)) || any(isinf(crossNormal))
-            || dot(crossNormal,crossNormal) < 0.0000000001) return;
-    vec3 normal = normalize(crossNormal);
-    if (dot(normal, p) > 0) normal = -normal;
 
     vec3 tangent = normalize(cross(normal, abs(normal.y) < 0.9 ? vec3(0,1,0) : vec3(1,0,0)));
     vec3 bitangent = cross(normal, tangent);
