@@ -103,20 +103,18 @@ class RasterDirectLightsTest {
         }
     }
 
-    @Test void shaderBudgetsAndProfileIsolationRemainExplicit() throws Exception {
-        String shader = Files.readString(Path.of("src/client/resources/assets/totem-lumen/shaders/core/raster_ray.fsh"));
-        assertTrue(shader.contains("for (int i = 0; i < 32; i++)"));
-        assertTrue(shader.contains("if (v.a < 0.25) return 0.0;"));
-        assertTrue(shader.contains("if (all(equal(cell, destination))) return 1.0;"));
-        assertTrue(shader.contains("if (v.a > 0.75) return 0.0;"));
-        assertTrue(shader.contains("visibility(surface + normal * 0.08, positions[i])"));
+    @Test void directLightDataStaysDormantUntilMaterialStageExists() throws Exception {
+        String shader = Files.readString(Path.of("src/client/resources/assets/totem-lumen/shaders/core/raster_indirect_gi.fsh"));
+        assertFalse(shader.contains("LightSampler"));
+        assertFalse(shader.contains("directRgb("));
+        assertFalse(shader.contains("visibility("));
         String scene = Files.readString(Path.of("src/client/java/dev/totem/lumen/integration/RasterLightingScene.java"));
         assertTrue(scene.contains("new RasterLightingVolume.Section(pixels)"));
         assertFalse(scene.contains("RasterMaterialCapture"));
-        assertTrue(Files.readString(Path.of("src/client/java/dev/totem/lumen/integration/RasterLightingRenderer.java"))
-                .contains("surface.supportsIndependentLighting()"));
+        String renderer = Files.readString(Path.of("src/client/java/dev/totem/lumen/integration/RasterLightingRenderer.java"));
+        assertTrue(renderer.contains("surface.supportsIndependentLighting()"));
+        assertTrue(renderer.contains("return false;"));
         String metrics = Files.readString(Path.of("src/client/java/dev/totem/lumen/integration/RgbFrameMetrics.java"));
         assertTrue(metrics.contains("rasterMaterialLighting={}"));
-        assertTrue(metrics.contains("DIRECT_RGB_POINT_SHADOWS"));
     }
 }
