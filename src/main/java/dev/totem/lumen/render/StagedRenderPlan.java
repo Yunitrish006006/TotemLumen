@@ -138,4 +138,44 @@ public final class StagedRenderPlan {
                 passes
         );
     }
+
+    /**
+     * Development graph with an independent DIRECT_LIGHT producer whose output is intentionally
+     * not consumed by COMPOSITE yet. This validates stage ownership without changing final pixels.
+     */
+    public static StagedRenderPlan rasterDirectLightDiagnosticPath() {
+        List<Pass> passes = new ArrayList<>();
+        passes.add(new Pass(
+                LumenRenderStage.SURFACE_CAPTURE,
+                Set.of(LumenStageResource.NATIVE_DEPTH),
+                Set.of(LumenStageResource.SURFACE)
+        ));
+        passes.add(new Pass(
+                LumenRenderStage.MATERIAL_RESOLVE,
+                Set.of(LumenStageResource.SURFACE, LumenStageResource.VOXEL_SCENE),
+                Set.of(LumenStageResource.MATERIAL)
+        ));
+        passes.add(new Pass(
+                LumenRenderStage.DIRECT_LIGHT,
+                Set.of(
+                        LumenStageResource.SURFACE,
+                        LumenStageResource.MATERIAL,
+                        LumenStageResource.VOXEL_SCENE),
+                Set.of(LumenStageResource.DIRECT_RADIANCE)
+        ));
+        passes.add(new Pass(
+                LumenRenderStage.INDIRECT_GI,
+                Set.of(LumenStageResource.SURFACE, LumenStageResource.VOXEL_SCENE),
+                Set.of(LumenStageResource.INDIRECT_RADIANCE)
+        ));
+        passes.add(new Pass(
+                LumenRenderStage.COMPOSITE,
+                Set.of(LumenStageResource.SURFACE, LumenStageResource.INDIRECT_RADIANCE),
+                Set.of(LumenStageResource.FINAL_COLOR)
+        ));
+        return new StagedRenderPlan(
+                Set.of(LumenStageResource.NATIVE_DEPTH, LumenStageResource.VOXEL_SCENE),
+                passes
+        );
+    }
 }
