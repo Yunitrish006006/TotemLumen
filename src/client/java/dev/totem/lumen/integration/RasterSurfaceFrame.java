@@ -18,7 +18,8 @@ public record RasterSurfaceFrame(
         long frameSerial,
         ColorSemantic colorSemantic,
         GpuTextureView baseColor,
-        GpuTextureView depth
+        GpuTextureView depth,
+        GpuTextureView normal
 ) {
     public enum ColorSemantic {
         /** Minecraft's completed native color; safe surface source, but already visually lit. */
@@ -32,6 +33,7 @@ public record RasterSurfaceFrame(
         Objects.requireNonNull(colorSemantic, "colorSemantic");
         Objects.requireNonNull(baseColor, "baseColor");
         Objects.requireNonNull(depth, "depth");
+        Objects.requireNonNull(normal, "normal");
         if (width <= 0 || height <= 0) throw new IllegalArgumentException("Non-positive surface extent");
         if (frameSerial <= 0) throw new IllegalArgumentException("Invalid frame serial");
     }
