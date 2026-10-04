@@ -42,14 +42,18 @@ class RasterSurfaceCaptureContractTest {
     }
 
     @Test
-    void lightingConsumesOnlyTheSurfaceContractForSceneInputs() throws Exception {
+    void stagesConsumeOnlyExplicitFrameContractsForSceneInputs() throws Exception {
         String renderer = read("src/client/java/dev/totem/lumen/integration/RasterLightingRenderer.java");
+        String indirect = read("src/client/java/dev/totem/lumen/integration/RasterIndirectGiStage.java");
+        String composite = read("src/client/java/dev/totem/lumen/integration/RasterCompositeStage.java");
         assertTrue(renderer.contains("render(CameraRenderState camera, RasterSurfaceFrame surface)"));
-        assertTrue(renderer.contains("surface.depth()"));
-        assertTrue(renderer.contains("surface.baseColor()"));
-        assertTrue(renderer.contains("surface.supportsIndependentLighting()"));
-        assertFalse(renderer.contains("sceneCopy"));
-        assertFalse(renderer.contains("target.getDepthTextureView()"));
+        assertTrue(renderer.contains("RasterIndirectGiStage.record("));
+        assertTrue(renderer.contains("RasterCompositeStage.record("));
+        assertTrue(indirect.contains("surface.depth()"));
+        assertTrue(composite.contains("surface.depth()"));
+        assertTrue(composite.contains("surface.baseColor()"));
+        assertFalse(indirect.contains("target.getDepthTextureView()"));
+        assertFalse(composite.contains("target.getDepthTextureView()"));
         assertFalse(renderer.contains("RasterMaterialCapture"));
     }
 
