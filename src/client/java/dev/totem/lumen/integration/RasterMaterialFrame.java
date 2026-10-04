@@ -21,6 +21,7 @@ public record RasterMaterialFrame(
         long materialRevision,
         int materialCount,
         long surfaceSetRevision,
+        long pbrTextureRevision,
         GpuTextureView visibleSurfaceIdentity,
         GpuTextureView baseProperties,
         GpuTextureView unlitAlbedo,
@@ -36,7 +37,7 @@ public record RasterMaterialFrame(
         Objects.requireNonNull(surfaceSetLut, "surfaceSetLut");
         if (width <= 0 || height <= 0) throw new IllegalArgumentException("Non-positive material extent");
         if (surfaceFrameSerial <= 0) throw new IllegalArgumentException("Invalid surface frame serial");
-        if (materialRevision < 0 || materialCount < 0 || surfaceSetRevision < 0)
+        if (materialRevision < 0 || materialCount < 0 || surfaceSetRevision < 0 || pbrTextureRevision < 0)
             throw new IllegalArgumentException("Invalid material snapshot metadata");
     }
 
