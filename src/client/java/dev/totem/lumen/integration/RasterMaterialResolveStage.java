@@ -426,7 +426,7 @@ final class RasterMaterialResolveStage {
         int totalPixels = RasterRawWordTextureLayout.WIDTH * textureRows;
         for (int pixel = 0; pixel < totalPixels; pixel++) {
             int raw = pixel < packed.usedWords()
-                    ? words.getInt(pixel * Integer.BYTES)
+                    ? pbrTextureWords.getInt(pixel * Integer.BYTES)
                     : 0;
             pbrTexturePixels.setPixelABGR(
                     RasterRawWordTextureLayout.x(pixel),
