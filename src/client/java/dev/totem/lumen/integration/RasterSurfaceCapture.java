@@ -16,8 +16,13 @@ import dev.totem.lumen.TotemLumenClient;
 import dev.totem.lumen.render.BackendProbe;
 import dev.totem.lumen.render.RendererSettings;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.renderer.BindGroupLayouts;
 import net.minecraft.client.renderer.RenderPipelines;
+import net.minecraft.client.renderer.state.level.CameraRenderState;
 import net.minecraft.resources.Identifier;
+import org.joml.Matrix4f;
+import org.joml.Vector3f;
+import org.joml.Vector4f;
 
 import java.util.Optional;
 
@@ -25,26 +30,40 @@ import java.util.Optional;
  * Owned SURFACE_CAPTURE stage for the raster-primary path.
  *
  * <p>It never replays Minecraft chunk draw lists or retains their vertex/index buffers. The
- * stage copies the completed native scene color into a Totem-owned texture and samples native
- * depth into a Totem-owned color texture. Downstream stages only receive those owned views.</p>
+ * stage copies completed native scene color, captures depth at R32 precision and reconstructs
+ * a full-resolution normal field into Totem-owned textures.</p>
  */
 public final class RasterSurfaceCapture {
     private static final long MAX_PIXELS = 4096L * 2160;
+
+    private static final BindGroupLayout DEPTH_SAMPLER = BindGroupLayout.builder()
+            .withUniform("DepthSampler", UniformType.COMBINED_IMAGE_SAMPLER)
+            .build();
+
     private static final RenderPipeline DEPTH_CAPTURE = RenderPipeline.builder()
             .withLocation(Identifier.fromNamespaceAndPath("totem-lumen", "pipeline/raster_surface_depth"))
             .withVertexShader(RenderPipelines.TRACY_BLIT.getShaders().get(ShaderType.VERTEX))
             .withFragmentShader(Identifier.fromNamespaceAndPath("totem-lumen", "core/raster_surface_depth"))
-            .withBindGroupLayout(BindGroupLayout.builder()
-                    .withUniform("DepthSampler", UniformType.COMBINED_IMAGE_SAMPLER)
-                    .build())
+            .withBindGroupLayout(DEPTH_SAMPLER)
             .withPrimitiveTopology(PrimitiveTopology.TRIANGLES)
             .withColorTargetState(new ColorTargetState(
                     Optional.empty(), GpuFormat.R32_FLOAT, ColorTargetState.WRITE_ALL))
             .build();
 
+    private static final RenderPipeline NORMAL_CAPTURE = RenderPipeline.builder()
+            .withLocation(Identifier.fromNamespaceAndPath("totem-lumen", "pipeline/raster_surface_normal"))
+            .withVertexShader(RenderPipelines.TRACY_BLIT.getShaders().get(ShaderType.VERTEX))
+            .withFragmentShader(Identifier.fromNamespaceAndPath("totem-lumen", "core/raster_surface_normal"))
+            .withBindGroupLayout(BindGroupLayouts.DYNAMIC_TRANSFORMS)
+            .withBindGroupLayout(DEPTH_SAMPLER)
+            .withPrimitiveTopology(PrimitiveTopology.TRIANGLES)
+            .withColorTargetState(new ColorTargetState(
+                    Optional.empty(), GpuFormat.RGBA16_FLOAT, ColorTargetState.WRITE_ALL))
+            .build();
+
     private static GpuDevice device;
-    private static GpuTexture color, depth;
-    private static GpuTextureView colorView, depthView;
+    private static GpuTexture color, depth, normal;
+    private static GpuTextureView colorView, depthView, normalView;
     private static long frameSerial, frames;
     private static boolean failed, logged;
 
@@ -52,10 +71,14 @@ public final class RasterSurfaceCapture {
 
     public static boolean unavailable() { return failed; }
 
-    public static RasterSurfaceFrame capture() {
-        if (!RendererSettings.rasterLightingEnabled() || failed) return null;
+    public static RasterSurfaceFrame capture(CameraRenderState camera) {
+        if (!RendererSettings.rasterLightingEnabled() || failed || camera == null || !camera.initialized) {
+            return null;
+        }
         var target = Minecraft.getInstance().gameRenderer.mainRenderTarget();
-        if (target == null || target.getColorTexture() == null || target.getDepthTextureView() == null) return null;
+        if (target == null || target.getColorTexture() == null || target.getDepthTextureView() == null) {
+            return null;
+        }
         if (!BackendProbe.detect().vulkan()) return null;
 
         var nativeColor = target.getColorTexture();
@@ -69,11 +92,28 @@ public final class RasterSurfaceCapture {
             var encoder = gpu.createCommandEncoder();
             encoder.copyTextureToTexture(nativeColor, color, 0, 0, 0, 0, 0, width, height);
 
-            var compiled = RenderSystem.getCompiledPipeline(DEPTH_CAPTURE);
             var nearest = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST);
+            var depthPipeline = RenderSystem.getCompiledPipeline(DEPTH_CAPTURE);
             try (var pass = encoder.createRenderPass(
-                    () -> "Totem raster surface depth capture", depthView, Optional.empty())) {
-                pass.setPipeline(compiled);
+                    () -> "Totem SURFACE_CAPTURE depth", depthView, Optional.empty())) {
+                pass.setPipeline(depthPipeline);
+                pass.setUniform("DepthSampler", target.getDepthTextureView(), nearest);
+                pass.draw(3, 1, 0, 0);
+            }
+
+            Matrix4f inverse = new Matrix4f(camera.projectionMatrix)
+                    .mul(camera.viewRotationMatrix)
+                    .invert();
+            Matrix4f metadata = new Matrix4f().zero()
+                    .setColumn(0, new Vector4f(
+                            0, 0, gpu.getDeviceInfo().isZZeroToOne() ? 1 : 0, 0));
+            var uniforms = RenderSystem.getDynamicUniforms()
+                    .writeTransform(inverse, new Vector4f(1), new Vector3f(), metadata);
+            var normalPipeline = RenderSystem.getCompiledPipeline(NORMAL_CAPTURE);
+            try (var pass = encoder.createRenderPass(
+                    () -> "Totem SURFACE_CAPTURE normal", normalView, Optional.empty())) {
+                pass.setPipeline(normalPipeline);
+                pass.setUniform("DynamicTransforms", uniforms);
                 pass.setUniform("DepthSampler", target.getDepthTextureView(), nearest);
                 pass.draw(3, 1, 0, 0);
             }
@@ -84,7 +124,7 @@ public final class RasterSurfaceCapture {
             if (!logged) {
                 logged = true;
                 TotemLumenClient.LOGGER.info(
-                        "RASTER SURFACE_CAPTURE ACTIVE: {}x{}, ownedColor=true, ownedDepth=true, colorSemantic={}",
+                        "RASTER SURFACE_CAPTURE ACTIVE: {}x{}, ownedColor=true, ownedDepth=R32, ownedNormal=RGBA16F, colorSemantic={}",
                         width, height, RasterSurfaceFrame.ColorSemantic.NATIVE_LIT_COLOR);
             }
             return new RasterSurfaceFrame(
@@ -94,7 +134,8 @@ public final class RasterSurfaceCapture {
                     frameSerial,
                     RasterSurfaceFrame.ColorSemantic.NATIVE_LIT_COLOR,
                     colorView,
-                    depthView
+                    depthView,
+                    normalView
             );
         } catch (RuntimeException failure) {
             failed = true;
@@ -113,7 +154,10 @@ public final class RasterSurfaceCapture {
                 && color.getFormat() == nativeColor.getFormat()
                 && depth != null
                 && depth.getWidth(0) == width
-                && depth.getHeight(0) == height) {
+                && depth.getHeight(0) == height
+                && normal != null
+                && normal.getWidth(0) == width
+                && normal.getHeight(0) == height) {
             return;
         }
 
@@ -129,8 +173,14 @@ public final class RasterSurfaceCapture {
                 GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_TEXTURE_BINDING,
                 GpuFormat.R32_FLOAT,
                 width, height, 1, 1);
+        normal = gpu.createTexture(
+                "Totem raster owned surface normal",
+                GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_TEXTURE_BINDING,
+                GpuFormat.RGBA16_FLOAT,
+                width, height, 1, 1);
         colorView = gpu.createTextureView(color);
         depthView = gpu.createTextureView(depth);
+        normalView = gpu.createTextureView(normal);
     }
 
     public static void tickLifecycle(Minecraft client) {
@@ -140,10 +190,12 @@ public final class RasterSurfaceCapture {
     public static void close() {
         if (colorView != null) colorView.close();
         if (depthView != null) depthView.close();
+        if (normalView != null) normalView.close();
         if (color != null) color.close();
         if (depth != null) depth.close();
-        colorView = depthView = null;
-        color = depth = null;
+        if (normal != null) normal.close();
+        colorView = depthView = normalView = null;
+        color = depth = normal = null;
         device = null;
         if (logged) {
             TotemLumenClient.LOGGER.info("Raster surface resources retired: frames={}", frames);
