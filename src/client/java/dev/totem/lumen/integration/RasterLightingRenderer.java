@@ -31,8 +31,8 @@ public final class RasterLightingRenderer {
     private static final RenderPipeline COMPOSITE = pipeline("raster_ray_composite",
             RenderPipelines.DEBUG_FILLED_BOX.getColorTargetStates().getFirst().format(), "DepthSampler", "LightingSampler", "SceneSampler");
     private static GpuDevice device;
-    private static GpuTexture atlas, sceneCopy, lighting;
-    private static GpuTextureView atlasView, sceneView, lightingView;
+    private static GpuTexture atlas, lighting;
+    private static GpuTextureView atlasView, lightingView;
     private static NativeImage tile;
     private static GpuTexture directLights;
     private static GpuTextureView directView;
@@ -67,35 +67,27 @@ public final class RasterLightingRenderer {
         if (!RendererSettings.rasterLightingEnabled() || client.level == null) close();
     }
 
-    public static void render(CameraRenderState camera) {
-        if (!RendererSettings.rasterLightingEnabled() || failed) return;
+    public static void render(CameraRenderState camera, RasterSurfaceFrame surface) {
+        if (!RendererSettings.rasterLightingEnabled() || failed || surface == null) return;
         ready = false;
-        // Raw capture is already presented; do not shade it as if it were native lit colour.
-        if (RasterMaterialCapture.rawPreviewRequested()) return;
         var volume = RasterLightingScene.snapshot();
         if (camera == null || !camera.initialized || volume == null) { ready = false; return; }
         var target = Minecraft.getInstance().gameRenderer.mainRenderTarget();
-        if (target == null || target.getColorTexture() == null || target.getDepthTextureView() == null) { ready = false; return; }
+        if (target == null || target.getColorTexture() == null) { ready = false; return; }
         if (!BackendProbe.detect().vulkan()) { ready = false; return; }
         try {
             var gpu = RenderSystem.getDevice();
             var color = target.getColorTexture();
             int w = color.getWidth(0), h = color.getHeight(0);
-            boolean materialPreview = RasterMaterialCapture.lightingPreviewRequested();
-            var material = RasterMaterialCapture.lightingFrame(gpu, w, h);
-            // Explicit preview fails closed to the untouched native frame, never stale albedo.
-            if (materialPreview && material == null) return;
+            if (!surface.matches(gpu, w, h)) return;
+            boolean materialPreview = surface.supportsIndependentLighting();
             int lw = RendererSettings.internalResolution().targetWidth(w, h);
             int lh = Math.max(1, Math.round(lw * h / (float) w));
-            if (device != gpu || sceneCopy == null || sceneCopy.getWidth(0) != w || sceneCopy.getHeight(0) != h
-                    || sceneCopy.getFormat() != color.getFormat() || lighting.getWidth(0) != lw || lighting.getHeight(0) != lh) {
+            if (device != gpu || lighting == null || lighting.getWidth(0) != lw || lighting.getHeight(0) != lh) {
                 close(); device = gpu;
                 atlas = gpu.createTexture("Raster ray voxel atlas", GpuTexture.USAGE_COPY_DST | GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_RENDER_ATTACHMENT,
                         GpuFormat.RGBA8_UNORM, RasterLightingVolume.ATLAS_WIDTH, RasterLightingVolume.ATLAS_HEIGHT, 1, 1);
                 atlasView = gpu.createTextureView(atlas);
-                sceneCopy = gpu.createTexture("Raster ray color input", GpuTexture.USAGE_COPY_DST | GpuTexture.USAGE_TEXTURE_BINDING,
-                        color.getFormat(), w, h, 1, 1);
-                sceneView = gpu.createTextureView(sceneCopy);
                 lighting = gpu.createTexture("Raster ray radiance and distance", GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_TEXTURE_BINDING,
                         GpuFormat.RGBA16_FLOAT, lw, lh, 1, 1);
                 lightingView = gpu.createTextureView(lighting);
@@ -149,7 +141,6 @@ public final class RasterLightingRenderer {
                     selectedLights = lights;
                 }
             }
-            if (!materialPreview) encoder.copyTextureToTexture(color, sceneCopy, 0, 0, 0, 0, 0, w, h);
             Matrix4f inverse = new Matrix4f(camera.projectionMatrix).mul(camera.viewRotationMatrix).invert();
             Matrix4f metadata = new Matrix4f().zero().setColumn(0, new Vector4f(RasterLightingVolume.RAY_DISTANCE,
                     RendererSettings.giQuality().samples(), gpu.getDeviceInfo().isZZeroToOne() ? 1 : 0,
@@ -162,7 +153,7 @@ public final class RasterLightingRenderer {
             try (var pass = encoder.createRenderPass(() -> "Raster-primary secondary rays", lightingView, Optional.empty())) {
                 pass.setPipeline(lightPipeline);
                 pass.setUniform("DynamicTransforms", uniforms);
-                pass.setUniform("DepthSampler", materialPreview ? material.depth() : target.getDepthTextureView(), nearest);
+                pass.setUniform("DepthSampler", surface.depth(), nearest);
                 pass.setUniform("VoxelSampler", atlasView, nearest);
                 pass.setUniform("LightSampler", materialPreview ? directView : atlasView, nearest);
                 pass.draw(3, 1, 0, 0);
@@ -170,9 +161,9 @@ public final class RasterLightingRenderer {
             try (var pass = encoder.createRenderPass(() -> "Raster ray depth-aware composite", target.getColorTextureView(), Optional.empty())) {
                 pass.setPipeline(compositePipeline);
                 pass.setUniform("DynamicTransforms", uniforms);
-                pass.setUniform("DepthSampler", materialPreview ? material.depth() : target.getDepthTextureView(), nearest);
+                pass.setUniform("DepthSampler", surface.depth(), nearest);
                 pass.setUniform("LightingSampler", lightingView, nearest);
-                pass.setUniform("SceneSampler", materialPreview ? material.baseColor() : sceneView, nearest);
+                pass.setUniform("SceneSampler", surface.baseColor(), nearest);
                 pass.draw(3, 1, 0, 0);
             }
             encoder.submit(); frames++; ready = complete;
@@ -194,10 +185,9 @@ public final class RasterLightingRenderer {
 
     public static void close() {
         ready = false;
-        if (atlas == null && sceneCopy == null && lighting == null) return;
+        if (atlas == null && lighting == null) return;
         // RenderPearl owns deferred GPU retirement; never destroy raw Vulkan handles here.
         if (atlasView != null) atlasView.close(); if (atlas != null) atlas.close();
-        if (sceneView != null) sceneView.close(); if (sceneCopy != null) sceneCopy.close();
         if (lightingView != null) lightingView.close(); if (lighting != null) lighting.close();
         if (tile != null) tile.close();
         if (directView != null) directView.close(); if (directLights != null) directLights.close();
@@ -205,7 +195,7 @@ public final class RasterLightingRenderer {
         directView = null; directLights = null; directPixels = null; selectedVolume = null; selectedLights = java.util.List.of();
         TotemLumenClient.LOGGER.info("Raster direct lights retired: selections={}, selectionMs={}, uploadBytes={}", lightSelections, lightSelectionNanos / 1_000_000.0, lightUploadBytes);
         lightSelections = lightSelectionNanos = lightUploadBytes = 0;
-        atlas = sceneCopy = lighting = null; atlasView = sceneView = lightingView = null; tile = null;
+        atlas = lighting = null; atlasView = lightingView = null; tile = null;
         java.util.Arrays.fill(uploaded, null); epoch = -1; logged = false;
         TotemLumenClient.LOGGER.info("Raster ray resources retired: frames={}, uploadBytes={}", frames, uploadBytes);
         frames = uploadBytes = 0;
