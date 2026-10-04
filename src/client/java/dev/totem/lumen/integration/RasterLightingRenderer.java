@@ -12,6 +12,7 @@ import dev.totem.lumen.render.RasterDirectLights;
 import dev.totem.lumen.render.RasterLightingVolume;
 import dev.totem.lumen.render.RasterLightingWindow;
 import dev.totem.lumen.render.RendererSettings;
+import dev.totem.lumen.render.StagedRenderPlan;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.BindGroupLayouts;
 import net.minecraft.client.renderer.RenderPipelines;
@@ -24,6 +25,7 @@ import java.util.Optional;
 
 /** Independent Vulkan raster-primary experiment. Does not initialize the full Totem pipeline. */
 public final class RasterLightingRenderer {
+    private static final StagedRenderPlan STAGE_PLAN = StagedRenderPlan.rasterMaterialPreview();
     private static final RenderPipeline LIGHTING = pipeline("raster_ray", GpuFormat.RGBA16_FLOAT,
             "DepthSampler", "VoxelSampler", "LightSampler");
     private static final RenderPipeline COMPOSITE = pipeline("raster_ray_composite",
@@ -170,13 +172,15 @@ public final class RasterLightingRenderer {
                 pass.setUniform("DynamicTransforms", uniforms);
                 pass.setUniform("DepthSampler", materialPreview ? material.depth() : target.getDepthTextureView(), nearest);
                 pass.setUniform("LightingSampler", lightingView, nearest);
-                pass.setUniform("SceneSampler", materialPreview ? material.color() : sceneView, nearest);
+                pass.setUniform("SceneSampler", materialPreview ? material.baseColor() : sceneView, nearest);
                 pass.draw(3, 1, 0, 0);
             }
             encoder.submit(); frames++; ready = complete;
             if (complete && !logged) {
                 logged = true;
-                if (materialPreview) TotemLumenClient.LOGGER.info("RASTER_MATERIAL RGB lighting preview ACTIVE: directLights={}/32, shadowRays<=4, same-frame material/depth; opaque/cutout only, NOT production lighting", selectedLights.size());
+                if (materialPreview) TotemLumenClient.LOGGER.info(
+                        "RASTER_MATERIAL RGB lighting preview ACTIVE: stages={}, directLights={}/32, shadowRays<=4, same-frame surface/depth; opaque/cutout only, NOT production lighting",
+                        STAGE_PLAN.stages(), selectedLights.size());
                 TotemLumenClient.LOGGER.info("RASTER_RAY ACTIVE: {}x{}, rayDistance={}, giSamples={}, atlasBytes={}, primaryRays=0; "
                         + "approximate normals, cube occlusion, emissive one-bounce only; no transmission/refraction/PBR", lw, lh,
                         RasterLightingVolume.RAY_DISTANCE, RendererSettings.giQuality().samples(), RasterLightingVolume.ATLAS_WIDTH * RasterLightingVolume.ATLAS_HEIGHT * 4);
