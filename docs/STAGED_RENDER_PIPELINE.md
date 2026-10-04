@@ -55,7 +55,7 @@ Implemented first:
 - the current owned Raster path is represented as
   `SURFACE_CAPTURE -> INDIRECT_GI -> COMPOSITE`;
 - `RasterSurfaceFrame` is the first concrete stage ABI. It carries the producing device, extent,
-  frame serial, color semantic, base-colour view and depth view.
+  frame serial, color semantic, base-colour view, R32 depth view and owned normal view.
 - Raster lighting consumes this frame token rather than reaching back into Minecraft's target or
   capture implementation.
 - color semantics are explicit: the first safe producer publishes `NATIVE_LIT_COLOR`; only a
@@ -63,8 +63,9 @@ Implemented first:
   composition.
 
 The first owned Raster surface is intentionally conservative: completed native scene color is copied
-to a Totem-owned texture and native depth is sampled into a Totem-owned R32_FLOAT texture. It is not
-the final unlit material G-buffer and does not claim MATERIAL_RESOLVE completion.
+to a Totem-owned texture, native depth is sampled into a Totem-owned R32_FLOAT texture, and a separate
+SURFACE_CAPTURE pipeline reconstructs a full-resolution approximate normal field into RGBA16F. It is
+not the final unlit material G-buffer and does not claim MATERIAL_RESOLVE completion.
 
 ## Phase 2 — owned raster surface capture
 
@@ -80,6 +81,7 @@ publishes:
 
 - completed native scene color is copied into a Totem-owned texture;
 - native depth is sampled once into a Totem-owned `R32_FLOAT` texture;
+- surface normals are reconstructed once into a Totem-owned `RGBA16_FLOAT` texture;
 - downstream lighting receives only `RasterSurfaceFrame`;
 - resize/profile/world lifecycle retirement is owned by the capture stage;
 - no chunk draw list, vertex/index buffer, lightmap, atlas or projection slice is retained.
@@ -89,8 +91,8 @@ still required. It also deliberately does **not** solve independent material lig
 is already visually lit, so the frame is tagged `NATIVE_LIT_COLOR` and cannot activate the
 independent direct-RGB path.
 
-The next surface/material increment must add owned normal/material identity/unlit base data without
-reintroducing native draw-buffer replay. Minecraft visibility and distant terrain remain
+The next surface/material increment must add stable material identity and unlit base data without
+reintroducing native draw-buffer replay. Normal reconstruction is already owned by SURFACE_CAPTURE. Minecraft visibility and distant terrain remain
 authoritative for the raster-primary path.
 
 ## Phase 3 — material resolve
@@ -113,7 +115,8 @@ their input ABI changes.
 The first split is now implemented for the active safe Raster path:
 
 - `RasterIndirectGiStage` owns the voxel atlas, `raster_indirect_gi` pipeline and
-  reduced-resolution radiance target;
+  reduced-resolution radiance target; it consumes the captured normal field rather than reconstructing
+  primary normals itself;
 - `RasterLightingFrame` is the frame-local INDIRECT_GI -> COMPOSITE ABI;
 - `RasterCompositeStage` owns the presentation pipeline and is the only staged Raster pass that
   writes the main world color target;
