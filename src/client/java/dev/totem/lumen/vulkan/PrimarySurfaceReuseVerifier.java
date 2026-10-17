@@ -25,7 +25,7 @@ public final class PrimarySurfaceReuseVerifier {
         require(count(main, "p18ResolveSurface(") == 1, "Primary decode must appear once in GI hit branch");
         require(main.contains("} else {\n            P18SurfaceSample primarySurface"), "Decode moved out of GI hit branch");
         require(main.contains("giHistorySamples, primarySurface"), "History path did not forward surface");
-        require(main.contains("indirectColor, primarySurface"), "Composite did not receive same surface");
+        require(main.contains("giCurrentColor("), "Final-linear resolve owner disappeared");
         require(optimized.contains("sampleIndex * giSamples + sampleOffset, p18PrimarySurface"), "GI loop did not forward surface");
         require(optimized.contains("p13FrameSeed(), p18PrimarySurface"), "Temporal path did not forward surface");
         require(optimized.contains("localLightWithSurface(hit, primaryOrigin, primaryDirection, true, p18Surface)"),

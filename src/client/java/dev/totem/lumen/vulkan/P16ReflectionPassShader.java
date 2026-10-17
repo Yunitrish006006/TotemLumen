@@ -46,12 +46,12 @@ final class P16ReflectionPassShader {
                 } scene;
 
                 const uint LOOKUP_BASE = 96u;
-                const uint LOOKUP_CAPACITY = 128u;
-                const uint LOOKUP_MASK = 127u;
+                const uint LOOKUP_CAPACITY = 256u;
+                const uint LOOKUP_MASK = 255u;
                 const uint LOOKUP_WORDS_PER_BUCKET = 4u;
-                const uint VOXEL_BASE = 608u;
+                const uint VOXEL_BASE = 1120u;
                 const uint VOXELS_PER_SECTION = 4096u;
-                const uint MATERIAL_EMISSION_BASE = 528096u;
+                const uint MATERIAL_EMISSION_BASE = 528608u;
                 const uint MATERIAL_EMISSION_WORDS_PER_RECORD = 16u;
                 const float SOFT_SHADOW_ANGULAR_RADIUS = 0.055;
                 const vec2 SOFT_SHADOW_OFFSETS[4] = vec2[4](
@@ -75,6 +75,197 @@ final class P16ReflectionPassShader {
                 + materialHelpers
                 + environment
                 + """
+
+                const uint P16_HISTORY_RECORD_WORDS = 8u;
+                const uint P16_HISTORY_MATERIAL_MASK = 0x0000FFFFu;
+                const uint P16_HISTORY_SAMPLE_MASK = 0x00FF0000u;
+                const uint P16_HISTORY_VERSION_MASK = 0x0F000000u;
+                const uint P16_HISTORY_COVERAGE_COHORT_FLAG = 0x10000000u;
+                const uint P16_HISTORY_ABI_VERSION = 2u;
+
+                uint p16HistorySampleCount(uint historyBase) {
+                    return (scene.data[historyBase + 7u] & P16_HISTORY_SAMPLE_MASK) >> 16u;
+                }
+
+                bool p16HistoryIdentityMatches(uint previousBase, uint currentBase) {
+                    uint previousControl = scene.data[previousBase + 7u];
+                    uint currentControl = scene.data[currentBase + 7u];
+                    if (((previousControl & P16_HISTORY_VERSION_MASK) >> 24u) != P16_HISTORY_ABI_VERSION
+                            || ((currentControl & P16_HISTORY_VERSION_MASK) >> 24u) != P16_HISTORY_ABI_VERSION) {
+                        return false;
+                    }
+
+                    bool previousCoverage = (previousControl & P16_HISTORY_COVERAGE_COHORT_FLAG) != 0u;
+                    bool currentCoverage = (currentControl & P16_HISTORY_COVERAGE_COHORT_FLAG) != 0u;
+                    if (previousCoverage != currentCoverage) return false;
+                    if (currentCoverage) {
+                        return scene.data[previousBase + 5u] != 0u
+                                && scene.data[previousBase + 5u] == scene.data[currentBase + 5u];
+                    }
+
+                    return (previousControl & P16_HISTORY_MATERIAL_MASK)
+                                    == (currentControl & P16_HISTORY_MATERIAL_MASK)
+                            && scene.data[previousBase + 1u] == scene.data[currentBase + 1u]
+                            && scene.data[previousBase + 2u] == scene.data[currentBase + 2u]
+                            && scene.data[previousBase + 3u] == scene.data[currentBase + 3u]
+                            && scene.data[previousBase + 4u] == scene.data[currentBase + 4u];
+                }
+
+                vec3 p16PreviousRayDirection(uvec2 pixel, uint width, uint height) {
+                    vec3 previousRight = vec3(
+                        uintBitsToFloat(scene.data[30]),
+                        uintBitsToFloat(scene.data[31]),
+                        uintBitsToFloat(scene.data[32])
+                    );
+                    vec3 previousUp = vec3(
+                        uintBitsToFloat(scene.data[33]),
+                        uintBitsToFloat(scene.data[34]),
+                        uintBitsToFloat(scene.data[35])
+                    );
+                    vec3 previousForward = vec3(
+                        uintBitsToFloat(scene.data[36]),
+                        uintBitsToFloat(scene.data[37]),
+                        uintBitsToFloat(scene.data[38])
+                    );
+                    float previousTanHalfFov = uintBitsToFloat(scene.data[39]);
+                    float previousAspect = uintBitsToFloat(scene.data[40]);
+                    float ndcX = ((float(pixel.x) + 0.5) / float(width)) * 2.0 - 1.0;
+                    float ndcY = 1.0 - ((float(pixel.y) + 0.5) / float(height)) * 2.0;
+                    return normalize(
+                        previousForward
+                        + previousRight * (ndcX * previousAspect * previousTanHalfFov)
+                        + previousUp * (ndcY * previousTanHalfFov)
+                    );
+                }
+
+                bool p16ReprojectAnchor(
+                        vec3 currentAnchor,
+                        uint width,
+                        uint height,
+                        out uvec2 previousPixel
+                ) {
+                    if (scene.data[26] == 0u) return false;
+                    vec3 previousOrigin = vec3(
+                        uintBitsToFloat(scene.data[27]),
+                        uintBitsToFloat(scene.data[28]),
+                        uintBitsToFloat(scene.data[29])
+                    );
+                    vec3 previousRight = vec3(
+                        uintBitsToFloat(scene.data[30]),
+                        uintBitsToFloat(scene.data[31]),
+                        uintBitsToFloat(scene.data[32])
+                    );
+                    vec3 previousUp = vec3(
+                        uintBitsToFloat(scene.data[33]),
+                        uintBitsToFloat(scene.data[34]),
+                        uintBitsToFloat(scene.data[35])
+                    );
+                    vec3 previousForward = vec3(
+                        uintBitsToFloat(scene.data[36]),
+                        uintBitsToFloat(scene.data[37]),
+                        uintBitsToFloat(scene.data[38])
+                    );
+                    float previousTanHalfFov = uintBitsToFloat(scene.data[39]);
+                    float previousAspect = uintBitsToFloat(scene.data[40]);
+                    vec3 relative = currentAnchor - previousOrigin;
+                    float depth = dot(relative, previousForward);
+                    if (depth <= 0.001 || previousTanHalfFov <= 0.000001 || previousAspect <= 0.000001) {
+                        return false;
+                    }
+                    float ndcX = dot(relative, previousRight) / (depth * previousAspect * previousTanHalfFov);
+                    float ndcY = dot(relative, previousUp) / (depth * previousTanHalfFov);
+                    if (abs(ndcX) > 1.0 || abs(ndcY) > 1.0) return false;
+                    ivec2 rounded = ivec2(floor(vec2(
+                        (ndcX * 0.5 + 0.5) * float(width),
+                        (0.5 - ndcY * 0.5) * float(height)
+                    )));
+                    if (rounded.x < 0 || rounded.y < 0
+                            || rounded.x >= int(width) || rounded.y >= int(height)) return false;
+                    previousPixel = uvec2(rounded);
+                    return true;
+                }
+
+                bool p16ResolveHistoryBase(
+                        uvec2 pixel,
+                        uint width,
+                        uint height,
+                        vec3 currentOrigin,
+                        vec3 currentDirection,
+                        uint currentBase,
+                        out uint previousBase
+                ) {
+                    float currentDistance = uintBitsToFloat(scene.data[currentBase + 6u]);
+                    if (!(currentDistance > 0.0)) {
+                        // A strict sky miss has no finite world-space anchor. Reuse only the
+                        // same pixel when its previous/current sky rays are effectively
+                        // identical; camera rotation therefore resets immediately. Fractional
+                        // accepted/rejected misses carry a cohort anchor and use the path below.
+                        uint currentControl = scene.data[currentBase + 7u];
+                        if (scene.data[26] == 0u
+                                || (currentControl & P16_HISTORY_COVERAGE_COHORT_FLAG) != 0u
+                                || (currentControl & P16_HISTORY_MATERIAL_MASK) != 0u) return false;
+                        previousBase = scene.data[24]
+                                + (pixel.y * width + pixel.x) * P16_HISTORY_RECORD_WORDS;
+                        if (!p16HistoryIdentityMatches(previousBase, currentBase)) return false;
+                        vec3 previousDirection = p16PreviousRayDirection(pixel, width, height);
+                        return dot(previousDirection, currentDirection) >= 0.999999;
+                    }
+                    vec3 currentAnchor = currentOrigin + currentDirection * currentDistance;
+                    uvec2 previousPixel;
+                    if (!p16ReprojectAnchor(currentAnchor, width, height, previousPixel)) return false;
+                    previousBase = scene.data[24]
+                            + (previousPixel.y * width + previousPixel.x) * P16_HISTORY_RECORD_WORDS;
+                    if (!p16HistoryIdentityMatches(previousBase, currentBase)) return false;
+
+                    float previousDistance = uintBitsToFloat(scene.data[previousBase + 6u]);
+                    if (!(previousDistance > 0.0)) return false;
+                    vec3 previousOrigin = vec3(
+                        uintBitsToFloat(scene.data[27]),
+                        uintBitsToFloat(scene.data[28]),
+                        uintBitsToFloat(scene.data[29])
+                    );
+                    vec3 previousAnchor = previousOrigin
+                            + p16PreviousRayDirection(previousPixel, width, height) * previousDistance;
+                    float pixelFootprint = 2.0 * max(currentDistance, previousDistance)
+                            * max(uintBitsToFloat(scene.data[20]), uintBitsToFloat(scene.data[39]))
+                            / max(float(height), 1.0);
+                    float anchorTolerance = clamp(pixelFootprint * 1.5, 0.025, 0.35);
+                    return distance(currentAnchor, previousAnchor) <= anchorTolerance;
+                }
+
+                vec3 p16ResolveFinalRadiance(
+                        uvec2 pixel,
+                        uint width,
+                        uint height,
+                        vec3 currentOrigin,
+                        vec3 currentDirection,
+                        vec3 currentRadiance
+                ) {
+                    uint currentBase = scene.data[25]
+                            + (pixel.y * width + pixel.x) * P16_HISTORY_RECORD_WORDS;
+                    uint sampleCount = 1u;
+                    vec3 resolved = currentRadiance;
+                    uint previousBase;
+                    if (scene.data[48] > 1u && p16ResolveHistoryBase(
+                            pixel,
+                            width,
+                            height,
+                            currentOrigin,
+                            currentDirection,
+                            currentBase,
+                            previousBase
+                    )) {
+                        uint historyLimit = max(scene.data[48], 1u);
+                        uint previousSamples = clamp(p16HistorySampleCount(previousBase), 1u, historyLimit);
+                        sampleCount = min(previousSamples + 1u, historyLimit);
+                        float historyWeight = float(previousSamples) / float(previousSamples + 1u);
+                        resolved = mix(currentRadiance, unpackRgb(scene.data[previousBase]), historyWeight);
+                    }
+                    scene.data[currentBase] = packRgba(resolved, 255u);
+                    scene.data[currentBase + 7u] = (scene.data[currentBase + 7u] & ~P16_HISTORY_SAMPLE_MASK)
+                            | (min(sampleCount, 255u) << 16u);
+                    return resolved;
+                }
 
                 vec3 p16SurfaceProperties(HitResult hit) {
                     if (hit.materialId < scene.data[23]) {
@@ -273,9 +464,9 @@ final class P16ReflectionPassShader {
                     uint height = scene.data[5];
                     if (pixel.x >= width || pixel.y >= height) return;
 
-                    // P16 historically affected only the final GI composite debug mode.
+                    // The split pass owns the final GI composite resolve and gamma. Reflection
+                    // remains optional inside this pass.
                     if (scene.data[22] != 11u) return;
-                    if (scene.data[46] == 0u || scene.data[42] == 0u) return;
 
                     vec3 origin = vec3(
                         uintBitsToFloat(scene.data[8]),
@@ -310,20 +501,29 @@ final class P16ReflectionPassShader {
                     uint pixelIndex = pixelBase + (height - 1u - pixel.y) * width + pixel.x;
                     vec3 baseRadiance = unpackRgb(scene.data[pixelIndex]);
 
-                    P15TraceResult primaryTrace = p15TraceFiltered(
-                        origin,
-                        direction,
-                        uintBitsToFloat(scene.data[7])
-                    );
-                    if (primaryTrace.hit.hit == 0u) {
-                        scene.data[pixelIndex] = packRgba(applyVanillaGamma(baseRadiance), 255u);
-                        return;
+                    vec3 finalLinearRadiance = baseRadiance;
+                    if (scene.data[46] != 0u && scene.data[42] != 0u) {
+                        P15TraceResult primaryTrace = p15TraceFiltered(
+                            origin,
+                            direction,
+                            uintBitsToFloat(scene.data[7])
+                        );
+                        if (primaryTrace.hit.hit != 0u) {
+                            finalLinearRadiance += p16ReflectionRgb(primaryTrace.hit, origin, direction)
+                                    * primaryTrace.transmission;
+                        }
                     }
 
-                    vec3 reflected = p16ReflectionRgb(primaryTrace.hit, origin, direction)
-                            * primaryTrace.transmission;
+                    vec3 resolvedLinearRadiance = p16ResolveFinalRadiance(
+                        pixel,
+                        width,
+                        height,
+                        origin,
+                        direction,
+                        finalLinearRadiance
+                    );
                     scene.data[pixelIndex] = packRgba(
-                            applyVanillaGamma(baseRadiance + reflected),
+                            applyVanillaGamma(resolvedLinearRadiance),
                             255u
                     );
                 }

@@ -25,6 +25,7 @@ import dev.totem.lumen.render.HybridTerrainPolicy;
 import dev.totem.lumen.integration.HybridTerrainRenderer;
 import net.minecraft.client.renderer.state.level.CameraRenderState;
 import dev.totem.lumen.scene.FrameSnapshot;
+import dev.totem.lumen.scene.ResidentSectionSelector;
 import dev.totem.lumen.scene.SectionKey;
 import dev.totem.lumen.scene.SectionSnapshot;
 import dev.totem.lumen.scene.SectionVoxelData;
@@ -41,8 +42,6 @@ import org.lwjgl.vulkan.VkCommandBuffer;
 import org.lwjgl.vulkan.VkImageMemoryBarrier;
 
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
@@ -56,8 +55,9 @@ import java.util.Set;
 public final class P5StableLookupRenderer {
     private static final int MAX_SECTIONS = 128;
     private static final int MIN_SECTIONS = 16;
+    private static final double RESIDENT_HOLD_DISTANCE = 8.0;
     private static final int HEADER_WORDS = 96;
-    private static final int LOOKUP_CAPACITY = 128;
+    private static final int LOOKUP_CAPACITY = 256;
     private static final int LOOKUP_BASE_WORD = HEADER_WORDS;
     private static final int LOOKUP_WORDS = LOOKUP_CAPACITY * GpuSectionLookupTable.WORDS_PER_BUCKET;
     private static final int VOXEL_BASE_WORD = LOOKUP_BASE_WORD + LOOKUP_WORDS;
@@ -78,6 +78,7 @@ public final class P5StableLookupRenderer {
     private static final int STATIC_DATA_END_WORD = MATERIAL_EMISSION_BASE_WORD
             + MAX_MATERIALS * MATERIAL_EMISSION_WORDS_PER_RECORD;
     private static final int HISTORY_RECORD_WORDS = 8;
+    static final int HISTORY_ABI_VERSION = 2;
     private static final int MAX_STEPS = 512;
     private static final float MAX_DISTANCE = 256.0f;
     private static final int CAMERA_UPLOAD_WORDS = HEADER_WORDS;
@@ -100,23 +101,27 @@ public final class P5StableLookupRenderer {
             } scene;
 
             const uint LOOKUP_BASE = 96u;
-            const uint LOOKUP_CAPACITY = 128u;
-            const uint LOOKUP_MASK = 127u;
+            const uint LOOKUP_CAPACITY = 256u;
+            const uint LOOKUP_MASK = 255u;
             const uint LOOKUP_WORDS_PER_BUCKET = 4u;
-            const uint VOXEL_BASE = 608u;
+            const uint VOXEL_BASE = 1120u;
             const uint VOXELS_PER_SECTION = 4096u;
-            const uint SECTION_LIGHT_COUNT_BASE = 524896u;
-            const uint SECTION_LIGHT_INDEX_BASE = 525024u;
-            const uint LIGHT_DATA_BASE = 526048u;
+            const uint SECTION_LIGHT_COUNT_BASE = 525408u;
+            const uint SECTION_LIGHT_INDEX_BASE = 525536u;
+            const uint LIGHT_DATA_BASE = 526560u;
             const uint MAX_GLOBAL_LIGHTS = 256u;
             const uint MAX_LIGHTS_PER_SECTION = 8u;
             const uint LIGHT_WORDS_PER_RECORD = 8u;
-            const uint MATERIAL_EMISSION_BASE = 528096u;
+            const uint MATERIAL_EMISSION_BASE = 528608u;
             const uint MATERIAL_EMISSION_WORDS_PER_RECORD = 16u;
             const uint HISTORY_RECORD_WORDS = 8u;
+            const uint HISTORY_ABI_VERSION = 2u;
             const float TEMPORAL_HISTORY_WEIGHT = 0.80;
             const uint GI_HISTORY_MAX_SAMPLES = 64u;
             const uint HISTORY_MATERIAL_MASK = 0x0000FFFFu;
+            const uint HISTORY_SAMPLE_MASK = 0x00FF0000u;
+            const uint HISTORY_VERSION_MASK = 0x0F000000u;
+            const uint HISTORY_COVERAGE_COHORT_FLAG = 0x10000000u;
             const float GI_MAX_DISTANCE = 48.0;
             const float GI_STRENGTH = 0.65;
             const float RGB_RADIAL_DISTANCE_SCALE = RGB_RADIAL_DISTANCE_SCALE_VALUE;
@@ -710,22 +715,56 @@ public final class P5StableLookupRenderer {
             }
 
             uint historySampleCount(uint historyBase) {
-                return scene.data[historyBase + 7u] >> 16u;
+                return (scene.data[historyBase + 7u] & HISTORY_SAMPLE_MASK) >> 16u;
+            }
+
+            uint historyAbiVersion(uint historyBase) {
+                return (scene.data[historyBase + 7u] & HISTORY_VERSION_MASK) >> 24u;
+            }
+
+            bool historyHasCoverageCohort(uint historyBase) {
+                return (scene.data[historyBase + 7u] & HISTORY_COVERAGE_COHORT_FLAG) != 0u;
+            }
+
+            uint historyCoverageCohort(uint historyBase) {
+                return scene.data[historyBase + 5u];
+            }
+
+            float historyCoverageAnchorDistance(uint historyBase) {
+                return uintBitsToFloat(scene.data[historyBase + 6u]);
+            }
+
+            // A 32-bit cohort hash is only the first identity component. The post-lighting
+            // resolve must also reconstruct and compare the previous/current anchor positions
+            // from camera rays plus historyCoverageAnchorDistance(). A hash match alone must
+            // never authorize reuse.
+
+            uint historyNormalKey(ivec3 rawNormal) {
+                vec3 normal = vec3(rawNormal);
+                if (dot(normal, normal) < 0.000001) return 0u;
+                normal /= abs(normal.x) + abs(normal.y) + abs(normal.z);
+                vec2 oct = normal.xy;
+                if (normal.z < 0.0) {
+                    vec2 octSign = vec2(
+                        oct.x >= 0.0 ? 1.0 : -1.0,
+                        oct.y >= 0.0 ? 1.0 : -1.0
+                    );
+                    oct = (vec2(1.0) - abs(oct.yx)) * octSign;
+                }
+                uvec2 encoded = uvec2(round(clamp(oct * 0.5 + 0.5, vec2(0.0), vec2(1.0)) * 65535.0));
+                return encoded.x | (encoded.y << 16u);
             }
 
             bool historyMatches(uint historyBase, HitResult hit) {
+                if (historyAbiVersion(historyBase) != HISTORY_ABI_VERSION) return false;
                 if (historyMaterial(historyBase) != hit.materialId + 1u) return false;
                 ivec3 previousVoxel = ivec3(
                     int(scene.data[historyBase + 1u]),
                     int(scene.data[historyBase + 2u]),
                     int(scene.data[historyBase + 3u])
                 );
-                ivec3 previousNormal = ivec3(
-                    int(scene.data[historyBase + 4u]),
-                    int(scene.data[historyBase + 5u]),
-                    int(scene.data[historyBase + 6u])
-                );
-                return all(equal(previousVoxel, hit.voxel)) && all(equal(previousNormal, hit.normal));
+                return all(equal(previousVoxel, hit.voxel))
+                        && scene.data[historyBase + 4u] == historyNormalKey(hit.normal);
             }
 
             vec3 spatialHistoryRgb(
@@ -753,12 +792,8 @@ public final class P5StableLookupRenderer {
                         uint sampleBase = scene.data[24] + sampleLinear * HISTORY_RECORD_WORDS;
                         if (historyMaterial(sampleBase) != hit.materialId + 1u) continue;
 
-                        ivec3 sampleNormal = ivec3(
-                            int(scene.data[sampleBase + 4u]),
-                            int(scene.data[sampleBase + 5u]),
-                            int(scene.data[sampleBase + 6u])
-                        );
-                        if (!all(equal(sampleNormal, hit.normal))) continue;
+                        if (historyAbiVersion(sampleBase) != HISTORY_ABI_VERSION) continue;
+                        if (scene.data[sampleBase + 4u] != historyNormalKey(hit.normal)) continue;
 
                         ivec3 sampleVoxel = ivec3(
                             int(scene.data[sampleBase + 1u]),
@@ -843,19 +878,29 @@ public final class P5StableLookupRenderer {
             void writeHistory(uvec2 pixel, uint width, HitResult hit, uint color, uint sampleCount) {
                 uint linear = pixel.y * width + pixel.x;
                 uint historyBase = scene.data[25] + linear * HISTORY_RECORD_WORDS;
+                uint coverageCohort = p18CapturedPrimaryCoverageCohort();
                 scene.data[historyBase] = color;
-                if (hit.hit == 0u) {
-                    scene.data[historyBase + 7u] = 0u;
-                    return;
-                }
                 scene.data[historyBase + 1u] = uint(hit.voxel.x);
                 scene.data[historyBase + 2u] = uint(hit.voxel.y);
                 scene.data[historyBase + 3u] = uint(hit.voxel.z);
-                scene.data[historyBase + 4u] = uint(hit.normal.x);
-                scene.data[historyBase + 5u] = uint(hit.normal.y);
-                scene.data[historyBase + 6u] = uint(hit.normal.z);
-                uint packedSamples = min(sampleCount, GI_HISTORY_MAX_SAMPLES) << 16u;
-                scene.data[historyBase + 7u] = packedSamples | ((hit.materialId + 1u) & HISTORY_MATERIAL_MASK);
+                scene.data[historyBase + 4u] = hit.hit == 0u ? 0u : historyNormalKey(hit.normal);
+                scene.data[historyBase + 5u] = coverageCohort;
+                // Word 6 is the reference-ray distance used by the final resolve. For a
+                // fractional candidate it anchors both accepted and rejected outcomes to the
+                // same surface. Strict hits use their primary distance; strict misses have no
+                // reconstructable world-space anchor.
+                scene.data[historyBase + 6u] = coverageCohort != 0u
+                        ? floatBitsToUint(p18CapturedPrimaryCoverageDistance())
+                        : (hit.hit == 0u ? 0u : floatBitsToUint(hit.distance));
+                uint packedControl = (HISTORY_ABI_VERSION << 24u)
+                        | (min(sampleCount, 255u) << 16u)
+                        | (coverageCohort == 0u ? 0u : HISTORY_COVERAGE_COHORT_FLAG);
+                if (hit.hit == 0u) {
+                    scene.data[historyBase + 7u] = packedControl;
+                    return;
+                }
+                scene.data[historyBase + 7u] = packedControl
+                        | ((hit.materialId + 1u) & HISTORY_MATERIAL_MASK);
             }
 
             uint debugColor(HitResult hit, vec3 primaryOrigin, vec3 primaryDirection) {
@@ -939,7 +984,7 @@ public final class P5StableLookupRenderer {
                     color = debugColor(primaryHit, origin, direction);
                 }
 
-                if (scene.data[46] == 0u) {
+                if (scene.data[94] == 0u) {
                     color = packRgba(applyVanillaGamma(unpackRgb(color)), 255u);
                 }
 
@@ -1006,7 +1051,9 @@ public final class P5StableLookupRenderer {
     private static long sceneSignature = Long.MIN_VALUE;
     private static long lastSubmittedFrame = -1;
     private static int historyReadIndex = -1;
+    private static int lastLookupSize;
     private static int lastLookupMaxProbe;
+    private static double lastLookupLoadFactor;
     private static int lastLightCount;
     private static int lastMaxLightsPerSection;
     private static int lastPopulatedLightLists;
@@ -1062,7 +1109,7 @@ public final class P5StableLookupRenderer {
         VulkanDevice device = MinecraftVulkanBridge.currentDevice();
         if (capabilities == null || device == null || !capabilities.canUseMinecraftFrameSubmissionForCompute()) return;
 
-        List<SectionSnapshot> sections = nearestSections(frame);
+        List<SectionSnapshot> sections = selectResidentSections(frame);
         if (sections.size() < MIN_SECTIONS) return;
 
         long settingsRevision = RendererSettings.revision();
@@ -1415,10 +1462,13 @@ public final class P5StableLookupRenderer {
         if (!firstFrameLogged) {
             firstFrameLogged = true;
             TotemLumenClient.LOGGER.info(
-                    "P5 stable GPU lookup READY: {}x{}, slots={}/{}, lookupMaxProbe={}, mode={}, sceneUpload={}",
+                    "P5 stable GPU lookup READY: {}x{}, slots={}/{}, lookupEntries={}/{}, lookupLoadFactor={}, lookupMaxProbe={}, mode={}, sceneUpload={}",
                     resources == null ? 0 : resources.width,
                     resources == null ? 0 : resources.height,
-                    SLOT_ALLOCATOR.usedSlots(), SLOT_ALLOCATOR.capacity(), lastLookupMaxProbe,
+                    SLOT_ALLOCATOR.usedSlots(), SLOT_ALLOCATOR.capacity(),
+                    lastLookupSize, LOOKUP_CAPACITY,
+                    String.format(java.util.Locale.ROOT, "%.3f", lastLookupLoadFactor),
+                    lastLookupMaxProbe,
                     submittedMode.label(), fullSceneUpload
             );
             TotemLumenClient.LOGGER.info(
@@ -1512,7 +1562,7 @@ public final class P5StableLookupRenderer {
                 / 1_000_000.0;
         double effectiveFps = averageMs <= 0.0 ? 0.0 : 1000.0 / averageMs;
         TotemLumenClient.LOGGER.info(
-                "Performance probe RESULT: mode={}, render={}x{}, avgSubmitToCompleteMs={}, effectiveTotemFps={}, giSamples={}, shadowSamples={}, reflections={}, p17PackMs={}, p17UploadBytes={}",
+                "Performance probe RESULT: mode={}, render={}x{}, avgSubmitToCompleteMs={}, effectiveTotemFps={}, giSamples={}, shadowSamples={}, reflections={}, lookupEntries={}/{}, lookupLoadFactor={}, lookupMaxProbe={}, p17PackMs={}, p17UploadBytes={}",
                 submittedMode.label(),
                 activeRenderWidth,
                 activeRenderHeight,
@@ -1521,6 +1571,10 @@ public final class P5StableLookupRenderer {
                 RendererSettings.giQuality().samples(),
                 RendererSettings.shadowQuality().samples(),
                 RendererSettings.reflectionsEnabled(),
+                lastLookupSize,
+                LOOKUP_CAPACITY,
+                String.format(java.util.Locale.ROOT, "%.3f", lastLookupLoadFactor),
+                lastLookupMaxProbe,
                 String.format(
                         java.util.Locale.ROOT,
                         "%.3f",
@@ -1532,21 +1586,17 @@ public final class P5StableLookupRenderer {
         performanceProbeAccumulatedNanos = 0L;
     }
 
-    private static List<SectionSnapshot> nearestSections(FrameSnapshot frame) {
-        List<SectionSnapshot> snapshots = new ArrayList<>(SceneExtractionBridge.scene().sectionSnapshots());
-        snapshots.removeIf(snapshot -> !snapshot.key().dimensionId().equals(frame.dimensionId()));
-        snapshots.sort(Comparator.comparingDouble(snapshot -> distanceSquared(frame, snapshot)));
-        if (snapshots.size() > MAX_SECTIONS) {
-            snapshots = new ArrayList<>(snapshots.subList(0, MAX_SECTIONS));
-        }
-        return List.copyOf(snapshots);
-    }
-
-    private static double distanceSquared(FrameSnapshot frame, SectionSnapshot snapshot) {
-        double x = snapshot.key().x() * 16.0 + 8.0 - frame.cameraX();
-        double y = snapshot.key().y() * 16.0 + 8.0 - frame.cameraY();
-        double z = snapshot.key().z() * 16.0 + 8.0 - frame.cameraZ();
-        return x * x + y * y + z * z;
+    private static List<SectionSnapshot> selectResidentSections(FrameSnapshot frame) {
+        int viewportWidth = Math.max(1, Minecraft.getInstance().getWindow().getWidth());
+        int viewportHeight = Math.max(1, Minecraft.getInstance().getWindow().getHeight());
+        return ResidentSectionSelector.select(
+                SceneExtractionBridge.scene().sectionSnapshots(),
+                frame,
+                Set.copyOf(RESIDENT_KEYS),
+                MAX_SECTIONS,
+                viewportWidth / (double) viewportHeight,
+                RESIDENT_HOLD_DISTANCE
+        );
     }
 
     private static long sectionSignature(List<SectionSnapshot> sections) {
@@ -1587,7 +1637,9 @@ public final class P5StableLookupRenderer {
         historyReadIndex = -1;
         lastCompletedFrame = null;
         lastCompletedMode = null;
+        lastLookupSize = 0;
         lastLookupMaxProbe = 0;
+        lastLookupLoadFactor = 0.0;
         lastLightCount = 0;
         lastMaxLightsPerSection = 0;
         lastPopulatedLightLists = 0;
@@ -1659,7 +1711,7 @@ public final class P5StableLookupRenderer {
         putWord(buffer, 44, RendererSettings.giQuality().samples());
         putWord(buffer, 45, RendererSettings.shadowQuality().samples());
         boolean reflectionPassActive = RendererSettings.reflectionsEnabled()
-                && P16MultipassReflection.ready();
+                && P16MultipassReflection.readyFor(resources.scene);
         putWord(buffer, 46, reflectionPassActive ? 1 : 0);
         putWord(buffer, 47, RendererSettings.waterReflections() ? 1 : 0);
         putWord(buffer, 48, RendererSettings.temporalQuality().historySamples());
@@ -1727,6 +1779,9 @@ public final class P5StableLookupRenderer {
                 ClientHeldLightState.captured().size(),
                 GpuSectionLightLists.RESERVED_DYNAMIC_LIGHTS
         ));
+        // The split post-lighting pass owns final-linear history resolve and gamma whenever
+        // its scene binding is ready. Reflection remains independently controlled by word 46.
+        putWord(buffer, 94, P16MultipassReflection.readyFor(resources.scene) ? 1 : 0);
     }
 
     private static long currentAnimationTick(FrameSnapshot frame) {
@@ -1750,7 +1805,9 @@ public final class P5StableLookupRenderer {
             }
         }
         lookup.writeTo(buffer, LOOKUP_BASE_WORD);
+        lastLookupSize = lookup.size();
         lastLookupMaxProbe = lookup.maxProbe();
+        lastLookupLoadFactor = lookup.loadFactor();
 
         for (int word = SECTION_LIGHT_COUNT_BASE_WORD; word < STATIC_DATA_END_WORD; word++) {
             putWord(buffer, word, 0);
