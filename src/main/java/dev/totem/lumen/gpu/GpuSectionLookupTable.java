@@ -60,20 +60,24 @@ public final class GpuSectionLookupTable {
         throw new IllegalStateException("GPU section lookup table is full: " + capacity);
     }
 
-    public int findSlot(int sectionX, int sectionY, int sectionZ) {
+    public LookupResult find(int sectionX, int sectionY, int sectionZ) {
         int start = hash(sectionX, sectionY, sectionZ) & mask;
         for (int probe = 0; probe < capacity; probe++) {
             int bucket = (start + probe) & mask;
             int base = bucket * WORDS_PER_BUCKET;
             int slotPlusOne = words[base + 3];
             if (slotPlusOne == 0) {
-                return -1;
+                return new LookupResult(-1, probe + 1);
             }
             if (words[base] == sectionX && words[base + 1] == sectionY && words[base + 2] == sectionZ) {
-                return slotPlusOne - 1;
+                return new LookupResult(slotPlusOne - 1, probe + 1);
             }
         }
-        return -1;
+        return new LookupResult(-1, capacity);
+    }
+
+    public int findSlot(int sectionX, int sectionY, int sectionZ) {
+        return find(sectionX, sectionY, sectionZ).slot();
     }
 
     public void writeTo(ByteBuffer buffer, int baseWord) {
@@ -95,6 +99,10 @@ public final class GpuSectionLookupTable {
         return maxProbe;
     }
 
+    public double loadFactor() {
+        return size / (double) capacity;
+    }
+
     public int wordCount() {
         return words.length;
     }
@@ -106,5 +114,12 @@ public final class GpuSectionLookupTable {
         h ^= z * 0xC2B2AE3D;
         h ^= h >>> 16;
         return h;
+    }
+
+    /** Lookup result with the number of buckets inspected, including the hit or terminating empty bucket. */
+    public record LookupResult(int slot, int probes) {
+        public boolean found() {
+            return slot >= 0;
+        }
     }
 }

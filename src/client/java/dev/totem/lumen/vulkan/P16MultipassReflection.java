@@ -9,7 +9,7 @@ import org.lwjgl.vulkan.VK10;
 import org.lwjgl.vulkan.VkBufferMemoryBarrier;
 import org.lwjgl.vulkan.VkCommandBuffer;
 
-/** Owns the split reflection pipeline with menu-time prewarming and scene-time binding. */
+/** Owns the split post-lighting pipeline with menu-time prewarming and scene-time binding. */
 public final class P16MultipassReflection {
     public static final String WORKER_NAME = "TotemLumen-P16Pipeline";
 
@@ -207,7 +207,7 @@ public final class P16MultipassReflection {
     ) {
         VulkanComputeProgram program = activeProgram;
         VulkanOwnedBuffer scene = attachedScene;
-        if (program == null || scene == null || !RendererSettings.reflectionsEnabled()) return;
+        if (program == null || scene == null) return;
 
         try (MemoryStack stack = MemoryStack.stackPush()) {
             VkBufferMemoryBarrier.Buffer baseToReflection = VkBufferMemoryBarrier.calloc(1, stack);
@@ -245,7 +245,8 @@ public final class P16MultipassReflection {
         if (!firstDispatchLogged) {
             firstDispatchLogged = true;
             TotemLumenClient.LOGGER.info(
-                    "P16 multipass reflection READY: base=P12-P15+P14E+P17, reflection=separate-compute-pass+P14E+P17, maxBounces={}, maxDistance={}",
+                    "P16 post-lighting resolve READY: base=P12-P15+P14E+P17, reflectionActive={}, reflection=separate-compute-pass+P14E+P17, maxBounces={}, maxDistance={}",
+                    RendererSettings.reflectionsEnabled(),
                     RendererSettings.reflectionBounces(),
                     RendererSettings.reflectionDistance()
             );
@@ -255,6 +256,10 @@ public final class P16MultipassReflection {
 
     public static boolean ready() {
         return activeProgram != null;
+    }
+
+    static boolean readyFor(VulkanOwnedBuffer scene) {
+        return scene != null && attachedScene == scene && activeProgram != null;
     }
 
     public static Throwable failure() {

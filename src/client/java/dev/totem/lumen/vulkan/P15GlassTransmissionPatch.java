@@ -343,7 +343,11 @@ final class P15GlassTransmissionPatch {
         String marker = "color = giCompositeFromIndirect(";
         int start = source.indexOf(marker);
         if (start < 0) {
-            throw new IllegalStateException("P15 glass patch marker missing: GI composite call");
+            marker = "color = giCurrentColor(";
+            start = source.indexOf(marker);
+            if (start < 0) {
+                throw new IllegalStateException("P15 glass patch marker missing: current GI composite call");
+            }
         }
         int end = source.indexOf(");", start);
         if (end < 0) {
@@ -351,7 +355,8 @@ final class P15GlassTransmissionPatch {
         }
         end += 2;
         String call = source.substring(start, end);
-        if (!call.contains("primaryHit") || !call.contains("indirectColor")) {
+        if (!call.contains("primaryHit")
+                || (marker.contains("giCompositeFromIndirect") && !call.contains("indirectColor"))) {
             throw new IllegalStateException("P15 glass patch GI composite call did not match expected arguments");
         }
         String replacement = "color = packRgba(unpackRgb(" + call.substring("color = ".length(), call.length() - 1)

@@ -113,7 +113,38 @@ final class P18TexturedSurfaceShaderPatch {
                     return value;
                 }
 
-                bool p18AlphaAccept(uint textureHandle, vec2 uv, uint salt) {
+                bool p18PrimaryCoverageCapture;
+                uint p18PrimaryCoverageCohort;
+                float p18PrimaryCoverageDistance;
+
+                void p18BeginPrimaryCoverageCapture() {
+                    p18PrimaryCoverageCapture = true;
+                    p18PrimaryCoverageCohort = 0u;
+                    p18PrimaryCoverageDistance = 0.0;
+                }
+
+                void p18EndPrimaryCoverageCapture() {
+                    p18PrimaryCoverageCapture = false;
+                }
+
+                void p18ObservePrimaryCoverage(uint cohort, float distance) {
+                    if (!p18PrimaryCoverageCapture || cohort == 0u) return;
+                    if (p18PrimaryCoverageCohort == 0u || distance < p18PrimaryCoverageDistance) {
+                        p18PrimaryCoverageCohort = cohort;
+                        p18PrimaryCoverageDistance = max(distance, 0.0);
+                    }
+                }
+
+                uint p18CapturedPrimaryCoverageCohort() {
+                    return p18PrimaryCoverageCohort;
+                }
+
+                float p18CapturedPrimaryCoverageDistance() {
+                    return p18PrimaryCoverageDistance;
+                }
+
+                bool p18AlphaAccept(uint textureHandle, vec2 uv, uint salt, out uint coverageCohort) {
+                    coverageCohort = 0u;
                     uint alpha = p18AlbedoAlpha(textureHandle, uv);
                     if (alpha == 0u) return false;
                     if (alpha == 255u) return true;
@@ -126,11 +157,18 @@ final class P18TexturedSurfaceShaderPatch {
                         return float(alpha) / 255.0 >= alphaCutoff;
                     }
 
-                    uint state = textureHandle * 0x9E3779B1u
-                            ^ floatBitsToUint(uv.x) * 0x85EBCA77u
-                            ^ floatBitsToUint(uv.y) * 0xC2B2AE3Du
-                            ^ salt
-                            ^ scene.data[41] * 0x27D4EB2Du;
+                    uint width = max(scene.data[descriptor + 1u], 1u);
+                    uint height = max(scene.data[descriptor + 2u], 1u);
+                    vec2 wrapped = fract(uv);
+                    uint texelX = min(width - 1u, uint(floor(wrapped.x * float(width))));
+                    uint texelY = min(height - 1u, uint(floor(wrapped.y * float(height))));
+                    uint stableState = textureHandle * 0x9E3779B1u
+                            ^ texelX * 0x85EBCA77u
+                            ^ texelY * 0xC2B2AE3Du
+                            ^ salt;
+                    coverageCohort = p18AlphaHash(stableState);
+                    if (coverageCohort == 0u) coverageCohort = 1u;
+                    uint state = coverageCohort ^ scene.data[41] * 0x27D4EB2Du;
                     uint hashed = p18AlphaHash(state);
                     float coverageSample = float(hashed & 0x00FFFFFFu) / 16777216.0;
                     return coverageSample < float(alpha) / 255.0;
@@ -234,7 +272,10 @@ final class P18TexturedSurfaceShaderPatch {
                                 ^ uint(voxel.z) * 0xC2B2AE3Du
                                 ^ surfaceSetId * 0x27D4EB2Du
                                 ^ uint(face);
-                        if (!p18AlphaAccept(textureHandle, uv, alphaSalt)) {
+                        uint coverageCohort;
+                        bool alphaAccepted = p18AlphaAccept(textureHandle, uv, alphaSalt, coverageCohort);
+                        p18ObservePrimaryCoverage(coverageCohort, candidateDistance);
+                        if (!alphaAccepted) {
                             return;
                         }
                     }
@@ -309,14 +350,22 @@ final class P18TexturedSurfaceShaderPatch {
                     if (distance < minDistance - 0.00001 || distance > maxDistance + 0.00001) return;
                     if (found && distance >= bestDistance) return;
 
-                    vec2 surfaceUv = uvA * (1.0 - u - v) + uvB * u + uvC * v;
-                    if (!p18AlphaAccept(textureHandle, surfaceUv, alphaSalt)) return;
-
                     vec3 geometricNormal = cross(edge1, edge2);
                     float normalLength = length(geometricNormal);
                     if (normalLength < 0.000001) return;
                     geometricNormal /= normalLength;
                     if (dot(geometricNormal, direction) > 0.0) geometricNormal = -geometricNormal;
+
+                    vec2 surfaceUv = uvA * (1.0 - u - v) + uvB * u + uvC * v;
+                    uint coverageCohort;
+                    bool alphaAccepted = p18AlphaAccept(
+                        textureHandle,
+                        surfaceUv,
+                        alphaSalt,
+                        coverageCohort
+                    );
+                    p18ObservePrimaryCoverage(coverageCohort, distance);
+                    if (!alphaAccepted) return;
 
                     found = true;
                     bestDistance = max(distance, 0.0);
@@ -325,6 +374,15 @@ final class P18TexturedSurfaceShaderPatch {
 
                 """;
         source = source.substring(0, triangleIndex) + triangle + source.substring(meshIndex);
+
+        source = replaceRequiredOnce(
+                source,
+                "HitResult primaryHit = traceRay(origin, direction);",
+                "p18BeginPrimaryCoverageCapture();\n"
+                        + "    HitResult primaryHit = traceRay(origin, direction);\n"
+                        + "    p18EndPrimaryCoverageCapture();",
+                "primary coverage capture scope"
+        );
 
         meshIndex = source.indexOf(meshStart);
         String geometryStart = "bool p14IntersectVoxelGeometry(";

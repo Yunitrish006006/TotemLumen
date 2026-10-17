@@ -176,20 +176,6 @@ final class P14EFluidOpticsPatch {
                 "P16 fluid surface properties"
         );
 
-        String oldPrimary = """
-                    P15TraceResult primaryTrace = p15TraceFiltered(
-                        origin,
-                        direction,
-                        uintBitsToFloat(scene.data[7])
-                    );
-                    if (primaryTrace.hit.hit == 0u) {
-                        scene.data[pixelIndex] = packRgba(applyVanillaGamma(baseRadiance), 255u);
-                        return;
-                    }
-
-                    vec3 reflected = p16ReflectionRgb(primaryTrace.hit, origin, direction)
-                            * primaryTrace.transmission;
-                """;
         String newPrimary = """
                     HitResult p14eRawPrimary = traceRay(origin, direction);
                     P15TraceResult primaryTrace = p15TraceFiltered(
@@ -197,28 +183,37 @@ final class P14EFluidOpticsPatch {
                         direction,
                         uintBitsToFloat(scene.data[7])
                     );
-                    if (primaryTrace.hit.hit == 0u && p14eRawPrimary.hit == 0u) return;
-
                     bool p14eReflectWater = scene.data[47] != 0u
                             && p14eRawPrimary.hit != 0u
                             && p14eRawPrimary.materialId == P14E_WATER_MATERIAL_ID;
                     HitResult p14eReflectionSurface = p14eReflectWater
                             ? p14eRawPrimary
                             : primaryTrace.hit;
-                    if (p14eReflectionSurface.hit == 0u) return;
-                    vec3 reflected = p16ReflectionRgb(p14eReflectionSurface, origin, direction)
-                            * (p14eReflectWater ? vec3(1.0) : primaryTrace.transmission);
-                    scene.data[pixelIndex] = packRgba(
-                            applyVanillaGamma(baseRadiance + reflected),
-                            255u
-                    );
+                    if (p14eReflectionSurface.hit != 0u) {
+                        finalLinearRadiance += p16ReflectionRgb(
+                            p14eReflectionSurface,
+                            origin,
+                            direction
+                        ) * (p14eReflectWater ? vec3(1.0) : primaryTrace.transmission);
+                    }
                 """;
-        return replaceRequiredOnce(
-                source,
-                oldPrimary,
-                newPrimary,
-                "P16 raw exact-water reflection surface"
-        );
+        String primaryStartMarker = "P15TraceResult primaryTrace = p15TraceFiltered(";
+        String primaryEndMarker = "* primaryTrace.transmission;";
+        int primaryStart = source.indexOf(primaryStartMarker);
+        int primaryEnd = source.indexOf(primaryEndMarker, primaryStart);
+        if (primaryStart < 0 || primaryEnd < 0) {
+            throw new IllegalStateException("P14E fluid optics marker missing: P16 raw exact-water reflection surface");
+        }
+        primaryEnd += primaryEndMarker.length();
+        primaryEnd = source.indexOf('}', primaryEnd);
+        if (primaryEnd < 0) {
+            throw new IllegalStateException("P14E fluid optics marker missing: P16 reflection block end");
+        }
+        primaryEnd++;
+        if (source.indexOf(primaryStartMarker, primaryEnd) >= 0) {
+            throw new IllegalStateException("P14E fluid optics marker is ambiguous: P16 raw exact-water reflection surface");
+        }
+        return source.substring(0, primaryStart) + newPrimary + source.substring(primaryEnd);
     }
 
     private static String replaceRequiredOnce(String source, String oldText, String newText, String label) {

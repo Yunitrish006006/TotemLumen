@@ -11,10 +11,14 @@ public final class ShaderVariantVerifier {
         String reflection = P16MultipassReflection.buildSourceForVerification();
         String candidate = FilteredTraceShaderPatch.VARIANT;
         require(LumenShaderVariant.select("baseline", full) == full, "Baseline changed");
-        require(LumenShaderVariant.hash(LumenShaderVariant.select(candidate, full)).equals(
-                "66869b9374362efb6878a1446e838b0ff89293288eea8ba7400823aa84e05c06"), "Full candidate drift");
-        require(LumenShaderVariant.hash(LumenShaderVariant.select(candidate, reflection)).equals(
-                "f823a2ff9238219d47e942ddd85391ee806ffaa19c188fdadab693e0c3d6b5f9"), "Reflection candidate drift");
+        String fullCandidateHash = LumenShaderVariant.hash(LumenShaderVariant.select(candidate, full));
+        String reflectionCandidateHash = LumenShaderVariant.hash(LumenShaderVariant.select(candidate, reflection));
+        require(fullCandidateHash.equals(
+                "e47b4720bb29066a8f80f5d908048ebbb5970ca06180c161155f98e2ec610bc7"),
+                "Full candidate drift: " + fullCandidateHash);
+        require(reflectionCandidateHash.equals(
+                "6e47724f8f1a95cbcfdb4fab30d09b0aa8c0d48d811ef87636afd6888b1134b9"),
+                "Reflection candidate drift: " + reflectionCandidateHash);
         rejects(() -> LumenShaderVariant.select("typo", full));
         rejects(() -> LumenShaderVariant.select(candidate, "missing anchors"));
         rejects(() -> LumenShaderVariant.select(candidate, full + full));

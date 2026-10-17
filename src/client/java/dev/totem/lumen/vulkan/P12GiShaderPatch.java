@@ -321,28 +321,31 @@ final class P12GiShaderPatch {
         }
 
         String newMainBranch = """
-                if (mode == 10u || mode == 11u) {
+                if (mode == 10u) {
                     uint giHistorySamples = 1u;
                     if (primaryHit.hit == 0u) {
-                        if (mode == 10u) {
-                            color = packRgba(vec3(0.0), 255u);
-                        } else {
-                            color = packRgba(p13SkyRadiance(direction), 255u);
-                        }
+                        color = packRgba(vec3(0.0), 255u);
                         writeHistory(pixel, width, primaryHit, packRgba(vec3(0.0), 255u), giHistorySamples);
                     } else {
                         uint indirectColor = giTemporalIndirectColor(
                             primaryHit, origin, direction, pixel, width, height, giHistorySamples
                         );
                         writeHistory(pixel, width, primaryHit, indirectColor, giHistorySamples);
-                        if (mode == 10u) {
-                            color = packRgba(unpackRgb(indirectColor) * uintBitsToFloat(scene.data[84]), 255u);
-                        } else {
-                            color = giCompositeFromIndirect(
-                                primaryHit, origin, direction, indirectColor
-                            );
-                        }
+                        color = packRgba(unpackRgb(indirectColor) * uintBitsToFloat(scene.data[84]), 255u);
                     }
+                } else if (mode == 11u) {
+                    // Mode 11 transfers one current linear-radiance sample plus current
+                    // identity metadata. The split post-lighting pass owns all accumulation,
+                    // optional reflection composition and the single gamma application.
+                    uint finalHistorySamples = 1u;
+                    if (primaryHit.hit == 0u) {
+                        color = packRgba(p13SkyRadiance(direction), 255u);
+                    } else {
+                        color = giCurrentColor(
+                            primaryHit, origin, direction, pixel, p13FrameSeed(), false
+                        );
+                    }
+                    writeHistory(pixel, width, primaryHit, color, finalHistorySamples);
                 } else if (mode == 8u || mode == 9u) {
                     uint directHistorySamples = 1u;
                     if (primaryHit.hit == 0u) {
@@ -355,6 +358,9 @@ final class P12GiShaderPatch {
                     writeHistory(pixel, width, primaryHit, color, directHistorySamples);
                 } else {
                     color = debugColor(primaryHit, origin, direction);
+                }
+                if (mode == 11u && scene.data[94] == 0u) {
+                    color = packRgba(applyVanillaGamma(unpackRgb(color)), 255u);
                 }
                 """.indent(4);
 

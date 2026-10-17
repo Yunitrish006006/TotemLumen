@@ -13,6 +13,7 @@ public final class P14ShaderCompileVerifier {
     }
 
     public static void main(String[] args) {
+        verifyPrimaryCoverageReferenceContract();
         String bootstrapSource = P5BootstrapShader.source();
         verifyBootstrapSource(bootstrapSource);
 
@@ -29,6 +30,7 @@ public final class P14ShaderCompileVerifier {
         verifyRuntimeQualitySettings(baseSource);
         verifyFixedCapacitySceneTails(baseSource, "full base pass");
         verifyP18TexturedSurfaces(baseSource, "full base pass", false);
+        verifyPrimaryCoverageMetadata(baseSource, "full base pass", true);
         verifyP18LabPbrShading(baseSource, "full base pass", false);
 
         verifyP17DynamicEntitySource(baseSource, "unified full lighting pass");
@@ -41,7 +43,9 @@ public final class P14ShaderCompileVerifier {
         verifyP17DynamicEntitySource(reflectionSource, "P16 reflection pass");
         verifyFixedCapacitySceneTails(reflectionSource, "P16 reflection pass");
         verifyP18TexturedSurfaces(reflectionSource, "P16 reflection pass", true);
+        verifyPrimaryCoverageMetadata(reflectionSource, "P16 reflection pass", false);
         verifyP18LabPbrShading(reflectionSource, "P16 reflection pass", true);
+        verifyPrimaryCoverageResolve(baseSource, reflectionSource);
 
         long compiler = Shaderc.shaderc_compiler_initialize();
         if (compiler == 0L) {
@@ -274,7 +278,7 @@ public final class P14ShaderCompileVerifier {
         requireSourceMarker(source, "* reflectionScale;", "P16 per-material reflection scale");
         requireSourceMarker(
                 source,
-                "if (scene.data[46] == 0u || scene.data[42] == 0u) return;",
+                "if (scene.data[46] != 0u && scene.data[42] != 0u)",
                 "P16 reflection master toggle"
         );
         requireSourceMarker(
@@ -289,7 +293,155 @@ public final class P14ShaderCompileVerifier {
         );
     }
 
+    private static void verifyPrimaryCoverageResolve(String baseSource, String reflectionSource) {
+        requireSourceMarker(
+                baseSource,
+                "giCurrentColor(",
+                "mode 11 current linear radiance"
+        );
+        requireSourceMarker(
+                baseSource,
+                ") * p15PrimaryTransmission, 255u);",
+                "mode 11 current transmission before resolve"
+        );
+        requireSourceMarker(
+                baseSource,
+                "if (mode == 11u && scene.data[94] == 0u)",
+                "base gamma fallback only without post-lighting resolve"
+        );
+        requireSourceMarker(
+                baseSource,
+                ": (hit.hit == 0u ? 0u : floatBitsToUint(hit.distance));",
+                "strict-hit reference distance"
+        );
+        requireSourceMarker(
+                reflectionSource,
+                "bool p16HistoryIdentityMatches(uint previousBase, uint currentBase)",
+                "post-lighting identity match"
+        );
+        requireSourceMarker(
+                reflectionSource,
+                "scene.data[previousBase + 5u] == scene.data[currentBase + 5u]",
+                "coverage cohort match"
+        );
+        requireSourceMarker(
+                reflectionSource,
+                "return distance(currentAnchor, previousAnchor) <= anchorTolerance;",
+                "coverage collision anchor rejection"
+        );
+        requireSourceMarker(
+                reflectionSource,
+                "return dot(previousDirection, currentDirection) >= 0.999999;",
+                "strict sky-ray identity"
+        );
+        requireSourceMarker(
+                reflectionSource,
+                "finalLinearRadiance += p16ReflectionRgb(",
+                "single linear reflection addition"
+        );
+        requireSourceMarker(
+                reflectionSource,
+                "vec3 resolvedLinearRadiance = p16ResolveFinalRadiance(",
+                "post-lighting final resolve"
+        );
+        requireSourceMarker(
+                reflectionSource,
+                "if (scene.data[48] > 1u && p16ResolveHistoryBase(",
+                "temporal-off bypass"
+        );
+        requireSourceMarker(
+                reflectionSource,
+                "applyVanillaGamma(resolvedLinearRadiance)",
+                "gamma after final resolve"
+        );
+        int reflectionAdd = reflectionSource.indexOf("finalLinearRadiance += p16ReflectionRgb(");
+        int resolve = reflectionSource.indexOf("vec3 resolvedLinearRadiance = p16ResolveFinalRadiance(");
+        int gamma = reflectionSource.indexOf("applyVanillaGamma(resolvedLinearRadiance)");
+        if (reflectionAdd < 0 || resolve <= reflectionAdd || gamma <= resolve
+                || reflectionSource.indexOf("finalLinearRadiance += p16ReflectionRgb(", reflectionAdd + 1) >= 0) {
+            throw new IllegalStateException("P16 reflection/resolve/gamma ordering drifted");
+        }
+        if (!baseSource.contains("const uint HISTORY_RECORD_WORDS = 8u;")
+                || !reflectionSource.contains("const uint P16_HISTORY_RECORD_WORDS = 8u;")) {
+            throw new IllegalStateException("Primary coverage resolve changed the bounded history record");
+        }
+        verifyPrimaryCoverageResolveReferenceContract();
+        System.out.println(
+                "Primary coverage resolve verification PASS: currentLinear=true, cohortAndAnchor=true, "
+                        + "strictDisocclusion=true, reflectionSingleAdd=true, gammaAfterResolve=true, recordWords=8"
+        );
+    }
+
+    private static void verifyPrimaryCoverageResolveReferenceContract() {
+        int cohort = coverageCohort(37, 5, 11, 0x13579BDF);
+        if (!resolveIdentityMatches(cohort, 3, 4, 0x1234, cohort, 9, 8, 0x5678)
+                || resolveIdentityMatches(cohort, 3, 4, 0x1234, cohort + 1, 3, 4, 0x1234)
+                || !resolveIdentityMatches(0, 3, 4, 0x1234, 0, 3, 4, 0x1234)
+                || resolveIdentityMatches(0, 3, 4, 0x1234, 0, 4, 4, 0x1234)) {
+            throw new IllegalStateException("Coverage/strict resolve identity reference drifted");
+        }
+        if (!resolveAnchorMatches(10.0f, 10.02f, 0.05f)
+                || resolveAnchorMatches(10.0f, 10.20f, 0.05f)) {
+            throw new IllegalStateException("Coverage anchor collision rejection drifted");
+        }
+        if (!resolveSkyDirectionMatches(1.0f)
+                || resolveSkyDirectionMatches(0.999f)) {
+            throw new IllegalStateException("Strict sky miss direction reset drifted");
+        }
+        float accumulated = 0.0f;
+        int samples = 0;
+        float[] acceptedRejected = {0.0f, 1.0f, 0.0f, 1.0f};
+        for (float current : acceptedRejected) {
+            accumulated = (current + accumulated * samples) / (samples + 1);
+            samples++;
+        }
+        if (Math.abs(accumulated - 0.5f) > 0.00001f) {
+            throw new IllegalStateException("Accepted/rejected coverage convergence drifted");
+        }
+        float currentLinear = 0.20f;
+        float reflectedLinear = 0.10f;
+        float previousLinear = 0.50f;
+        float resolved = ((currentLinear + reflectedLinear) + previousLinear) * 0.5f;
+        if (Math.abs(resolved - 0.40f) > 0.00001f) {
+            throw new IllegalStateException("Reflection must be added exactly once before resolve");
+        }
+    }
+
+    private static boolean resolveIdentityMatches(
+            int previousCohort,
+            int previousMaterial,
+            int previousVoxel,
+            int previousNormal,
+            int currentCohort,
+            int currentMaterial,
+            int currentVoxel,
+            int currentNormal
+    ) {
+        if ((previousCohort == 0) != (currentCohort == 0)) return false;
+        if (currentCohort != 0) return previousCohort == currentCohort;
+        return previousMaterial == currentMaterial
+                && previousVoxel == currentVoxel
+                && previousNormal == currentNormal;
+    }
+
+    private static boolean resolveAnchorMatches(float previousDistance, float currentDistance, float tolerance) {
+        return Math.abs(previousDistance - currentDistance) <= tolerance;
+    }
+
+    private static boolean resolveSkyDirectionMatches(float directionDot) {
+        return directionDot >= 0.999999f;
+    }
+
     private static void verifyFixedCapacitySceneTails(String source, String label) {
+        requireSourceMarker(source, "const uint LOOKUP_BASE = 96u;", label + " lookup base");
+        requireSourceMarker(source, "const uint LOOKUP_CAPACITY = 256u;", label + " lookup capacity");
+        requireSourceMarker(source, "const uint LOOKUP_MASK = 255u;", label + " lookup mask");
+        requireSourceMarker(source, "const uint VOXEL_BASE = 1120u;", label + " voxel base");
+        requireSourceMarker(
+                source,
+                "const uint MATERIAL_EMISSION_BASE = 528608u;",
+                label + " material emission base"
+        );
         requireSourceMarker(
                 source,
                 "uint pixelCount = scene.data[51] * scene.data[52];",
@@ -302,7 +454,8 @@ public final class P14ShaderCompileVerifier {
         }
         System.out.println(
                 "Fixed-capacity scene-tail verification PASS (" + label
-                        + "): capacityWords=51/52, activeExtentTailBase=false"
+                        + "): lookupCapacity=256, lookupLoadAt128=0.5, lookupBytesDelta=2048, "
+                        + "capacityWords=51/52, activeExtentTailBase=false"
         );
     }
 
@@ -344,7 +497,7 @@ public final class P14ShaderCompileVerifier {
         );
         requireSourceMarker(
                 source,
-                "if (!p18AlphaAccept(textureHandle, surfaceUv, alphaSalt)) return;",
+                "bool alphaAccepted = p18AlphaAccept(",
                 label + " mesh alpha coverage rejection"
         );
         requireSourceMarker(
@@ -364,7 +517,7 @@ public final class P14ShaderCompileVerifier {
         );
         requireSourceMarker(
                 source,
-                "if (!p18AlphaAccept(textureHandle, uv, alphaSalt))",
+                "p18ObservePrimaryCoverage(coverageCohort, candidateDistance);",
                 label + " textured-cube alpha coverage rejection"
         );
         if (reflectionPass) {
@@ -379,6 +532,187 @@ public final class P14ShaderCompileVerifier {
                         + "meshUv=true, cubeFastPath=true, alphaZeroReject=true, partialAlpha=stochastic, "
                         + "animatedFrames=true, gameTickClock=true, reflectionFallback=" + reflectionPass
         );
+    }
+
+    private static void verifyPrimaryCoverageMetadata(
+            String source,
+            String label,
+            boolean primaryPass
+    ) {
+        requireSourceMarker(
+                source,
+                "bool p18AlphaAccept(uint textureHandle, vec2 uv, uint salt, out uint coverageCohort)",
+                label + " alpha cohort output"
+        );
+        requireSourceMarker(
+                source,
+                "uint stableState = textureHandle * 0x9E3779B1u",
+                label + " stable cohort state"
+        );
+        int stableState = source.indexOf("uint stableState = textureHandle * 0x9E3779B1u");
+        int stochasticState = source.indexOf(
+                "uint state = coverageCohort ^ scene.data[41] * 0x27D4EB2Du;",
+                stableState
+        );
+        if (stableState < 0 || stochasticState <= stableState
+                || source.substring(stableState, stochasticState).contains("scene.data[41]")) {
+            throw new IllegalStateException(label + " coverage cohort must exclude the frame seed");
+        }
+        requireSourceMarker(
+                source,
+                "uint state = coverageCohort ^ scene.data[41] * 0x27D4EB2Du;",
+                label + " frame seed separated from cohort"
+        );
+        requireSourceMarker(source, "coverageCohort = 0u;", label + " default strict identity");
+        requireSourceMarker(source, "if (alpha == 255u) return true;", label + " opaque endpoint");
+        requireSourceMarker(source, "if (alphaCutoff > 0.0)", label + " fixed-cutoff endpoint");
+        if (primaryPass) {
+            requireSourceMarker(
+                    source,
+                    "const uint HISTORY_ABI_VERSION = " + P5StableLookupRenderer.HISTORY_ABI_VERSION + "u;",
+                    label + " history ABI version"
+            );
+            requireSourceMarker(
+                    source,
+                    "scene.data[historyBase + 5u] = coverageCohort;",
+                    label + " cohort history word"
+            );
+            requireSourceMarker(
+                    source,
+                    "floatBitsToUint(p18CapturedPrimaryCoverageDistance())",
+                    label + " cohort anchor distance"
+            );
+            requireSourceMarker(
+                    source,
+                    "uint historyCoverageCohort(uint historyBase)",
+                    label + " cohort history reader"
+            );
+            requireSourceMarker(
+                    source,
+                    "float historyCoverageAnchorDistance(uint historyBase)",
+                    label + " cohort anchor reader"
+            );
+            requireSourceMarker(
+                    source,
+                    "A hash match alone must",
+                    label + " collision guard contract"
+            );
+            requireSourceMarker(
+                    source,
+                    "scene.data[historyBase + 4u] == historyNormalKey(hit.normal)",
+                    label + " versioned normal identity"
+            );
+            requireSourceMarker(
+                    source,
+                    "if (historyAbiVersion(sampleBase) != HISTORY_ABI_VERSION) continue;",
+                    label + " spatial history ABI consumer"
+            );
+            if (source.contains("ivec3 previousNormal = ivec3(")) {
+                throw new IllegalStateException(label + " retains a pre-v2 normal history consumer");
+            }
+            requireSourceMarker(
+                    source,
+                    "p18BeginPrimaryCoverageCapture();",
+                    label + " primary cohort capture begin"
+            );
+            requireSourceMarker(
+                    source,
+                    "p18EndPrimaryCoverageCapture();",
+                    label + " primary cohort capture end"
+            );
+        } else if (source.contains("p18BeginPrimaryCoverageCapture();")) {
+            throw new IllegalStateException(label + " must not open primary coverage capture");
+        }
+        System.out.println(
+                "Primary coverage metadata verification PASS (" + label + "): "
+                        + "historyAbi=2, recordWords=8, stableCohort=true, frameSeedSeparated=true, "
+                        + "primaryCapture=" + primaryPass
+        );
+    }
+
+    private static void verifyPrimaryCoverageReferenceContract() {
+        int textureHandle = 37;
+        int texelX = 5;
+        int texelY = 11;
+        int salt = 0x13579BDF;
+        int cohort = coverageCohort(textureHandle, texelX, texelY, salt);
+        if (cohort == 0 || cohort != coverageCohort(textureHandle, texelX, texelY, salt)) {
+            throw new IllegalStateException("Primary coverage cohort must be stable and non-zero");
+        }
+        if (cohort == coverageCohort(textureHandle, texelX + 1, texelY, salt)
+                || cohort == coverageCohort(textureHandle, texelX, texelY, salt + 1)) {
+            throw new IllegalStateException("Primary coverage cohort must distinguish texel and geometry identity");
+        }
+        int frame0 = alphaSampleHash(cohort, 0);
+        int frame1 = alphaSampleHash(cohort, 1);
+        if (frame0 == frame1 || cohort != coverageCohort(textureHandle, texelX, texelY, salt)) {
+            throw new IllegalStateException("Frame seed must vary sampling without changing the cohort");
+        }
+        if (emitsCoverageCohort(0, 0.0f)
+                || emitsCoverageCohort(255, 0.0f)
+                || emitsCoverageCohort(128, 0.5f)
+                || !emitsCoverageCohort(128, 0.0f)) {
+            throw new IllegalStateException("Alpha endpoints or fixed-cutoff cohort semantics drifted");
+        }
+        int nearestCohort = 0;
+        float nearestDistance = 0.0f;
+        int[] candidates = {coverageCohort(1, 2, 3, 4), coverageCohort(5, 6, 7, 8)};
+        float[] distances = {9.0f, 4.5f};
+        for (int index = 0; index < candidates.length; index++) {
+            if (nearestCohort == 0 || distances[index] < nearestDistance) {
+                nearestCohort = candidates[index];
+                nearestDistance = distances[index];
+            }
+        }
+        if (nearestCohort != candidates[1] || Float.intBitsToFloat(Float.floatToRawIntBits(nearestDistance)) != 4.5f) {
+            throw new IllegalStateException("Nearest coverage candidate or anchor-distance packing drifted");
+        }
+        int control = (P5StableLookupRenderer.HISTORY_ABI_VERSION << 24)
+                | (64 << 16)
+                | 0x10000000
+                | 4095;
+        if ((control & 0xFFFF) != 4095
+                || ((control >>> 16) & 0xFF) != 64
+                || ((control >>> 24) & 0xF) != P5StableLookupRenderer.HISTORY_ABI_VERSION
+                || (control & 0x10000000) == 0) {
+            throw new IllegalStateException("Primary coverage history control word packing drifted");
+        }
+        int missControl = (P5StableLookupRenderer.HISTORY_ABI_VERSION << 24) | (1 << 16) | 0x10000000;
+        if ((missControl & 0xFFFF) != 0 || (missControl & 0x10000000) == 0) {
+            throw new IllegalStateException("Coverage miss metadata must retain cohort flag without a material");
+        }
+        System.out.println(
+                "Primary coverage reference verification PASS: alphaEndpoints=true, stableCohort=true, "
+                        + "frameSeedSeparated=true, nearestCandidate=true, missMetadata=true, "
+                        + "texelAndGeometryDistinct=true, controlWordAbi="
+                        + P5StableLookupRenderer.HISTORY_ABI_VERSION
+        );
+    }
+
+    private static boolean emitsCoverageCohort(int alpha, float alphaCutoff) {
+        return alpha > 0 && alpha < 255 && alphaCutoff <= 0.0f;
+    }
+
+    private static int coverageCohort(int textureHandle, int texelX, int texelY, int salt) {
+        int stableState = textureHandle * 0x9E3779B1
+                ^ texelX * 0x85EBCA77
+                ^ texelY * 0xC2B2AE3D
+                ^ salt;
+        int cohort = p18AlphaHash(stableState);
+        return cohort == 0 ? 1 : cohort;
+    }
+
+    private static int alphaSampleHash(int cohort, int frameIndex) {
+        return p18AlphaHash(cohort ^ frameIndex * 0x27D4EB2D);
+    }
+
+    private static int p18AlphaHash(int value) {
+        value ^= value >>> 16;
+        value *= 0x7FEB352D;
+        value ^= value >>> 15;
+        value *= 0x846CA68B;
+        value ^= value >>> 16;
+        return value;
     }
 
     private static void verifyP18LabPbrShading(
@@ -543,7 +877,6 @@ public final class P14ShaderCompileVerifier {
         requireSourceMarker(source, "int denoiseRadius = int(min(scene.data[50], 2u));", "runtime denoise radius");
         requireSourceMarker(source, "for (int offsetY = -2; offsetY <= 2; offsetY++)", "5x5 denoise bound");
         requireSourceMarker(source, "vec3 tlRuntimeDirectionalTransmission(", "production soft-shadow helper");
-        requireSourceMarker(source, "const uint LOOKUP_BASE = 96u;", "stable 96-word header ABI");
         requireSourceMarker(
                 source,
                 "const uint MATERIAL_EMISSION_WORDS_PER_RECORD = 16u;",

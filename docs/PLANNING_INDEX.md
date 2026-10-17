@@ -4,6 +4,8 @@ This file is the repository index for design plans and decision tables. Architec
 
 | Area | Primary document | What is recorded |
 | --- | --- | --- |
+| Current update execution | [`UPDATE_EXECUTION_PLAN.md`](UPDATE_EXECUTION_PLAN.md) | ordered update tasks, dependencies, acceptance gates and per-task execution checkpoints |
+| Performance renderer references | [`PERFORMANCE_RENDERER_REFERENCE_STUDY.md`](PERFORMANCE_RENDERER_REFERENCE_STUDY.md) | official-source comparison of Sodium, Iris, Complementary, VulkanMod, Nvidium, Distant Horizons and PTGI; Lumen residency/per-pass priorities |
 | Whole project architecture | [`ARCHITECTURE.md`](ARCHITECTURE.md) | Vulkan/client vs common/server boundaries, authority model, package direction |
 | Renderer phases | [`ROADMAP.md`](ROADMAP.md) | P0+ renderer milestones and runtime validation gates |
 | P13 Overworld moon | [`P13_OVERWORLD_MOON.md`](P13_OVERWORLD_MOON.md) | moon disk, opposite-sun celestial direction, eight-step lunar phase, moonlight visibility and runtime gate |

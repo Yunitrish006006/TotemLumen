@@ -76,4 +76,33 @@ final class GpuSectionLookupTableTest {
     void rejectsNonPowerOfTwoCapacity() {
         assertThrows(IllegalArgumentException.class, () -> new GpuSectionLookupTable(96));
     }
+
+    @Test
+    void keepsOneHundredTwentyEightResidentsAtHalfLoad() {
+        GpuSectionLookupTable table = new GpuSectionLookupTable(256);
+        for (int sectionX = 0; sectionX < 128; sectionX++) {
+            table.put(sectionX, -4, sectionX * 3, sectionX);
+        }
+
+        assertEquals(128, table.size());
+        assertEquals(256, table.capacity());
+        assertEquals(0.5, table.loadFactor());
+    }
+
+    @Test
+    void reportsBoundedProbeCountsForHitsAndMisses() {
+        GpuSectionLookupTable table = new GpuSectionLookupTable(8);
+        for (int sectionX = 0; sectionX < table.capacity(); sectionX++) {
+            table.put(sectionX, 0, 0, sectionX);
+        }
+
+        GpuSectionLookupTable.LookupResult hit = table.find(7, 0, 0);
+        GpuSectionLookupTable.LookupResult miss = table.find(999, 0, 0);
+
+        assertTrue(hit.found());
+        assertEquals(7, hit.slot());
+        assertTrue(hit.probes() >= 1 && hit.probes() <= table.capacity());
+        assertEquals(-1, miss.slot());
+        assertEquals(table.capacity(), miss.probes());
+    }
 }

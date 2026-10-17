@@ -50,8 +50,19 @@ final class PrimarySurfaceReuseShaderPatch {
                             + "            uint indirectColor = giTemporalIndirectColor(");
             f = once(f, "primaryHit, origin, direction, pixel, width, height, giHistorySamples",
                     "primaryHit, origin, direction, pixel, width, height, giHistorySamples, primarySurface");
-            return once(f, "primaryHit, origin, direction, indirectColor",
-                    "primaryHit, origin, direction, indirectColor, primarySurface");
+            String oldCompositeArguments = "primaryHit, origin, direction, indirectColor";
+            if (f.contains(oldCompositeArguments)) {
+                return once(f, oldCompositeArguments,
+                        "primaryHit, origin, direction, indirectColor, primarySurface");
+            }
+            // Mode 11 now emits current linear radiance for the post-lighting resolve and no
+            // longer calls giCompositeFromIndirect. Keep this research transform scoped to the
+            // remaining mode-10 indirect-history path, and fail closed if that ownership marker
+            // is also absent.
+            if (!f.contains("giCurrentColor(")) {
+                throw new IllegalArgumentException("Missing primary reuse current-linear owner");
+            }
+            return f;
         });
     }
 
