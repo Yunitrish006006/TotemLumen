@@ -34,7 +34,7 @@ final class DefaultLightingDataPackTest {
             assertNotNull(tuningStream);
             var tuning = JsonParser.parseReader(new InputStreamReader(tuningStream,
                     StandardCharsets.UTF_8)).getAsJsonObject();
-            assertEquals(2.0f, tuning.get("brightness_multiplier").getAsFloat());
+            assertEquals(1.0f, tuning.get("brightness_multiplier").getAsFloat());
             assertEquals(1.0f, tuning.get("attenuation_multiplier").getAsFloat());
         }
         try (var spawnStream = getClass().getClassLoader().getResourceAsStream(

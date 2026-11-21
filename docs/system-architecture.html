@@ -145,7 +145,7 @@
       { id:'rgb', title:'Minecraft RGB', sub:'頂點 RGB + 平滑天空光', kind:'原生模式', color:'#83d3af', rootOf:'native', dx:200,dy:-150,dz:95, status:'Alpha 61 視覺手測通過',
         description:'維持 Minecraft 地形渲染，從客戶端 RGB 欄位在每個 quad 頂點融合方塊光與天空光，保留原有紋理與透明度。有伺服器欄位時以它為準。', flow:'伺服器同步的每格 RGB 欄位 + 天空光 → VanillaRgbLighting → Minecraft 地形 quad。', boundary:'RGB 是視覺效果；權威生成仍讀伺服器光場。沒有伺服器欄位時，客戶端可做局部預測。', refs:[src('RGB 著色','../src/client/java/dev/totem/lumen/integration/VanillaRgbLighting.java'),src('天空光','../src/client/java/dev/totem/lumen/integration/RgbSkyLightMath.java')] },
       { id:'held', title:'移動／手持光', sub:'有界畫面後處理', kind:'原生模式', color:'#83d3af', rootOf:'native', dx:0,dy:165,dz:110, status:'已實作；光遮擋仍有限制',
-        description:'手持光源在 Pure／RGB 原生世界畫面上以深度重建後處理補光，避免每幀因移動光源重建地形。', flow:'ClientHeldLightState + 本地 RGB 欄位 → HeldLightPostRenderer → 畫面補光。', boundary:'深度畫面路徑尚未提供完整方塊遮擋；需與放置光源做實機比較。', refs:[src('後處理','../src/client/java/dev/totem/lumen/integration/HeldLightPostRenderer.java'),src('狀態','../src/client/java/dev/totem/lumen/integration/ClientHeldLightState.java')] },
+        description:'手持光源在 Minecraft RGB 的原生世界畫面上以深度重建後處理補光，避免每幀因移動光源重建地形。', flow:'ClientHeldLightState + 本地 RGB 欄位 → HeldLightPostRenderer → 畫面補光。', boundary:'深度畫面路徑尚未提供完整方塊遮擋；需與放置光源做實機比較。', refs:[src('後處理','../src/client/java/dev/totem/lumen/integration/HeldLightPostRenderer.java'),src('狀態','../src/client/java/dev/totem/lumen/integration/ClientHeldLightState.java')] },
 
       { id:'totem', title:'Totem Vulkan 路徑', sub:'場景抽取 · Compute 光追 · 合成', kind:'光追渲染', color:'#efca82', x:345,y:145,z:15, root:true, status:'基線已實作；26.3 世界內驗證待完成',
         description:'Totem 模式抽取不可變場景，打包成 GPU 資源，借用 Minecraft 的 Vulkan 裝置與提交時間線，在 compute shader 中進行體素光追和後續光照合成。',

@@ -76,6 +76,21 @@ point from neighboring light voxels. It does not round the surface average back 
 RGBA, which had produced conspicuous colored squares. With smooth lighting disabled, the quad
 uses one unblended block/face value. The texture's original vertex alpha is preserved.
 
+## RGB source combination
+
+At each shaded position, evaluate each contributing light after its distance falloff
+and applicable visibility or occlusion. Take the maximum red, green and blue
+contributions independently across sources. The three maxima may come from different
+sources. Two identical overlapping lights should produce the same direct illumination
+as one. For example, contributions of (0.8, 0.2, 0.0) and (0.3, 0.1, 0.7) should yield
+(0.8, 0.2, 0.7) in either order.
+
+The server gameplay field already merges propagated candidates per channel.
+Minecraft RGB takes the maximum across the pre-light scene and the proposed final surface
+color for each hand light, preserving texture alpha. The bundled default lighting pack
+uses a 1.0 brightness multiplier. Totem Lumen local lights and the Raster Ray
+direct-light preview still use their existing renderer-specific composition. Minecraft Pure uses vanilla world lighting.
+
 ## Server-approved held light
 
 When the server runs Totem Lumen, it resolves luminous BlockItems in either player hand (plus lava
@@ -86,11 +101,11 @@ using the same world-space position in first and third person. This is
 visual lighting only and does not alter vanilla block-light levels or spawning rules. It clears
 on unequip, dimension change, disconnect, or entity disappearance.
 
-`MINECRAFT_PURE` and `MINECRAFT_RGB` share depth reconstruction but use separate surface-light
-blend states: Pure is additive, while RGB samples a copy of the pre-held-light scene and adds only
-the moving RGB contribution above the already-present placed RGB light. Both change
-visible terrain brightness without modifying chunk meshes, their texture alpha, or Minecraft's
-light engine. `TOTEM_LUMEN` uploads the same moving sources to four reserved light
+`MINECRAFT_PURE` uses vanilla world lighting and skips held-light capture and rendering.
+`MINECRAFT_RGB` reconstructs visible surfaces from depth and adds the moving RGB
+contribution above the already-present placed RGB light. This changes visible terrain
+brightness without modifying chunk meshes, their texture alpha, or Minecraft's light engine.
+`TOTEM_LUMEN` uploads the same moving sources to four reserved light
 records in the Vulkan scene and shades them directly, without repacking static sections on motion.
 At most four nearby hand lights are presented per client frame; the packet is capped at sixteen.
 The resolved models for luminous block items use full-bright lightmap coordinates as well, so a

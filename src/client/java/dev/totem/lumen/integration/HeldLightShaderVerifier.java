@@ -8,7 +8,6 @@ import java.nio.charset.StandardCharsets;
 
 /** Build-time compilation gate for the held-light fragment shader's Minecraft shader ABI. */
 public final class HeldLightShaderVerifier {
-    private static final String FRAGMENT = "assets/totem-lumen/shaders/core/held_light.fsh";
     private static final String RGB_FRAGMENT = "assets/totem-lumen/shaders/core/held_light_rgb.fsh";
     private static final String DYNAMIC_TRANSFORMS = "assets/minecraft/shaders/include/dynamictransforms.glsl";
 
@@ -17,15 +16,13 @@ public final class HeldLightShaderVerifier {
 
     public static void main(String[] args) throws Exception {
         RasterMaterialVerifier.verify();
-        String fragment = readResource(FRAGMENT);
         String rgbFragment = readResource(RGB_FRAGMENT);
         String include = readResource(DYNAMIC_TRANSFORMS);
         String directive = "#include <minecraft:dynamictransforms.glsl>";
-        if (!fragment.contains(directive) || !rgbFragment.contains(directive)) {
+        if (!rgbFragment.contains(directive)) {
             throw new IllegalStateException("Held-light fragment does not include Minecraft dynamic transforms");
         }
-        if (!fragment.contains("float radialDistance = distanceToLight * max(TextureMat[0].w, 1.0)")
-                || !rgbFragment.contains("float radialDistance = length(ModelOffset - worldPosition) * max(TextureMat[0].w, 1.0)")
+        if (!rgbFragment.contains("float radialDistance = length(ModelOffset - worldPosition) * max(TextureMat[0].w, 1.0)")
                 || !rgbFragment.contains("texture(SceneColorSampler, texCoord)")
                 || !rgbFragment.contains("texelFetch(PlacedRgbSampler, texel, 0)")
                 || !rgbFragment.contains("vec3 fraction = fract(voxelPosition)")
@@ -33,11 +30,11 @@ public final class HeldLightShaderVerifier {
                 || !rgbFragment.contains("vec3 existing = max(baseline, placed)")
                 || !rgbFragment.contains("float skyHeadroom = 1.0 - clamp(TextureMat[1].w, 0.0, 1.0)")
                 || !rgbFragment.contains("vec3 missing = max(min(held, vec3(1.0)) - existing, vec3(0.0))")
-                || !rgbFragment.contains("reflectance * missing * (vec3(1.0) - scene)")) {
+                || !rgbFragment.contains("reflectance * missing * (vec3(1.0) - scene)")
+                || !rgbFragment.contains("fragColor = vec4(scene + contribution, 0.0);")) {
             throw new IllegalStateException("Held light must respect sky and placed RGB illumination before compositing");
         }
         verifyAtlasLayout();
-        verify(fragment.replace(directive, include), "totem-lumen:core/held_light");
         verify(rgbFragment.replace(directive, include), "totem-lumen:core/held_light_rgb");
         verify(readResource("assets/totem-lumen/shaders/core/hybrid_terrain.fsh").replace(directive, include),
                 "totem-lumen:core/hybrid_terrain");

@@ -32,10 +32,9 @@ if (!zipEntries.includes('assets/totem-lumen/shaders/core/held_light_rgb.fsh')
     || !zipEntries.includes(mod.icon)) {
   throw new Error('Release JAR is missing packaged shader assets, license, or icon');
 }
-const changelog = readFileSync('docs/RELEASE_ALPHA61.md', 'utf8');
-const projectBody = readFileSync('docs/MODRINTH_PROJECT.md', 'utf8');
-if (!changelog.includes(version) || projectBody.length < 100) {
-  throw new Error('Release notes or project description are incomplete');
+const changelog = readFileSync(`docs/RELEASE_ALPHA${version.split('.').at(-1)}.md`, 'utf8');
+if (!changelog.includes(version)) {
+  throw new Error('Release notes do not match the release version');
 }
 
 const marker = {
@@ -76,31 +75,8 @@ async function request(path, options = {}) {
   return body;
 }
 
-let project = await request('/project/totem-lumen');
-if (!project) {
-  const form = new FormData();
-  form.set('data', JSON.stringify({
-    slug: 'totem-lumen',
-    title: 'Totem Lumen',
-    description: 'RGB gameplay lighting and an experimental Vulkan renderer for Minecraft 26.3.',
-    body: projectBody,
-    categories: ['technology', 'utility'],
-    additional_categories: [],
-    project_type: 'mod',
-    license_id: 'Apache-2.0',
-    source_url: 'https://github.com/Yunitrish006006/TotemLumen',
-    issues_url: 'https://github.com/Yunitrish006006/TotemLumen/issues',
-    client_side: 'optional',
-    server_side: 'optional',
-    initial_versions: [],
-    gallery_items: [],
-    is_draft: true,
-  }));
-  const created = await request('/project', { method: 'POST', body: form });
-  if (!created?.id) throw new Error('Modrinth did not return a project ID');
-  project = await request(`/project/${created.id}`);
-}
-if (project?.slug !== 'totem-lumen'
+const project = await request('/project/DcB192se');
+if (project?.id !== 'DcB192se' || project.slug !== 'totem-lumen'
     || !['mod', 'project'].includes(project?.project_type)) {
   throw new Error(`Modrinth project identity mismatch: ${JSON.stringify({
     id: project?.id, slug: project?.slug, project_type: project?.project_type,

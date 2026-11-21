@@ -3,6 +3,7 @@ package dev.totem.lumen.integration;
 import dev.totem.lumen.TotemLumenClient;
 import dev.totem.lumen.gameplay.light.PackedRgbLight;
 import dev.totem.lumen.network.HeldLightsPayload;
+import dev.totem.lumen.render.RendererSettings;
 import net.minecraft.client.Minecraft;
 import net.minecraft.util.Mth;
 import net.minecraft.world.InteractionHand;
@@ -40,7 +41,8 @@ public final class ClientHeldLightState {
 
     public static List<Light> capture(Minecraft client, float partialTick) {
         HeldLightsPayload payload = latest;
-        if (payload == null || client.level == null
+        if (RendererSettings.renderProfile() == RendererSettings.RenderProfile.MINECRAFT_PURE
+                || payload == null || client.level == null
                 || !payload.dimension().equals(client.level.dimension().identifier())) {
             captured = List.of();
             return captured;

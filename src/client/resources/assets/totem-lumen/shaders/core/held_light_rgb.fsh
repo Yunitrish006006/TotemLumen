@@ -70,5 +70,6 @@ void main() {
     // Only light stronger than the existing sky or placed source may be added.
     vec3 missing = max(min(held, vec3(1.0)) - existing, vec3(0.0));
     vec3 contribution = reflectance * missing * (vec3(1.0) - scene);
-    fragColor = vec4(contribution, 0.0);
+    // Every light uses the same pre-light scene. The RGB MAX blend selects one result per channel.
+    fragColor = vec4(scene + contribution, 0.0);
 }

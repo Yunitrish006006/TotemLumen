@@ -3,7 +3,6 @@ package dev.totem.lumen.integration;
 import com.mojang.renderpearl.api.pipeline.PrimitiveTopology;
 import com.mojang.renderpearl.api.pipeline.BindGroupLayout;
 import com.mojang.renderpearl.api.pipeline.BlendFunction;
-import com.mojang.renderpearl.api.pipeline.BlendFactor;
 import com.mojang.renderpearl.api.pipeline.ColorTargetState;
 import com.mojang.renderpearl.api.pipeline.RenderPipeline;
 import com.mojang.renderpearl.api.pipeline.ShaderType;
@@ -34,29 +33,25 @@ import org.joml.Vector4f;
 import java.util.List;
 import java.util.Optional;
 
-/** Depth-reconstructed moving light for both vanilla-world profiles; no terrain remeshing. */
+/** Depth-reconstructed moving light for the Minecraft RGB profile; no terrain remeshing. */
 public final class HeldLightPostRenderer {
     private static final int MAX_VISIBLE_LIGHTS = 4;
     private static final float RGB_HELD_RADIUS_SCALE = 0.9f;
     private static final float RGB_HELD_STRENGTH = 0.90f;
-    private static RendererSettings.RenderProfile lastLoggedProfile;
+    private static boolean loggedActive;
     private static boolean pipelineUnavailable;
     private static GpuDevice snapshotDevice;
     private static GpuTexture sceneSnapshot;
     private static GpuTextureView sceneSnapshotView;
-    private static final RenderPipeline PURE_PIPELINE = pipeline("held_light_pure", BlendFunction.ADDITIVE, false);
-    /** Add a reflectance-weighted contribution computed from a pre-light scene snapshot. */
-    private static final RenderPipeline RGB_PIPELINE = pipeline("held_light_rgb", new BlendFunction(
-            BlendFactor.ONE, BlendFactor.ONE, BlendFactor.ZERO, BlendFactor.ONE
-    ), true);
+    /** Each light proposes a final color from the same snapshot; MAX keeps the strongest result per channel. */
+    private static final RenderPipeline RGB_PIPELINE = createRgbPipeline();
 
     private HeldLightPostRenderer() {
     }
 
     public static void render(CameraRenderState camera) {
         if (pipelineUnavailable
-                || RendererSettings.renderProfile() == RendererSettings.RenderProfile.TOTEM_LUMEN
-                || RendererSettings.rasterLightingEnabled()
+                || RendererSettings.renderProfile() != RendererSettings.RenderProfile.MINECRAFT_RGB
                 || !RenderSystem.isOnRenderThread()) return;
         Minecraft client = Minecraft.getInstance();
         if (client.level == null || camera == null || !camera.initialized) return;
@@ -72,56 +67,48 @@ public final class HeldLightPostRenderer {
         );
         Matrix4f inverseViewProjection = new Matrix4f(camera.projectionMatrix).mul(view).invert();
         boolean zeroToOne = RenderSystem.getDevice().getDeviceInfo().isZZeroToOne();
-        RendererSettings.RenderProfile profile = RendererSettings.renderProfile();
-        boolean rgbProfile = profile == RendererSettings.RenderProfile.MINECRAFT_RGB;
-        var compiledPipeline = compilePipelineOrDisable(rgbProfile ? RGB_PIPELINE : PURE_PIPELINE);
+        var compiledPipeline = compilePipelineOrDisable(RGB_PIPELINE);
         if (compiledPipeline == null) return;
         CommandEncoder encoder = RenderSystem.getDevice().createCommandEncoder();
-        if (rgbProfile) {
-            GpuTexture color = target.getColorTexture();
-            if (color == null || (color.usage() & GpuTexture.USAGE_COPY_SRC) == 0) return;
-            HeldLightFieldAtlas.update(encoder, lights, client.level.dimension().identifier().toString());
-            ensureSnapshot(color, target.width, target.height);
-            // Sample only the scene before any held lights. Reading the attachment being written
-            // would be undefined, and copying once lets all nearby lights share the same albedo.
-            encoder.copyTextureToTexture(color, sceneSnapshot, 0, 0, 0, 0, 0,
-                    target.width, target.height);
-        }
+        GpuTexture color = target.getColorTexture();
+        if (color == null || (color.usage() & GpuTexture.USAGE_COPY_SRC) == 0) return;
+        HeldLightFieldAtlas.update(encoder, lights, client.level.dimension().identifier().toString());
+        ensureSnapshot(color, target.width, target.height);
+        // Sample only the scene before any held lights. Reading the attachment being written
+        // would be undefined, and copying once lets all nearby lights share the same albedo.
+        encoder.copyTextureToTexture(color, sceneSnapshot, 0, 0, 0, 0, 0,
+                target.width, target.height);
         try (RenderPass pass = encoder.createRenderPass(
                 () -> "Totem Lumen held light",
                 target.getColorTextureView(), Optional.empty())) {
             pass.setPipeline(compiledPipeline);
             pass.setUniform("DepthSampler", target.getDepthTextureView(),
                     RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST));
-            if (rgbProfile) {
-                pass.setUniform("SceneColorSampler", sceneSnapshotView,
-                        RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST));
-                pass.setUniform("PlacedRgbSampler", HeldLightFieldAtlas.view(),
-                        RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST));
-            }
+            pass.setUniform("SceneColorSampler", sceneSnapshotView,
+                    RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST));
+            pass.setUniform("PlacedRgbSampler", HeldLightFieldAtlas.view(),
+                    RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST));
             int count = 0;
             for (ClientHeldLightState.Light light : lights) {
                 if (count++ >= MAX_VISIBLE_LIGHTS) break;
                 Matrix4f metadata = new Matrix4f();
                 metadata.setColumn(0, new Vector4f(
-                        light.radius() * (rgbProfile ? RGB_HELD_RADIUS_SCALE : 1.0f),
+                        light.radius() * RGB_HELD_RADIUS_SCALE,
                         zeroToOne ? 1.0f : 0.0f, 0.0f, RgbLightAttenuation.RADIAL_DISTANCE_SCALE
                 ));
-                if (rgbProfile) {
-                    float skyLevel = smoothedSkyLevel(client.level, light.x(), light.y(), light.z());
-                    Vector3f baseline = VanillaRgbLighting.skyAndAmbientAt(skyLevel);
-                    metadata.setColumn(1, new Vector4f(baseline,
-                            VanillaRgbLighting.daylightCoverageAt(skyLevel)));
-                    int slot = count - 1;
-                    metadata.setColumn(2, new Vector4f(
-                            HeldLightFieldAtlas.originX(slot), HeldLightFieldAtlas.originY(slot),
-                            HeldLightFieldAtlas.originZ(slot), slot
-                    ));
-                }
+                float skyLevel = smoothedSkyLevel(client.level, light.x(), light.y(), light.z());
+                Vector3f baseline = VanillaRgbLighting.skyAndAmbientAt(skyLevel);
+                metadata.setColumn(1, new Vector4f(baseline,
+                        VanillaRgbLighting.daylightCoverageAt(skyLevel)));
+                int slot = count - 1;
+                metadata.setColumn(2, new Vector4f(
+                        HeldLightFieldAtlas.originX(slot), HeldLightFieldAtlas.originY(slot),
+                        HeldLightFieldAtlas.originZ(slot), slot
+                ));
 
                 pass.setUniform("DynamicTransforms", RenderSystem.getDynamicUniforms().writeTransform(
                         inverseViewProjection,
-                        new Vector4f(light.red(), light.green(), light.blue(), rgbProfile ? RGB_HELD_STRENGTH : 1.35f),
+                        new Vector4f(light.red(), light.green(), light.blue(), RGB_HELD_STRENGTH),
                         new Vector3f(light.x(), light.y(), light.z()),
                         metadata
                 ));
@@ -129,10 +116,10 @@ public final class HeldLightPostRenderer {
             }
         }
         encoder.submit();
-        if (profile != lastLoggedProfile) {
-            lastLoggedProfile = profile;
+        if (!loggedActive) {
+            loggedActive = true;
             TotemLumenClient.LOGGER.info("Held light surface pass active: profile={}, sources={}",
-                    profile, Math.min(lights.size(), MAX_VISIBLE_LIGHTS));
+                    RendererSettings.RenderProfile.MINECRAFT_RGB, Math.min(lights.size(), MAX_VISIBLE_LIGHTS));
         }
     }
 
@@ -182,23 +169,23 @@ public final class HeldLightPostRenderer {
         }
     }
 
-    private static RenderPipeline pipeline(String name, BlendFunction blend, boolean sampleScene) {
+    private static RenderPipeline createRgbPipeline() {
         var builder = RenderPipeline.builder()
-                .withLocation(Identifier.fromNamespaceAndPath("totem-lumen", "pipeline/" + name))
+                .withLocation(Identifier.fromNamespaceAndPath("totem-lumen", "pipeline/held_light_rgb"))
                 .withVertexShader(RenderPipelines.TRACY_BLIT.getShaders().get(ShaderType.VERTEX))
                 .withFragmentShader(Identifier.fromNamespaceAndPath("totem-lumen",
-                        sampleScene ? "core/held_light_rgb" : "core/held_light"))
+                        "core/held_light_rgb"))
                 .withBindGroupLayout(BindGroupLayouts.DYNAMIC_TRANSFORMS)
                 .withPrimitiveTopology(PrimitiveTopology.TRIANGLES)
                 .withColorTargetState(new ColorTargetState(
-                        Optional.of(blend),
+                        Optional.of(BlendFunction.MAX),
                         RenderPipelines.DEBUG_FILLED_BOX.getColorTargetStates().getFirst().format(),
-                        ColorTargetState.WRITE_ALL
+                        ColorTargetState.WRITE_COLOR
                 ));
         var samplers = BindGroupLayout.builder()
                 .withUniform("DepthSampler", UniformType.COMBINED_IMAGE_SAMPLER);
-        if (sampleScene) samplers.withUniform("SceneColorSampler", UniformType.COMBINED_IMAGE_SAMPLER);
-        if (sampleScene) samplers.withUniform("PlacedRgbSampler", UniformType.COMBINED_IMAGE_SAMPLER);
+        samplers.withUniform("SceneColorSampler", UniformType.COMBINED_IMAGE_SAMPLER);
+        samplers.withUniform("PlacedRgbSampler", UniformType.COMBINED_IMAGE_SAMPLER);
         return builder.withBindGroupLayout(samplers.build()).build();
     }
 
