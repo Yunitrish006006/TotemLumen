@@ -122,7 +122,7 @@ public final class ClientGameplayLightField {
     }
 
     public static int packedAtCurrentDimension(int x, int y, int z) {
-        return packedAt(activeDimension, x, y, z);
+        return localLookup.get().packedAtCurrentDimension(x, y, z);
     }
 
     private static int packedAt(String dimension, int x, int y, int z) {
@@ -142,13 +142,6 @@ public final class ClientGameplayLightField {
     /** Obtain once per terrain quad instead of doing a ThreadLocal lookup for every RGB sample. */
     static LocalLookup localSampler() {
         return localLookup.get();
-    }
-
-    /** Immutable section snapshot identity for bounded client-only GPU light-field updates. */
-    static char[] localSectionReference(int sectionX, int sectionY, int sectionZ) {
-        Key key = new Key(activeDimension, sectionX, sectionY, sectionZ);
-        char[] local = LOCAL_SECTIONS.get(key);
-        return local != null ? local : SECTIONS.get(key);
     }
 
     public static synchronized void clear() {
@@ -602,11 +595,25 @@ public final class ClientGameplayLightField {
         private long revision = Long.MIN_VALUE;
         private char[] values;
 
+        private ClientHeldLightField.Snapshot heldSnapshot;
+        private long heldSectionKey = Long.MIN_VALUE;
+        private char[] heldValues;
+
         int packedAtCurrentDimension(int x, int y, int z) {
-            char[] section = sectionValues(
-                    activeDimension, Math.floorDiv(x, 16), Math.floorDiv(y, 16), Math.floorDiv(z, 16)
-            );
-            return section == null ? 0 : section[((y & 15) << 8) | ((z & 15) << 4) | (x & 15)];
+            String dim = activeDimension;
+            int sx = x >> 4, sy = y >> 4, sz = z >> 4;
+            char[] section = sectionValues(dim, sx, sy, sz);
+            int index = ((y & 15) << 8) | ((z & 15) << 4) | (x & 15);
+            char placed = section == null ? 0 : section[index];
+            var snapshot = ClientHeldLightField.visible;
+            if (snapshot.sections().isEmpty() || !snapshot.dimension().equals(dim)) return placed;
+            long key = net.minecraft.core.SectionPos.asLong(sx, sy, sz);
+            if (heldSnapshot != snapshot || heldSectionKey != key) {
+                heldSnapshot = snapshot;
+                heldSectionKey = key;
+                heldValues = snapshot.sections().get(key);
+            }
+            return heldValues == null ? placed : PackedRgbLight.componentMax(placed, heldValues[index]);
         }
 
         int packedAtCurrentDimension(BlockPos pos) {

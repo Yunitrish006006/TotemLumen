@@ -65,7 +65,7 @@ public final class ClientHeldLightState {
             int packed = source.packed();
             float radius = PackedRgbLight.alpha(packed) + 0.5f;
             result.add(new Light(
-                    source.entityId(), x, (float) eye.y - 0.45f, z,
+                    source.entityId(), source.packed(), x, (float) eye.y - 0.45f, z,
                     radius,
                     PackedRgbLight.red(packed) / 15.0f,
                     PackedRgbLight.green(packed) / 15.0f,
@@ -89,7 +89,7 @@ public final class ClientHeldLightState {
         return captured;
     }
 
-    public record Light(int entityId, float x, float y, float z, float radius,
+    public record Light(int entityId, char packed, float x, float y, float z, float radius,
                         float red, float green, float blue) {
     }
 }

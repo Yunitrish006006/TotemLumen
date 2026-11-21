@@ -26,7 +26,7 @@ if (mod.id !== 'totem-lumen' || mod.version !== version || mod.depends?.minecraf
   throw new Error('JAR metadata does not match release metadata');
 }
 const zipEntries = execFileSync('unzip', ['-Z1', file], { encoding: 'utf8' }).split('\n');
-if (!zipEntries.includes('assets/totem-lumen/shaders/core/held_light_rgb.fsh')
+if (!zipEntries.includes('dev/totem/lumen/integration/ClientHeldLightField.class')
     || !zipEntries.includes('LICENSE.txt_totem-lumen')
     || mod.icon !== 'assets/totem-lumen/icon.png'
     || !zipEntries.includes(mod.icon)) {

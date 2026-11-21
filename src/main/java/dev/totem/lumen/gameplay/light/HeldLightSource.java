@@ -14,16 +14,19 @@ public final class HeldLightSource {
 
     public static char packedFor(ItemStack stack) {
         if (stack.isEmpty()) return 0;
+        BlockState state;
         if (stack.is(Items.LAVA_BUCKET)) {
-            return PackedRgbLight.fromNormalized(DefaultEmissionColors.forBlock("minecraft:lava", 15), 15);
+            state = net.minecraft.world.level.block.Blocks.LAVA.defaultBlockState();
+        } else if (stack.getItem() instanceof BlockItem blockItem) {
+            state = blockItem.getBlock().defaultBlockState();
+        } else {
+            return 0;
         }
-        if (!(stack.getItem() instanceof BlockItem blockItem)) return 0;
-        BlockState state = blockItem.getBlock().defaultBlockState();
         if (state.getLightEmission() <= 0) return 0;
         return GameplayLightSource.packedFor(
                 state,
                 EffectiveLightingRules.ruleFor(
-                        BuiltInRegistries.BLOCK.getKey(blockItem.getBlock())
+                        BuiltInRegistries.BLOCK.getKey(state.getBlock())
                 )
         );
     }

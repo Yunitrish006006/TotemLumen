@@ -7,6 +7,7 @@ import dev.totem.lumen.integration.ClientLightingWorldRules;
 import dev.totem.lumen.integration.ClientGameplayLightField;
 import dev.totem.lumen.integration.ClientGameplayLightPredictor;
 import dev.totem.lumen.integration.ClientHeldLightState;
+import dev.totem.lumen.integration.ClientHeldLightField;
 import dev.totem.lumen.integration.EntityRenderGeometryCache;
 import dev.totem.lumen.integration.FluidRenderGeometryCache;
 import dev.totem.lumen.integration.LabPbrTextureRegistry;
@@ -146,13 +147,18 @@ public final class TotemLumenClient implements ClientModInitializer {
         // scene bridge constructs the immutable FrameSnapshot for the same frame.
         P13EnvironmentCapture.initialize();
         SceneExtractionBridge.initialize();
-        net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLevelEvents.AFTER_CLIENT_LEVEL_CHANGE.register((client, level) -> RasterLightingScene.clear());
+        net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLevelEvents.AFTER_CLIENT_LEVEL_CHANGE.register((client, level) -> {
+            ClientHeldLightField.clear();
+            RasterLightingScene.clear();
+        });
         ClientChunkEvents.CHUNK_LOAD.register((level, chunk) -> {
             RasterLightingScene.onChunkChanged(level, chunk.getPos().x(), chunk.getPos().z());
+            ClientHeldLightField.chunkChanged(level, chunk.getPos().x(), chunk.getPos().z());
             if (RendererSettings.renderProfile() == RendererSettings.RenderProfile.MINECRAFT_RGB) ClientGameplayLightPredictor.onChunkLoaded(level, chunk);
         });
         ClientChunkEvents.CHUNK_UNLOAD.register((level, chunk) -> {
             RasterLightingScene.onChunkChanged(level, chunk.getPos().x(), chunk.getPos().z());
+            ClientHeldLightField.chunkChanged(level, chunk.getPos().x(), chunk.getPos().z());
             if (RendererSettings.renderProfile() == RendererSettings.RenderProfile.MINECRAFT_RGB) ClientGameplayLightPredictor.onChunkUnloaded(level, chunk);
         });
 
@@ -161,6 +167,7 @@ public final class TotemLumenClient implements ClientModInitializer {
             RendererBootstrap.tick();
             RendererSettings.RenderProfile renderProfile = RendererSettings.renderProfile();
             if (renderProfile != lastRenderProfile) {
+                ClientHeldLightField.clear();
                 ClientGameplayLightPredictor.clear();
                 RasterLightingScene.clear();
                 if (client.level != null && (renderProfile == RendererSettings.RenderProfile.MINECRAFT_RGB
@@ -180,6 +187,7 @@ public final class TotemLumenClient implements ClientModInitializer {
                 FluidRenderGeometryCache.setActiveDimension(dimensionId);
                 if (renderProfile == RendererSettings.RenderProfile.MINECRAFT_RGB) {
                     VanillaRgbLighting.updateSkyPalette(client.level);
+                    ClientHeldLightField.tick(client);
                 }
                 if (renderProfile == RendererSettings.RenderProfile.MINECRAFT_RGB) ClientGameplayLightPredictor.tick(client.level, client.player);
                 long dirtyEnqueueStart = System.nanoTime();
@@ -245,8 +253,9 @@ public final class TotemLumenClient implements ClientModInitializer {
         // method is cancelled entirely, while extraction continues every frame.
         LevelExtractionEvents.END_EXTRACTION.register(context -> {
             var client = net.minecraft.client.Minecraft.getInstance();
-            ClientHeldLightState.capture(client,
-                    client.getDeltaTracker().getGameTimeDeltaPartialTick(true));
+            if (RendererSettings.rendererEnabled()) {
+                ClientHeldLightState.capture(client, client.getDeltaTracker().getGameTimeDeltaPartialTick(true));
+            }
             // The old P5 world bootstrap is now a zero-GPU compatibility gate.
             P5WorldDebugComposite.runOnceOnRenderThread();
 

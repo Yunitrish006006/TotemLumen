@@ -8,6 +8,10 @@
     "FluidRendererCaptureMixin",
     "BlockEntityRenderDispatcherMixin",
     "EntityRendererStateMixin",
+    "EntityRgbStateMixin",
+    "WorldEntityRgbMixin",
+    "EntityModelRgbMixin",
+    "FirstPersonArmRgbMixin",
     "EntityRenderDispatcherMixin",
     "ItemModelResolverGlowMixin",
     "ItemStackRenderStateGlowMixin",
@@ -27,8 +31,7 @@
     "VulkanComputeProgramMixin",
     "VideoSettingsRenderProfileMixin",
     "VanillaRgbLightingLighterMixin",
-    "VanillaRgbIndigoLightingMixin",
-    "VanillaRgbOverlayMixin"
+    "VanillaRgbIndigoLightingMixin"
   ],
   "injectors": {
     "defaultRequire": 1

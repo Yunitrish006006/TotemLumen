@@ -8,7 +8,6 @@ import java.nio.charset.StandardCharsets;
 
 /** Build-time compilation gate for the held-light fragment shader's Minecraft shader ABI. */
 public final class HeldLightShaderVerifier {
-    private static final String RGB_FRAGMENT = "assets/totem-lumen/shaders/core/held_light_rgb.fsh";
     private static final String DYNAMIC_TRANSFORMS = "assets/minecraft/shaders/include/dynamictransforms.glsl";
 
     private HeldLightShaderVerifier() {
@@ -16,65 +15,13 @@ public final class HeldLightShaderVerifier {
 
     public static void main(String[] args) throws Exception {
         RasterMaterialVerifier.verify();
-        String rgbFragment = readResource(RGB_FRAGMENT);
+        ClientHeldLightFieldVerifier.verify();
         String include = readResource(DYNAMIC_TRANSFORMS);
         String directive = "#include <minecraft:dynamictransforms.glsl>";
-        if (!rgbFragment.contains(directive)) {
-            throw new IllegalStateException("Held-light fragment does not include Minecraft dynamic transforms");
-        }
-        if (!rgbFragment.contains("float radialDistance = length(ModelOffset - worldPosition) * max(TextureMat[0].w, 1.0)")
-                || !rgbFragment.contains("texture(SceneColorSampler, texCoord)")
-                || !rgbFragment.contains("texelFetch(PlacedRgbSampler, texel, 0)")
-                || !rgbFragment.contains("vec3 fraction = fract(voxelPosition)")
-                || !rgbFragment.contains("float shapedFalloff = 1.2 * falloff * falloff * (1.5 - 0.5 * falloff)")
-                || !rgbFragment.contains("vec3 existing = max(baseline, placed)")
-                || !rgbFragment.contains("float skyHeadroom = 1.0 - clamp(TextureMat[1].w, 0.0, 1.0)")
-                || !rgbFragment.contains("vec3 missing = max(min(held, vec3(1.0)) - existing, vec3(0.0))")
-                || !rgbFragment.contains("reflectance * missing * (vec3(1.0) - scene)")
-                || !rgbFragment.contains("fragColor = vec4(scene + contribution, 0.0);")) {
-            throw new IllegalStateException("Held light must respect sky and placed RGB illumination before compositing");
-        }
-        verifyAtlasLayout();
-        verify(rgbFragment.replace(directive, include), "totem-lumen:core/held_light_rgb");
         verify(readResource("assets/totem-lumen/shaders/core/hybrid_terrain.fsh").replace(directive, include),
                 "totem-lumen:core/hybrid_terrain");
         verify(readResource("assets/totem-lumen/shaders/core/raster_ray.fsh").replace(directive, include), "totem-lumen:core/raster_ray");
         verify(readResource("assets/totem-lumen/shaders/core/raster_ray_composite.fsh").replace(directive, include), "totem-lumen:core/raster_ray_composite");
-    }
-
-    private static void verifyAtlasLayout() {
-        boolean[] occupied = new boolean[HeldLightFieldAtlas.WIDTH * HeldLightFieldAtlas.HEIGHT];
-        for (int slot = 0; slot < 4; slot++) {
-            for (int z = 0; z < HeldLightFieldAtlas.SIDE; z++) {
-                for (int y = 0; y < HeldLightFieldAtlas.SIDE; y++) {
-                    for (int x = 0; x < HeldLightFieldAtlas.SIDE; x++) {
-                        int atlasX = HeldLightFieldAtlas.atlasX(slot, x, z);
-                        int atlasY = HeldLightFieldAtlas.atlasY(slot, y, z);
-                        int index = atlasY * HeldLightFieldAtlas.WIDTH + atlasX;
-                        if (atlasX < 0 || atlasX >= HeldLightFieldAtlas.WIDTH || atlasY < 0
-                                || atlasY >= HeldLightFieldAtlas.HEIGHT || occupied[index]) {
-                            throw new IllegalStateException("Held-light RGB atlas has an overlapping or invalid cell");
-                        }
-                        occupied[index] = true;
-                    }
-                }
-            }
-        }
-        for (boolean cell : occupied) {
-            if (!cell) throw new IllegalStateException("Held-light RGB atlas has a missing cell");
-        }
-        if (HeldLightFieldAtlas.origin(-0.2f) != -17) {
-            throw new IllegalStateException("Held-light RGB atlas must floor negative world coordinates");
-        }
-        char[][] first = new char[27][];
-        char[][] unchanged = first.clone();
-        if (!HeldLightFieldAtlas.sameReferences(first, unchanged)) {
-            throw new IllegalStateException("Unchanged RGB sections should not cause an atlas upload");
-        }
-        unchanged[3] = new char[4096];
-        if (HeldLightFieldAtlas.sameReferences(first, unchanged)) {
-            throw new IllegalStateException("Changed RGB sections must refresh the atlas");
-        }
     }
 
     private static void verify(String source, String name) {

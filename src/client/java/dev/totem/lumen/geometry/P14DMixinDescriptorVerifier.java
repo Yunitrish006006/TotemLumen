@@ -11,7 +11,6 @@ import dev.totem.lumen.mixin.GpuDeviceAccessor;
 import dev.totem.lumen.mixin.LevelRendererTakeoverMixin;
 import dev.totem.lumen.mixin.SubmitNodeCollectionBlockEntityMixin;
 import dev.totem.lumen.mixin.SubmitNodeCollectionItemMixin;
-import dev.totem.lumen.mixin.VanillaRgbOverlayMixin;
 import dev.totem.lumen.mixin.VideoSettingsRenderProfileMixin;
 import dev.totem.lumen.mixin.SubmitNodeStorageBlockEntityMixin;
 import net.minecraft.client.OptionInstance;
@@ -114,7 +113,6 @@ public final class P14DMixinDescriptorVerifier {
         verifyEntitySubmit();
         verifyItemSubmit();
         verifyLevelRenderTakeover();
-        verifyHeldLightRenderHook();
         verifyVideoSettingsProfileHooks();
         System.out.println(
                 "P14D/P17 mixin descriptor verification PASS: minecraft=26.3, "
@@ -315,25 +313,6 @@ public final class P14DMixinDescriptorVerifier {
             throw new IllegalStateException(
                     "LevelRenderer takeover callback must end with CallbackInfo"
             );
-        }
-    }
-
-    private static void verifyHeldLightRenderHook() {
-        Method handler = Arrays.stream(VanillaRgbOverlayMixin.class.getDeclaredMethods())
-                .filter(method -> method.getName().equals("totemLumen$drawHeldLight"))
-                .findFirst()
-                .orElseThrow(() -> new IllegalStateException("Missing held-light LevelRenderer callback"));
-        Class<?>[] callback = handler.getParameterTypes();
-        if (callback.length != LEVEL_RENDER_26_3.length + 1) {
-            throw new IllegalStateException("Held-light callback parameter count mismatch");
-        }
-        for (int i = 0; i < LEVEL_RENDER_26_3.length; i++) {
-            if (callback[i] != LEVEL_RENDER_26_3[i]) {
-                throw new IllegalStateException("Held-light callback parameter " + i + " mismatch");
-            }
-        }
-        if (callback[callback.length - 1] != CallbackInfo.class) {
-            throw new IllegalStateException("Held-light callback must end with CallbackInfo");
         }
     }
 

@@ -14,7 +14,6 @@ import net.minecraft.core.Direction;
 import net.minecraft.world.level.LightLayer;
 import dev.totem.lumen.gameplay.light.PackedRgbLight;
 import com.mojang.blaze3d.vertex.QuadInstance;
-import org.joml.Vector3f;
 import net.minecraft.util.ARGB;
 import net.minecraft.util.LightCoordsUtil;
 import net.fabricmc.fabric.api.client.renderer.v1.mesh.MutableQuadView;
@@ -285,21 +284,21 @@ public final class VanillaRgbLighting {
 
     /** Samples RGB light at a surface vertex, interpolating effective channels without repacking. */
     private static void sampleRgbAt(
-            float worldX, float worldY, float worldZ, Direction face,
+            double worldX, double worldY, double worldZ, Direction face,
             ClientGameplayLightField.LocalLookup light, float[] out
     ) {
         float offsetX = face == null ? 0.0f : face.getStepX() * 0.5f;
         float offsetY = face == null ? 0.0f : face.getStepY() * 0.5f;
         float offsetZ = face == null ? 0.0f : face.getStepZ() * 0.5f;
-        float sampleX = worldX + offsetX - 0.5f;
-        float sampleY = worldY + offsetY - 0.5f;
-        float sampleZ = worldZ + offsetZ - 0.5f;
+        double sampleX = worldX + offsetX - 0.5f;
+        double sampleY = worldY + offsetY - 0.5f;
+        double sampleZ = worldZ + offsetZ - 0.5f;
         int baseX = (int) Math.floor(sampleX);
         int baseY = (int) Math.floor(sampleY);
         int baseZ = (int) Math.floor(sampleZ);
-        float fractionX = sampleX - baseX;
-        float fractionY = sampleY - baseY;
-        float fractionZ = sampleZ - baseZ;
+        float fractionX = (float) (sampleX - baseX);
+        float fractionY = (float) (sampleY - baseY);
+        float fractionZ = (float) (sampleZ - baseZ);
         out[0] = 0.0f;
         out[1] = 0.0f;
         out[2] = 0.0f;
@@ -332,6 +331,20 @@ public final class VanillaRgbLighting {
         return Math.max(0, Math.min(255, Math.round(source * Math.min(1.0f, illumination))));
     }
 
+    static int modelTint(double x, double y, double z, int skyLevel, int emissionFloor) {
+        float[] rgb = RGB_SAMPLE.get();
+        sampleRgbAt(x, y, z, null, ClientGameplayLightField.localSampler(), rgb);
+        SkyPalette palette = skyPalette;
+        float sky = skyLevel / 15.0f * palette.timeFactor();
+        float daylight = sky * palette.daylight();
+        float gain = ClientLightingWorldRules.tuning().brightnessMultiplier();
+        float floor = emissionFloor / 15.0f;
+        return ARGB.color(255,
+                litChannel(255, Math.max(floor, RgbSurfaceLightMath.illumination(palette.ambient(), rgb[0], palette.red() * sky, daylight, gain))),
+                litChannel(255, Math.max(floor, RgbSurfaceLightMath.illumination(palette.ambient(), rgb[1], palette.green() * sky, daylight, gain))),
+                litChannel(255, Math.max(floor, RgbSurfaceLightMath.illumination(palette.ambient(), rgb[2], palette.blue() * sky, daylight, gain))));
+    }
+
     public static void updateSkyPalette(ClientLevel level) {
         double gamma = Minecraft.getInstance().options.gamma().get();
         float ambient = 0.04f + 0.16f * (float) Math.max(0.0, Math.min(1.0, gamma));
@@ -353,26 +366,6 @@ public final class VanillaRgbLighting {
                     daylight
             );
         }
-    }
-
-    /** RGB terrain's unlit baseline at a sky level, shared with the moving-light composite. */
-    static Vector3f skyAndAmbientAt(float skyLight) {
-        SkyPalette palette = skyPalette;
-        float skyWeight = skyWeightAt(skyLight, palette);
-        return new Vector3f(
-                palette.ambient() + palette.red() * skyWeight,
-                palette.ambient() + palette.green() * skyWeight,
-                palette.ambient() + palette.blue() * skyWeight
-        );
-    }
-
-    static float daylightCoverageAt(float skyLight) {
-        SkyPalette palette = skyPalette;
-        return skyWeightAt(skyLight, palette) * palette.daylight();
-    }
-
-    private static float skyWeightAt(float skyLight, SkyPalette palette) {
-        return Math.max(0.0f, Math.min(15.0f, skyLight)) / 15.0f * palette.timeFactor();
     }
 
     /** Uses the same user-facing ambient-occlusion toggle as vanilla smooth lighting. */

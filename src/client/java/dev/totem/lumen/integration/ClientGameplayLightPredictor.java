@@ -153,6 +153,7 @@ public final class ClientGameplayLightPredictor {
         }
         boolean sourceChanged = oldSource != nextSource;
         boolean propagationChanged = oldState.getLightDampening() != newState.getLightDampening();
+        if (propagationChanged) ClientHeldLightField.chunkChanged(level, pos.getX() >> 4, pos.getZ() >> 4);
         if (sourceChanged || propagationChanged) {
             Region influence = Region.aroundBlock(level, pos);
             ClientGameplayLightField.markSpeculativeRegion(

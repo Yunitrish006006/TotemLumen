@@ -86,8 +86,7 @@ as one. For example, contributions of (0.8, 0.2, 0.0) and (0.3, 0.1, 0.7) should
 (0.8, 0.2, 0.7) in either order.
 
 The server gameplay field already merges propagated candidates per channel.
-Minecraft RGB takes the maximum across the pre-light scene and the proposed final surface
-color for each hand light, preserving texture alpha. The bundled default lighting pack
+Minecraft RGB merges held and placed light per channel at each terrain sample. The bundled default lighting pack
 uses a 1.0 brightness multiplier. Totem Lumen local lights and the Raster Ray
 direct-light preview still use their existing renderer-specific composition. Minecraft Pure uses vanilla world lighting.
 
@@ -102,46 +101,22 @@ visual lighting only and does not alter vanilla block-light levels or spawning r
 on unequip, dimension change, disconnect, or entity disappearance.
 
 `MINECRAFT_PURE` uses vanilla world lighting and skips held-light capture and rendering.
-`MINECRAFT_RGB` reconstructs visible surfaces from depth and adds the moving RGB
-contribution above the already-present placed RGB light. This changes visible terrain
-brightness without modifying chunk meshes, their texture alpha, or Minecraft's light engine.
+`MINECRAFT_RGB` seeds a client-only light field at the block cell containing the hand.
+Six-neighbor propagation applies the placed-light attenuation and destination block dampening.
+An opaque wall stops direct propagation; light can still travel around an opening.
+Terrain vertices sample the component-wise maximum of this field and the placed field,
+sharing smooth lighting, texture color, skylight, ambient brightness and data-pack gain.
+Movement across cells queues a bounded field update and refreshes affected terrain meshes.
+World player and mob models and first-person bare arms sample this same field at the
+interpolated entity light probe. Ordinary model layers retain their material tint, alpha
+and directional shading. GUI previews, emissive layers and held-item geometry keep their
+own lighting. The four nearest hand lights participate. Position changes and mesh uploads can take several ticks to appear.
 `TOTEM_LUMEN` uploads the same moving sources to four reserved light
 records in the Vulkan scene and shades them directly, without repacking static sections on motion.
 At most four nearby hand lights are presented per client frame; the packet is capped at sixteen.
 The resolved models for luminous block items use full-bright lightmap coordinates as well, so a
 held or dropped torch/lantern surface remains visible like the corresponding placed emitter
 instead of only illuminating nearby geometry. Non-luminous items keep their supplied lightmap.
-
-Minecraft RGB estimates a surface's reflectance from its pre-held-light colour, the source-cell
-sky/ambient baseline, and the client RGB field at the visible surface. Its moving light scales
-with that reflectance and remaining colour headroom:
-dark materials respond less, while light materials in a dark room still brighten without the
-previous near-field clipping. The emitter tint is blended toward neutral and handheld strength
-is 0.90. A single scene copy is reused for all held sources in the frame. Four bounded 32³
-source-relative windows of the client RGB field are packed into one 512×256 atlas, uploaded only
-when a light crosses a block, a section inside its window changes, or the dimension/device changes.
-Unrelated field revisions are rejected by local section-snapshot identity checks.
-The fragment pass compares held versus placed RGB per channel and adds only the positive
-difference; this prevents a held torch beside a placed torch from being added at full strength.
-Placed RGB is trilinearly sampled near the visible surface so moving the hand across voxel
-boundaries does not produce hard square subtraction edges; the handheld sky/ambient baseline
-also interpolates neighbouring sky cells as its source moves.
-RGB handheld illumination uses a 1.20 centre gain and a steeper polynomial distance curve:
-the centre is brighter while the middle and outer radius fade more quickly. The placed-light
-subtraction, surface-reflectance weighting, and Minecraft Pure profile are unchanged.
-The source-cell baseline is an approximation near cave entrances and other sharp sky-light boundaries.
-Held light applies the shared `1.20` radial distance scale before
-falloff, matching the placed/server attenuation basis while remaining a depth-based moving-light
-approximation rather than occlusion-aware voxel propagation; movement never triggers terrain
-remeshing.
-Minecraft RGB brightens its client-only visual source field by one light level (capped at 15),
-without changing server gameplay-light or spawn decisions. Its handheld pass uses a 90% radius
-and a stronger center contribution than the placed-source approximation; Pure is unchanged.
-Placed RGB light uses an isotropic client visual distance with a 1.20 falloff scale, plus one
-additional visual level at selected five-level intervals. Totem Lumen's held-light path applies
-the same radial scale before its physically shaped falloff. The source cell remains unchanged,
-and immediate updates, region rebuilds, cross-section edges, and held-light distance attenuation
-share the same radial basis.
 
 ## Runtime ABI
 

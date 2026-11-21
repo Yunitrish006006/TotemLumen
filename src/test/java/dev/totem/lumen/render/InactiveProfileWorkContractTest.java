@@ -22,24 +22,17 @@ class InactiveProfileWorkContractTest {
         assertTrue(source.substring(guard, worldRead).contains("return;"));
     }
 
-    @Test void pureSkipsHandLightCaptureAndOnlyRgbUsesTheSurfacePass() throws Exception {
+    @Test void pureSkipsHandLightCaptureAndOnlyRgbUpdatesTheVisualField() throws Exception {
         String capture = read("integration/ClientHeldLightState.java");
         int pure = capture.indexOf("RendererSettings.renderProfile() == RendererSettings.RenderProfile.MINECRAFT_PURE");
         int gather = capture.indexOf("for (HeldLightsPayload.Source source");
         assertTrue(pure >= 0 && gather > pure);
         assertTrue(capture.substring(pure, gather).contains("captured = List.of();"));
 
-        String render = read("integration/HeldLightPostRenderer.java");
-        int rgb = render.indexOf("RendererSettings.renderProfile() != RendererSettings.RenderProfile.MINECRAFT_RGB");
-        int lights = render.indexOf("ClientHeldLightState.captured()");
-        assertTrue(rgb >= 0 && lights > rgb);
-        assertTrue(render.substring(rgb, lights).contains("return;"));
-    }
-
-    @Test void overlappingRgbHandLightsKeepTheStrongestChannelAndPreserveAlpha() throws Exception {
-        String render = read("integration/HeldLightPostRenderer.java");
-        assertTrue(render.contains("Optional.of(BlendFunction.MAX)"));
-        assertTrue(render.contains("ColorTargetState.WRITE_COLOR"));
+        assertTrue(read("TotemLumenClient.java").contains(
+                "if (renderProfile == RendererSettings.RenderProfile.MINECRAFT_RGB) {\n"
+                + "                    VanillaRgbLighting.updateSkyPalette(client.level);\n"
+                + "                    ClientHeldLightField.tick(client);"));
     }
 
     @Test void modelAndPbrTickBelongOnlyToActiveFullRenderer() throws Exception {
