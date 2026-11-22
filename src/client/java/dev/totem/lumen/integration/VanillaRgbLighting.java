@@ -131,6 +131,8 @@ public final class VanillaRgbLighting {
             blockBlue = 0.0f;
         }
 
+        blockGreen = RgbSurfaceLightMath.torchGreen(blockRed, blockGreen, blockBlue);
+
         // Sky light and block light share one terrain-light budget. A sunlit surface should
         // not become brighter just because a torch is placed beside it.
         SkyPalette palette = skyPalette;
@@ -253,6 +255,7 @@ public final class VanillaRgbLighting {
                 blockGreen = fallbackGreen;
                 blockBlue = fallbackBlue;
             }
+            blockGreen = RgbSurfaceLightMath.torchGreen(blockRed, blockGreen, blockBlue);
             float vertexSky = RgbSkyLightMath.vertexSkyLevel(
                     quad.lightmap(vertex), skyLight,
                     quad.emissive() || state.emissiveRendering() || state.getLightEmission() > 0
@@ -324,6 +327,7 @@ public final class VanillaRgbLighting {
     static int modelTint(double x, double y, double z, int skyLevel, int emissionFloor) {
         float[] rgb = RGB_SAMPLE.get();
         sampleRgbAt(x, y, z, null, ClientGameplayLightField.localSampler(), rgb);
+        rgb[1] = RgbSurfaceLightMath.torchGreen(rgb[0], rgb[1], rgb[2]);
         SkyPalette palette = skyPalette;
         float gain = ClientLightingWorldRules.tuning().brightnessMultiplier();
         float floor = emissionFloor / 15.0f;

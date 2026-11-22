@@ -11,6 +11,7 @@ public final class RgbDaylightBalanceVerifier {
     public static void main(String[] args) {
         verifySmoothedSkyVertices();
         verifyVanillaDaylight();
+        verifyTorchLift();
         float peak = RgbSurfaceLightMath.illumination(0.2f, 1, 0, 0, 1);
         float nearPeak = RgbSurfaceLightMath.illumination(0.2f, 14f / 15, 0, 0, 1);
         if (!(peak < 1 && peak > nearPeak && nearPeak > 0.75f))
@@ -47,6 +48,19 @@ public final class RgbDaylightBalanceVerifier {
                 throw new AssertionError("A torch brightened a sky-lit rainy noon surface");
             }
         }
+    }
+
+    private static void verifyTorchLift() {
+        float red = 14f / 15, green = 9f / 15, blue = 5f / 15;
+        float lifted = RgbSurfaceLightMath.torchGreen(red, green, blue);
+        if (Math.abs(lifted - green * 1.08f) > 0.00001f
+                || RgbSurfaceLightMath.torchGreen(red, green, 1f) < lifted)
+            throw new AssertionError("Warm torch lift must survive overlapping light");
+        if (RgbSurfaceLightMath.torchGreen(0, 0, 0) != 0
+                || RgbSurfaceLightMath.torchGreen(1, 1, 1) != 1
+                || RgbSurfaceLightMath.torchGreen(0.28f, 0.78f, 1) != 0.78f
+                || RgbSurfaceLightMath.torchGreen(1, 0.18f, 0.06f) != 0.18f)
+            throw new AssertionError("Unexpected shift outside the torch palette");
     }
 
     private static void verifyVanillaDaylight() {
