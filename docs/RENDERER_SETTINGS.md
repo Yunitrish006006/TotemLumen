@@ -58,7 +58,9 @@ sky illumination, and a neutral full-bright lightmap lookup prevents Minecraft's
 light from whitening that terrain. Source removal recomputes neighboring contributions under a
 tick budget, then publishes the completed local region without exposing the intermediate clear.
 Only changed mesh sections and the boundary neighbors needed for vertex interpolation are marked
-dirty. Because sky RGB is baked into terrain
+dirty. In the Overworld, daylight uses the vanilla sky-light factor, sky color, ambient color,
+brightness setting, and lightmap response. Smooth sky levels interpolate adjacent lightmap
+entries. Twilight blends back into the RGB night palette. Because sky RGB is baked into terrain
 vertices, time/sky-epoch changes queue a bounded refresh of loaded sections known to receive sky
 light, nearest first; they do not invalidate all compiled geometry at once. Ordinary torches use
 a slightly less-red warm-white fallback, while soul and redstone torches keep their own palettes.

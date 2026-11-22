@@ -10,6 +10,7 @@ public final class RgbDaylightBalanceVerifier {
 
     public static void main(String[] args) {
         verifySmoothedSkyVertices();
+        verifyVanillaDaylight();
         float peak = RgbSurfaceLightMath.illumination(0.2f, 1, 0, 0, 1);
         float nearPeak = RgbSurfaceLightMath.illumination(0.2f, 14f / 15, 0, 0, 1);
         if (!(peak < 1 && peak > nearPeak && nearPeak > 0.75f))
@@ -46,6 +47,27 @@ public final class RgbDaylightBalanceVerifier {
                 throw new AssertionError("A torch brightened a sky-lit rainy noon surface");
             }
         }
+    }
+
+    private static void verifyVanillaDaylight() {
+        var white = new org.joml.Vector3f(1);
+        var dark = new org.joml.Vector3f(0);
+        var map = new DaylightMap(1, 1, white, dark, 0);
+        // Vanilla lightmap.fsh: sky level 10/15 becomes (2/3)/(4-2) = 1/3.
+        if (Math.abs(map.at(0, 10) - 1f / 3) > 0.0001f || map.at(2, 15) != 1f
+                || map.at(0, 9.5f) != (map.at(0, 9) + map.at(0, 10)) * 0.5f)
+            throw new AssertionError("Smoothed skylight differs from the vanilla lightmap");
+        var rain = new DaylightMap(1, 0.6f, white, dark, 0);
+        var bright = new DaylightMap(1, 0.6f, white, dark, 1);
+        if (rain.at(1, 15) >= map.at(1, 15) || bright.at(1, 10) <= rain.at(1, 10)
+                || rain.refreshKey == bright.refreshKey)
+            throw new AssertionError("Skylight ignored weather or the brightness setting");
+        for (long tick : new long[]{1000, 6000, 11000})
+            if (DaylightMap.dayWeight(tick) != 1)
+                throw new AssertionError("Daytime plateau was darkened at tick " + tick);
+        if (DaylightMap.dayWeight(18000) != 0 || DaylightMap.dayWeight(12000) <= 0
+                || DaylightMap.dayWeight(12000) >= 1)
+            throw new AssertionError("Skylight must fade into the existing night palette");
     }
 
     private static void verifySmoothedSkyVertices() {

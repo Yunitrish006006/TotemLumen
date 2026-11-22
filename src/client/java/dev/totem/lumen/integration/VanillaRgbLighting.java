@@ -12,6 +12,8 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.level.LightLayer;
+import net.minecraft.world.attribute.EnvironmentAttributes;
+import net.minecraft.util.Mth;
 import dev.totem.lumen.gameplay.light.PackedRgbLight;
 import com.mojang.blaze3d.vertex.QuadInstance;
 import net.minecraft.util.ARGB;
@@ -26,7 +28,7 @@ public final class VanillaRgbLighting {
     private static final ThreadLocal<float[]> RGB_SAMPLE = ThreadLocal.withInitial(() -> new float[3]);
     private static final Direction[] SAMPLE_DIRECTIONS = Direction.values();
     /** Immutable per-tick snapshot read by parallel terrain-mesh workers. */
-    private static volatile SkyPalette skyPalette = new SkyPalette(0.92f, 0.96f, 1.0f, 1.0f, 0.04f, 1.0f);
+    private static volatile SkyPalette skyPalette = new SkyPalette(0.92f, 0.96f, 1.0f, 1.0f, 0.04f, 1.0f, null);
     private VanillaRgbLighting() {
     }
 
@@ -133,7 +135,6 @@ public final class VanillaRgbLighting {
         // not become brighter just because a torch is placed beside it.
         SkyPalette palette = skyPalette;
         float blockGain = ClientLightingWorldRules.tuning().brightnessMultiplier();
-        float ambient = palette.ambient();
         int rgbLightmap = LightCoordsUtil.FULL_BRIGHT;
         if (DIAGNOSTIC_LOGS.get() < 8) {
             int logIndex = DIAGNOSTIC_LOGS.getAndIncrement();
@@ -154,14 +155,9 @@ public final class VanillaRgbLighting {
                     state.emissiveRendering() || state.getLightEmission() > 0
             );
             skyLit |= vertexSky > 0.0f;
-            float skyWeight = vertexSky / 15.0f * palette.timeFactor();
-            float daylightCoverage = skyWeight * palette.daylight();
-            red = RgbSurfaceLightMath.illumination(
-                    ambient, blockRed, palette.red() * skyWeight, daylightCoverage, blockGain);
-            green = RgbSurfaceLightMath.illumination(
-                    ambient, blockGreen, palette.green() * skyWeight, daylightCoverage, blockGain);
-            blue = RgbSurfaceLightMath.illumination(
-                    ambient, blockBlue, palette.blue() * skyWeight, daylightCoverage, blockGain);
+            red = palette.illumination(0, vertexSky, blockRed, blockGain);
+            green = palette.illumination(1, vertexSky, blockGreen, blockGain);
+            blue = palette.illumination(2, vertexSky, blockBlue, blockGain);
             int source = instance.getColor(vertex);
             int tintedRed = litChannel(ARGB.red(source), red);
             int tintedGreen = litChannel(ARGB.green(source), green);
@@ -216,7 +212,6 @@ public final class VanillaRgbLighting {
             fallbackBlue = color.blue() * emission;
         }
         SkyPalette palette = skyPalette;
-        float ambient = palette.ambient();
         float blockGain = ClientLightingWorldRules.tuning().brightnessMultiplier();
         if (INDIGO_DIAGNOSTIC_LOGS.get() < 4 && INDIGO_DIAGNOSTIC_LOGS.getAndIncrement() < 4) {
             dev.totem.lumen.TotemLumenClient.LOGGER.info(
@@ -263,17 +258,12 @@ public final class VanillaRgbLighting {
                     quad.emissive() || state.emissiveRendering() || state.getLightEmission() > 0
             );
             skyLit |= vertexSky > 0.0f;
-            float skyWeight = vertexSky / 15.0f * palette.timeFactor();
-            float daylightCoverage = skyWeight * palette.daylight();
             int source = quad.color(vertex);
             quad.color(vertex, ARGB.color(
                     ARGB.alpha(source),
-                    litChannel(ARGB.red(source), RgbSurfaceLightMath.illumination(
-                            ambient, blockRed, palette.red() * skyWeight, daylightCoverage, blockGain)),
-                    litChannel(ARGB.green(source), RgbSurfaceLightMath.illumination(
-                            ambient, blockGreen, palette.green() * skyWeight, daylightCoverage, blockGain)),
-                    litChannel(ARGB.blue(source), RgbSurfaceLightMath.illumination(
-                            ambient, blockBlue, palette.blue() * skyWeight, daylightCoverage, blockGain))
+                    litChannel(ARGB.red(source), palette.illumination(0, vertexSky, blockRed, blockGain)),
+                    litChannel(ARGB.green(source), palette.illumination(1, vertexSky, blockGreen, blockGain)),
+                    litChannel(ARGB.blue(source), palette.illumination(2, vertexSky, blockBlue, blockGain))
             ));
             quad.lightmap(vertex, LightCoordsUtil.FULL_BRIGHT);
         }
@@ -335,14 +325,12 @@ public final class VanillaRgbLighting {
         float[] rgb = RGB_SAMPLE.get();
         sampleRgbAt(x, y, z, null, ClientGameplayLightField.localSampler(), rgb);
         SkyPalette palette = skyPalette;
-        float sky = skyLevel / 15.0f * palette.timeFactor();
-        float daylight = sky * palette.daylight();
         float gain = ClientLightingWorldRules.tuning().brightnessMultiplier();
         float floor = emissionFloor / 15.0f;
         return ARGB.color(255,
-                litChannel(255, Math.max(floor, RgbSurfaceLightMath.illumination(palette.ambient(), rgb[0], palette.red() * sky, daylight, gain))),
-                litChannel(255, Math.max(floor, RgbSurfaceLightMath.illumination(palette.ambient(), rgb[1], palette.green() * sky, daylight, gain))),
-                litChannel(255, Math.max(floor, RgbSurfaceLightMath.illumination(palette.ambient(), rgb[2], palette.blue() * sky, daylight, gain))));
+                litChannel(255, Math.max(floor, palette.illumination(0, skyLevel, rgb[0], gain))),
+                litChannel(255, Math.max(floor, palette.illumination(1, skyLevel, rgb[1], gain))),
+                litChannel(255, Math.max(floor, palette.illumination(2, skyLevel, rgb[2], gain))));
     }
 
     public static void updateSkyPalette(ClientLevel level) {
@@ -351,19 +339,29 @@ public final class VanillaRgbLighting {
         float timeFactor = Math.max(0.0f, (15.0f - level.getSkyDarken()) / 15.0f);
         String dimension = level.dimension().identifier().toString();
         if ("minecraft:the_nether".equals(dimension)) {
-            skyPalette = new SkyPalette(1.0f, 0.34f, 0.16f, timeFactor, ambient, 0.0f);
+            skyPalette = new SkyPalette(1.0f, 0.34f, 0.16f, timeFactor, ambient, 0.0f, null);
         } else if ("minecraft:the_end".equals(dimension)) {
-            skyPalette = new SkyPalette(0.58f, 0.48f, 1.0f, timeFactor, ambient, 0.0f);
+            skyPalette = new SkyPalette(0.58f, 0.48f, 1.0f, timeFactor, ambient, 0.0f, null);
         } else {
             float daylight = daylight(level);
             float night = 1.0f - daylight;
+            DaylightMap map = null;
+            if (level.dimension().equals(net.minecraft.world.level.Level.OVERWORLD)) {
+                float blend = DaylightMap.dayWeight(level.getOverworldClockTime());
+                if (blend > 0) {
+                    var probe = Minecraft.getInstance().gameRenderer.mainCamera().attributeProbe();
+                    map = new DaylightMap(blend, probe.getValue(EnvironmentAttributes.SKY_LIGHT_FACTOR, 1f),
+                            probe.getValue(EnvironmentAttributes.SKY_LIGHT_COLOR, 1f),
+                            probe.getValue(EnvironmentAttributes.AMBIENT_LIGHT_COLOR, 1f), (float) gamma);
+                }
+            }
             skyPalette = new SkyPalette(
                     0.28f * night + daylight,
                     0.38f * night + daylight,
                     0.82f * night + daylight,
                     timeFactor,
                     ambient,
-                    daylight
+                    daylight, map
             );
         }
     }
@@ -418,8 +416,10 @@ public final class VanillaRgbLighting {
         if (!"minecraft:overworld".equals(level.dimension().identifier().toString())) {
             return 0;
         }
-        int paletteStep = Math.round(daylight(level) * 12.0f);
-        return (level.getSkyDarken() << 5) | paletteStep;
+        SkyPalette palette = skyPalette;
+        if (palette.map != null && palette.map.weight == 1f) return palette.map.refreshKey;
+        int key = (level.getSkyDarken() << 5) | Math.round(palette.daylight * 12.0f);
+        return palette.map == null ? key : 31 * key + palette.map.refreshKey;
     }
 
     private static float daylight(ClientLevel level) {
@@ -429,7 +429,18 @@ public final class VanillaRgbLighting {
     }
 
     private record SkyPalette(float red, float green, float blue, float timeFactor,
-                              float ambient, float daylight) {
+                              float ambient, float daylight, DaylightMap map) {
+        float illumination(int channel, float level, float block, float gain) {
+            float sky = level * timeFactor / 15f;
+            float tint = channel == 0 ? red : channel == 1 ? green : blue;
+            if (map == null || level <= 0) {
+                return RgbSurfaceLightMath.illumination(ambient, block, tint * sky, sky * daylight, gain);
+            }
+            float coverage = Mth.lerp(map.weight, sky * daylight, level / 15f * map.coverage);
+            float artificial = RgbSurfaceLightMath.illumination(ambient, block, 0, coverage, gain);
+            float sunlight = Mth.lerp(map.weight, ambient + tint * sky, map.at(channel, level));
+            return Math.max(artificial, sunlight);
+        }
     }
 
     private static int toChannel(int value, int maximum) {
