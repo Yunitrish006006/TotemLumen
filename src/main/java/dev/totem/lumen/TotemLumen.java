@@ -10,6 +10,7 @@ import dev.totem.lumen.gameplay.light.SpawnLightProfilesReloadListener;
 import dev.totem.lumen.network.GameplayLightSectionsPayload;
 import dev.totem.lumen.network.LightingWorldRulesPayload;
 import dev.totem.lumen.network.HeldLightsPayload;
+import dev.totem.lumen.network.HeldLightPolicyPayload;
 import dev.totem.lumen.network.ServerLightingViewPackets;
 import dev.totem.lumen.world.LightingWorldRulesReloadListener;
 import net.fabricmc.fabric.api.resource.v1.pack.PackActivationType;
@@ -52,6 +53,7 @@ public final class TotemLumen implements ModInitializer {
                 LightingWorldRulesPayload.TYPE,
                 LightingWorldRulesPayload.CODEC
         );
+        PayloadTypeRegistry.clientboundPlay().register(HeldLightPolicyPayload.TYPE, HeldLightPolicyPayload.CODEC);
         PayloadTypeRegistry.clientboundPlay().register(HeldLightsPayload.TYPE, HeldLightsPayload.CODEC);
         PayloadTypeRegistry.clientboundPlay().register(
                 GameplayLightSectionsPayload.TYPE,

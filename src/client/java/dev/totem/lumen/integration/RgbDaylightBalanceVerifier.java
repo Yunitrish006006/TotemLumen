@@ -10,6 +10,10 @@ public final class RgbDaylightBalanceVerifier {
 
     public static void main(String[] args) {
         verifySmoothedSkyVertices();
+        float peak = RgbSurfaceLightMath.illumination(0.2f, 1, 0, 0, 1);
+        float nearPeak = RgbSurfaceLightMath.illumination(0.2f, 14f / 15, 0, 0, 1);
+        if (!(peak < 1 && peak > nearPeak && nearPeak > 0.75f))
+            throw new AssertionError("Bright artificial lights lost highlight detail");
         int torch = PackedRgbLight.packRgba(15, 10, 5, 14);
         float[] channels = {
                 PackedRgbLight.red(torch) / 15.0f,
@@ -27,12 +31,12 @@ public final class RgbDaylightBalanceVerifier {
                 throw new AssertionError("Night torch light was lost");
             }
             float moonlitTorch = RgbSurfaceLightMath.illumination(0.04f, channel, 0.2f, 0.0f, 2.0f);
-            float expectedMoonlit = 0.04f + Math.max(0.2f, channel * 2.0f);
+            float expectedMoonlit = Math.max(0.24f, nightTorch);
             if (Math.abs(moonlitTorch - expectedMoonlit) > 0.0001f) {
                 throw new AssertionError("Moonlight reduced the nighttime block-light gain");
             }
             float partialSky = RgbSurfaceLightMath.illumination(0.04f, channel, 0.5f, 0.5f, 2.0f);
-            float expected = 0.04f + Math.max(0.5f, channel);
+            float expected = Math.max(0.54f, RgbSurfaceLightMath.illumination(0.04f, channel, 0.0f, 0.0f, 1.0f));
             if (Math.abs(partialSky - expected) > 0.0001f) {
                 throw new AssertionError("Partial daylight did not taper the block-light boost");
             }

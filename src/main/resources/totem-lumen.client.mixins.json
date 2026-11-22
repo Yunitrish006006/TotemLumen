@@ -28,6 +28,7 @@
     "P5StableLookupRendererP17Mixin",
     "P5RendererResourcesMixin",
     "RgbFrameMetricsMixin",
+    "RgbVignetteMixin",
     "VulkanComputeProgramMixin",
     "VideoSettingsRenderProfileMixin",
     "VanillaRgbLightingLighterMixin",

@@ -1928,9 +1928,9 @@ public final class P5StableLookupRenderer {
                 continue;
             }
             ClientHeldLightState.Light light = lights.get(index);
-            putWord(buffer, base, Float.floatToRawIntBits(light.x()));
-            putWord(buffer, base + 1, Float.floatToRawIntBits(light.y()));
-            putWord(buffer, base + 2, Float.floatToRawIntBits(light.z()));
+            putWord(buffer, base, Float.floatToRawIntBits((float) light.x()));
+            putWord(buffer, base + 1, Float.floatToRawIntBits((float) light.y()));
+            putWord(buffer, base + 2, Float.floatToRawIntBits((float) light.z()));
             putWord(buffer, base + 3, Float.floatToRawIntBits(light.radius()));
             putWord(buffer, base + 4, Float.floatToRawIntBits(light.red()));
             putWord(buffer, base + 5, Float.floatToRawIntBits(light.green()));

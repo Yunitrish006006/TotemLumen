@@ -22,6 +22,7 @@ import dev.totem.lumen.integration.VanillaRgbLighting;
 import dev.totem.lumen.network.GameplayLightSectionsPayload;
 import dev.totem.lumen.network.LightingWorldRulesPayload;
 import dev.totem.lumen.network.HeldLightsPayload;
+import dev.totem.lumen.network.HeldLightPolicyPayload;
 import dev.totem.lumen.network.ServerLightingViewPackets;
 import dev.totem.lumen.render.RendererBootstrap;
 import dev.totem.lumen.render.RendererCompileProgressNotifier;
@@ -80,6 +81,8 @@ public final class TotemLumenClient implements ClientModInitializer {
                     payload.rules().size()
             );
         });
+        ClientPlayNetworking.registerGlobalReceiver(HeldLightPolicyPayload.TYPE, (payload, context) ->
+                ClientHeldLightState.setEnabled(payload.enabled()));
         ClientPlayNetworking.registerGlobalReceiver(HeldLightsPayload.TYPE, (payload, context) ->
                 ClientHeldLightState.apply(payload)
         );

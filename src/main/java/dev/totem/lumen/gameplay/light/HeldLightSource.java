@@ -13,21 +13,22 @@ public final class HeldLightSource {
     }
 
     public static char packedFor(ItemStack stack) {
-        if (stack.isEmpty()) return 0;
+        BlockState state = emittingState(stack);
+        if (state == null) return 0;
+        return GameplayLightSource.packedFor(state,
+                EffectiveLightingRules.ruleFor(BuiltInRegistries.BLOCK.getKey(state.getBlock())));
+    }
+
+    public static BlockState emittingState(ItemStack stack) {
+        if (stack.isEmpty()) return null;
         BlockState state;
         if (stack.is(Items.LAVA_BUCKET)) {
             state = net.minecraft.world.level.block.Blocks.LAVA.defaultBlockState();
         } else if (stack.getItem() instanceof BlockItem blockItem) {
             state = blockItem.getBlock().defaultBlockState();
         } else {
-            return 0;
+            return null;
         }
-        if (state.getLightEmission() <= 0) return 0;
-        return GameplayLightSource.packedFor(
-                state,
-                EffectiveLightingRules.ruleFor(
-                        BuiltInRegistries.BLOCK.getKey(state.getBlock())
-                )
-        );
+        return state.getLightEmission() > 0 ? state : null;
     }
 }

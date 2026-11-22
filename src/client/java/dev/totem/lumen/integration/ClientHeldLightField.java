@@ -11,20 +11,23 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.SectionPos;
 
-import java.util.ArrayList;
-import java.util.Arrays;
+import java.util.BitSet;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
-import java.util.List;
+import java.util.Collection;
+import java.util.ArrayDeque;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.Map;
+import java.util.Set;
 
 /** Tick-owned visual light. Terrain workers only read fully published sections. */
 public final class ClientHeldLightField {
-    private static final int MAX_LIGHTS = 4;
-    private static final int MAX_RADIUS = PackedRgbLight.MAX_CHANNEL;
     private static final Direction[] NEIGHBORS = Direction.values();
     private static ClientLevel level;
-    private static List<Seed> lastSeeds = List.of();
-    private static Flood pending;
-    private static boolean invalidated;
+    private static final Map<Seed, Flood> sources = new LinkedHashMap<>();
+    private static final Map<Long, Set<Flood>> contributors = new LinkedHashMap<>();
+    private static final ArrayDeque<Flood> pending = new ArrayDeque<>();
+    private static final LongOpenHashSet invalidated = new LongOpenHashSet();
     private static final BlockPos.MutableBlockPos sample = new BlockPos.MutableBlockPos();
     private static float attenuation;
     static volatile Snapshot visible = new Snapshot("", new Long2ObjectOpenHashMap<>());
@@ -35,21 +38,25 @@ public final class ClientHeldLightField {
     private ClientHeldLightField() {}
 
     public static void clear() {
-        if (!visible.sections.isEmpty()) publish(new Long2ObjectOpenHashMap<>());
+        if (!visible.sections.isEmpty()) {
+            var meshes = new LongOpenHashSet();
+            for (long key : visible.sections.keySet()) markNeighbors(key, meshes);
+            visible = new Snapshot("", new Long2ObjectOpenHashMap<>());
+            queueMeshes(meshes);
+        }
         level = null;
-        lastSeeds = List.of();
-        pending = null;
-        invalidated = false;
+        sources.clear();
+        contributors.clear();
+        pending.clear();
+        invalidated.clear();
     }
 
     public static void chunkChanged(ClientLevel world, int chunkX, int chunkZ) {
         if (world != level) return;
-        for (Seed seed : lastSeeds) {
-            if (Math.abs((seed.cell.getX() >> 4) - chunkX) <= 1
-                    && Math.abs((seed.cell.getZ() >> 4) - chunkZ) <= 1) {
-                invalidated = true;
-                return;
-            }
+        for (Seed seed : sources.keySet()) {
+            long key = SectionPos.asLong(seed.cell);
+            if (Math.abs(SectionPos.x(key) - chunkX) <= 1 && Math.abs(SectionPos.z(key) - chunkZ) <= 1)
+                invalidated.add(key);
         }
     }
 
@@ -59,75 +66,119 @@ public final class ClientHeldLightField {
             level = client.level;
         }
         if (level == null) return;
-        var lights = ClientHeldLightState.capture(client, 1.0f);
-        if (lights.isEmpty()) {
-            clear();
-            return;
-        }
-        String dimension = level.dimension().identifier().toString();
-        boolean authoritative = ClientGameplayLightField.hasServerField(dimension);
-        List<Seed> seeds = new ArrayList<>(MAX_LIGHTS);
-        for (int i = 0; i < Math.min(MAX_LIGHTS, lights.size()); i++) {
-            var light = lights.get(i);
+        boolean authoritative = ClientGameplayLightField.hasServerField(level.dimension().identifier().toString());
+        Set<Seed> seeds = new LinkedHashSet<>();
+        for (var light : ClientHeldLightState.capture(client, 1.0f)) {
             BlockPos cell = BlockPos.containing(light.x(), light.y(), light.z());
-            if (!level.isInsideBuildHeight(cell.getY()) || !level.hasChunkAt(cell)
-                    || level.getBlockState(cell).getLightDampening() >= 15) continue;
+            if (!open(cell)) {
+                var holder = level.getEntity(light.entityId());
+                if (holder == null) continue;
+                cell = BlockPos.containing(holder.getX(), light.y(), holder.getZ());
+                if (!open(cell)) {
+                    cell = BlockPos.containing(holder.getEyePosition());
+                    if (!open(cell)) {
+                        cell = holder.blockPosition();
+                        if (!open(cell)) continue;
+                    }
+                }
+            }
             char packed = authoritative ? light.packed() : ClientRgbVisualLightSource.brighten(light.packed());
             seeds.add(new Seed(cell, packed));
         }
+        var dirty = new Long2ObjectOpenHashMap<BitSet>();
         float tuning = ClientLightingWorldRules.tuning().attenuationMultiplier();
-        if (invalidated || attenuation != tuning || seeds.isEmpty()
-                || pending != null && !pending.stillNearby(seeds)) {
-            pending = null;
-            lastSeeds = List.of();
-            invalidated = false;
-            attenuation = tuning;
-        }
-        if (seeds.isEmpty()) {
-            clear();
-            return;
-        }
-        if (pending == null && !seeds.equals(lastSeeds)) {
-            lastSeeds = List.copyOf(seeds);
-            pending = new Flood(lastSeeds);
-        }
-        if (pending == null) return;
-        if (pending.advance((x, y, z, packed) -> {
-            if (!level.isInsideBuildHeight(y) || !level.hasChunkAt(x, z)) return 0;
-            return RgbLightAttenuation.attenuate(packed, level.getBlockState(sample.set(x, y, z)), tuning);
-        }, 4096, System.nanoTime() + 2_000_000L)) {
-            publish(pending.sections);
-            pending = null;
-        }
-    }
+        var retired = new java.util.HashSet<Flood>();
+        sources.entrySet().removeIf(entry -> {
+            Seed seed = entry.getKey();
+            long key = SectionPos.asLong(seed.cell);
+            if (tuning == attenuation && !invalidated.contains(key) && seeds.contains(seed)) return false;
+            var flood = entry.getValue();
+            retired.add(flood);
+            flood.occupied.forEach((section, cells) -> {
+                dirty.computeIfAbsent(section, unused -> new BitSet()).or(cells);
+                var local = contributors.get(section);
+                local.remove(flood);
+                if (local.isEmpty()) contributors.remove(section);
+            });
+            return true;
+        });
+        if (!retired.isEmpty()) pending.removeIf(retired::contains);
+        invalidated.clear();
+        attenuation = tuning;
+        for (var seed : seeds) {
+            if (sources.containsKey(seed)) continue;
+            var flood = new Flood(java.util.List.of(seed));
+            sources.put(seed, flood);
 
-    private static void publish(Long2ObjectOpenHashMap<char[]> sections) {
-        String dimension = level.dimension().identifier().toString();
-        Snapshot previous = visible;
-        visible = new Snapshot(dimension, sections);
-        var keys = new LongOpenHashSet(previous.sections.keySet());
-        keys.addAll(sections.keySet());
-        var dirty = new LongOpenHashSet();
-        for (long key : keys) {
-            char[] old = previous.sections.get(key);
-            char[] next = sections.get(key);
-            if (Arrays.equals(old, next)) continue;
-            // Interpolated terrain vertices can sample one cell across a section boundary.
-            boolean[] neighbors = new boolean[27];
-            for (int i = 0; i < 4096; i++) {
-                if ((old == null ? 0 : old[i]) == (next == null ? 0 : next[i])) continue;
-                int x = i & 15, y = i >> 8, z = (i >> 4) & 15;
+            pending.addLast(flood);
+            collectChanges(flood, dirty);
+        }
+        long deadline = System.nanoTime() + 2_000_000L;
+        for (int remaining = 4096; !pending.isEmpty() && remaining > 0 && System.nanoTime() < deadline; remaining -= 128) {
+            var flood = pending.removeFirst();
+            boolean complete = flood.advance((x, y, z, packed) -> {
+                if (!level.isInsideBuildHeight(y) || !level.hasChunkAt(x, z)) return 0;
+                var state = level.getBlockState(sample.set(x, y, z));
+                return state.getLightDampening() >= 15 ? 0 : RgbLightAttenuation.attenuate(packed, state, tuning);
+            }, 128, deadline);
+            collectChanges(flood, dirty);
+            if (!complete) pending.addLast(flood);
+        }
+        if (dirty.isEmpty()) return;
+        // Never hand terrain workers a section still being filled by a flood.
+        var sections = new Long2ObjectOpenHashMap<>(visible.sections);
+        var meshes = new LongOpenHashSet();
+        for (var entry : dirty.long2ObjectEntrySet()) {
+            long key = entry.getLongKey();
+            var local = contributors.get(key);
+            if (local == null) {
+                if (sections.remove(key) != null) markNeighbors(key, meshes);
+                continue;
+            }
+            char[] previous = sections.get(key);
+            char[] next = previous == null ? new char[4096] : previous.clone();
+            // Resolve only touched voxels against sources actually reaching this section.
+            var fields = local.stream().map(flood -> flood.sections.get(key)).toList();
+            var cells = entry.getValue();
+            for (int i = cells.nextSetBit(0); i >= 0; i = cells.nextSetBit(i + 1)) {
+                char value = 0;
+                for (char[] field : fields) value = PackedRgbLight.componentMax(value, field[i]);
+                if (next[i] == value) continue;
+                next[i] = value;
+                int x = i & 15, y = i >> 8, z = i >> 4 & 15;
                 for (int dy = y == 0 ? -1 : 0; dy <= (y == 15 ? 1 : 0); dy++)
                     for (int dz = z == 0 ? -1 : 0; dz <= (z == 15 ? 1 : 0); dz++)
                         for (int dx = x == 0 ? -1 : 0; dx <= (x == 15 ? 1 : 0); dx++)
-                            neighbors[(dy + 1) * 9 + (dz + 1) * 3 + dx + 1] = true;
+                            meshes.add(SectionPos.offset(key, dx, dy, dz));
             }
-            for (int i = 0; i < neighbors.length; i++) {
-                if (neighbors[i]) dirty.add(SectionPos.asLong(SectionPos.x(key) + i % 3 - 1,
-                        SectionPos.y(key) + i / 9 - 1, SectionPos.z(key) + i / 3 % 3 - 1));
-            }
+            sections.put(key, next);
         }
-        for (long key : dirty) ClientGameplayLightField.markSectionDirty(dimension,
+        visible = new Snapshot(level.dimension().identifier().toString(), sections);
+        queueMeshes(meshes);
+    }
+
+    private static void collectChanges(Flood flood, Long2ObjectOpenHashMap<BitSet> dirty) {
+        flood.changed.forEach((key, cells) -> {
+            contributors.computeIfAbsent(key, unused -> new LinkedHashSet<>()).add(flood);
+            dirty.computeIfAbsent(key, unused -> new BitSet()).or(cells);
+        });
+        flood.changed.clear();
+    }
+
+    private static boolean open(BlockPos pos) {
+        return level.isInsideBuildHeight(pos.getY()) && level.hasChunkAt(pos)
+                && level.getBlockState(pos).getLightDampening() < 15;
+    }
+
+    private static void markNeighbors(long key, LongOpenHashSet meshes) {
+        for (int dy = -1; dy <= 1; dy++)
+            for (int dz = -1; dz <= 1; dz++)
+                for (int dx = -1; dx <= 1; dx++) meshes.add(SectionPos.offset(key, dx, dy, dz));
+    }
+
+    private static void queueMeshes(LongOpenHashSet meshes) {
+        String dimension = level.dimension().identifier().toString();
+        for (long key : meshes) ClientGameplayLightField.markSectionDirty(dimension,
                 SectionPos.x(key), SectionPos.y(key), SectionPos.z(key));
     }
 
@@ -136,23 +187,13 @@ public final class ClientHeldLightField {
 
     static final class Flood {
         final Long2ObjectOpenHashMap<char[]> sections = new Long2ObjectOpenHashMap<>();
-        private final List<Seed> seeds;
+        private final Long2ObjectOpenHashMap<BitSet> occupied = new Long2ObjectOpenHashMap<>();
+        private final Long2ObjectOpenHashMap<BitSet> changed = new Long2ObjectOpenHashMap<>();
         private final LongArrayFIFOQueue positions = new LongArrayFIFOQueue();
         private final CharArrayFIFOQueue values = new CharArrayFIFOQueue();
 
-        Flood(List<Seed> seeds) {
-            this.seeds = seeds;
+        Flood(Collection<Seed> seeds) {
             for (Seed seed : seeds) offer(seed.cell.getX(), seed.cell.getY(), seed.cell.getZ(), seed.packed);
-        }
-
-        // Finish an in-flight step while walking; drop work for a removed or distant source.
-        boolean stillNearby(List<Seed> current) {
-            if (current.size() != seeds.size()) return false;
-            for (Seed old : seeds) {
-                if (current.stream().noneMatch(s -> s.packed == old.packed
-                        && s.cell.distManhattan(old.cell) <= MAX_RADIUS)) return false;
-            }
-            return true;
         }
 
         boolean advance(Transfer transfer, int budget, long deadline) {
@@ -178,6 +219,8 @@ public final class ClientHeldLightField {
             char combined = PackedRgbLight.componentMax(section[index], packed);
             if (combined == section[index]) return;
             section[index] = combined;
+            occupied.computeIfAbsent(key, unused -> new BitSet()).set(index);
+            changed.computeIfAbsent(key, unused -> new BitSet()).set(index);
             positions.enqueue(BlockPos.asLong(x, y, z));
             values.enqueue(packed);
         }

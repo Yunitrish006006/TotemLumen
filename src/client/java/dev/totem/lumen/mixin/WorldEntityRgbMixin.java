@@ -21,6 +21,7 @@ public abstract class WorldEntityRgbMixin {
             SubmitNodeCollector collector, Operation<Void> original) {
         var previous = EntityRgbLighting.current();
         var lighting = ((EntityRgbLighting.State) state).totemLumen$getLighting();
+        if (lighting != null) lighting = lighting.forWorld(camera.pos);
         if (lighting == previous) {
             original.call(dispatcher, state, camera, x, y, z, poses, collector);
             return;

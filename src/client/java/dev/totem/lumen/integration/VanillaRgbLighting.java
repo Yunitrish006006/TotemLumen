@@ -157,15 +157,15 @@ public final class VanillaRgbLighting {
             float skyWeight = vertexSky / 15.0f * palette.timeFactor();
             float daylightCoverage = skyWeight * palette.daylight();
             red = RgbSurfaceLightMath.illumination(
-                    0.0f, blockRed, palette.red() * skyWeight, daylightCoverage, blockGain);
+                    ambient, blockRed, palette.red() * skyWeight, daylightCoverage, blockGain);
             green = RgbSurfaceLightMath.illumination(
-                    0.0f, blockGreen, palette.green() * skyWeight, daylightCoverage, blockGain);
+                    ambient, blockGreen, palette.green() * skyWeight, daylightCoverage, blockGain);
             blue = RgbSurfaceLightMath.illumination(
-                    0.0f, blockBlue, palette.blue() * skyWeight, daylightCoverage, blockGain);
+                    ambient, blockBlue, palette.blue() * skyWeight, daylightCoverage, blockGain);
             int source = instance.getColor(vertex);
-            int tintedRed = litChannel(ARGB.red(source), ambient + red);
-            int tintedGreen = litChannel(ARGB.green(source), ambient + green);
-            int tintedBlue = litChannel(ARGB.blue(source), ambient + blue);
+            int tintedRed = litChannel(ARGB.red(source), red);
+            int tintedGreen = litChannel(ARGB.green(source), green);
+            int tintedBlue = litChannel(ARGB.blue(source), blue);
             instance.setColor(vertex, ARGB.color(
                     ARGB.alpha(source), tintedRed, tintedGreen, tintedBlue
             ));

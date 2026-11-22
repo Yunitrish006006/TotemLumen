@@ -67,8 +67,8 @@ unlit ore remains non-emissive.
 Server and client propagation store light chroma in RGB and attenuation in A within the existing
 16-bit field. The A channel is light intensity, not texture transparency, so a warm torch does not
 leave a pure-red fringe at its dim edge. This also changes the RGB field
-used by server gameplay-light queries. Entity, particle, fluid and other non-terrain render
-families have not yet been migrated to this RGB terrain path; the profile is not a complete
+used by server gameplay-light queries. Particles, fluids and some non-terrain render
+families still use their own lighting; the profile is not a complete
 replacement of Minecraft's lighting pipeline.
 
 On Indigo terrain, smooth lighting interpolates effective RGB at each quad vertex in floating
@@ -90,27 +90,25 @@ Minecraft RGB merges held and placed light per channel at each terrain sample. T
 uses a 1.0 brightness multiplier. Totem Lumen local lights and the Raster Ray
 direct-light preview still use their existing renderer-specific composition. Minecraft Pure uses vanilla world lighting.
 
-## Server-approved held light
+## Held lighting
 
-When the server runs Totem Lumen, it resolves luminous BlockItems in either player hand (plus lava
-buckets) with the same emission colors and world rules as placed blocks. A bounded equipment
-snapshot preserves main and offhand separately; ordinary entity tracking supplies interpolated
-positions. Each source is offset toward its actual hand according to body yaw and dominant arm,
-using the same world-space position in first and third person. This is
-visual lighting only and does not alter vanilla block-light levels or spawning rules. It clears
-on unequip, dimension change, disconnect, or entity disappearance.
+Minecraft RGB reads the tracked main-hand and offhand equipment of players and living mobs
+within 48 blocks. It resolves luminous block items and lava buckets using the same emission
+rules as placed blocks. A Totem Lumen server can disable held lighting. Older servers that
+provide only the equipment snapshot retain their original source list. A vanilla server
+needs no mod for the client-side effect. Held lighting has no effect on spawning.
 
-`MINECRAFT_PURE` uses vanilla world lighting and skips held-light capture and rendering.
-`MINECRAFT_RGB` seeds a client-only light field at the block cell containing the hand.
-Six-neighbor propagation applies the placed-light attenuation and destination block dampening.
-An opaque wall stops direct propagation; light can still travel around an opening.
-Terrain vertices sample the component-wise maximum of this field and the placed field,
-sharing smooth lighting, texture color, skylight, ambient brightness and data-pack gain.
-Movement across cells queues a bounded field update and refreshes affected terrain meshes.
-World player and mob models and first-person bare arms sample this same field at the
-interpolated entity light probe. Ordinary model layers retain their material tint, alpha
-and directional shading. GUI previews, emissive layers and held-item geometry keep their
-own lighting. The four nearest hand lights participate. Position changes and mesh uploads can take several ticks to appear.
+When the estimated hand is inside an opaque block, the light starts on the holder's side.
+Movement updates the source cell on the next client tick. Propagation and terrain mesh
+refreshes run incrementally, so more distant surfaces can follow later. Solid blocks stop
+the flood and openings allow light through. Held and placed light merge by channel before
+terrain shading. A smooth roll-off above 75% artificial illumination preserves bright-end
+gradients. The vignette samples the merged field at the camera eye.
+
+World player and mob models, including first-person bare arms, sample the RGB field.
+Large world models interpolate a bounded grid of extracted colors across the mesh.
+Ordinary layers preserve material color, transparency and directional shading. Emissive
+layers retain their intrinsic lighting. Minecraft Pure skips hand-light capture.
 `TOTEM_LUMEN` uploads the same moving sources to four reserved light
 records in the Vulkan scene and shades them directly, without repacking static sections on motion.
 At most four nearby hand lights are presented per client frame; the packet is capped at sixteen.

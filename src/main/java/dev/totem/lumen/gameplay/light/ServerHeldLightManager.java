@@ -3,6 +3,7 @@ package dev.totem.lumen.gameplay.light;
 import dev.totem.lumen.TotemLumen;
 import dev.totem.lumen.config.ServerLightingConfigStore;
 import dev.totem.lumen.network.HeldLightsPayload;
+import dev.totem.lumen.network.HeldLightPolicyPayload;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
@@ -48,6 +49,11 @@ public final class ServerHeldLightManager {
                     .thenComparing(HeldLightsPayload.Source::hand));
             HeldLightsPayload payload = new HeldLightsPayload(recipient.level().dimension().identifier(), sources);
             HeldLightsPayload previous = LAST_SENT.put(recipient.getUUID(), payload);
+            if ((previous == null || ticks % 40L == 0L)
+                    && ServerPlayNetworking.canSend(recipient, HeldLightPolicyPayload.TYPE)) {
+                ServerPlayNetworking.send(recipient, new HeldLightPolicyPayload(
+                        ServerLightingConfigStore.current().heldLightEnabled()));
+            }
             if (!payload.equals(previous) || ticks % 40L == 0L) {
                 ServerPlayNetworking.send(recipient, payload);
                 if (!payload.equals(previous) && diagnosticChanges++ < 12) {

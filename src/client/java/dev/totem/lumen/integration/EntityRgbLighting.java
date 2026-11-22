@@ -13,10 +13,12 @@ import net.minecraft.world.entity.monster.Vex;
 import net.minecraft.world.entity.boss.wither.WitherBoss;
 import net.minecraft.world.entity.monster.cubemob.MagmaCube;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.phys.Vec3;
+import net.minecraft.client.renderer.texture.UvMapping;
 import net.minecraft.world.entity.animal.squid.GlowSquid;
 
 /** Material-independent RGB illumination captured from the terrain field at the vanilla entity probe. */
-public record EntityRgbLighting(int lightCoords, int tint) {
+public record EntityRgbLighting(int lightCoords, int tint, EntityLightVolume volume, Vec3 camera) {
     public interface State {
         EntityRgbLighting totemLumen$getLighting();
         void totemLumen$setLighting(EntityRgbLighting lighting);
@@ -34,7 +36,15 @@ public record EntityRgbLighting(int lightCoords, int tint) {
         if (floor == 15) return null;
         var pos = entity.getLightProbePosition(partialTick);
         int tint = VanillaRgbLighting.modelTint(pos.x, pos.y, pos.z, LightCoordsUtil.sky(coords), floor);
-        return new EntityRgbLighting(coords, tint);
+        return new EntityRgbLighting(coords, tint, EntityLightVolume.capture(entity, partialTick, floor), null);
+    }
+
+    public EntityRgbLighting forWorld(Vec3 origin) {
+        return volume == null ? this : new EntityRgbLighting(lightCoords, tint, volume, origin);
+    }
+
+    public UvMapping spatialMapping(UvMapping sprite) {
+        return new EntityLightMapping(sprite, volume, camera);
     }
 
     public static EntityRgbLighting current() {
