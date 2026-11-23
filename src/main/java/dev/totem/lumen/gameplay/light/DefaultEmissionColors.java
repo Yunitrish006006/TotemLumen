@@ -14,6 +14,7 @@ public final class DefaultEmissionColors {
     private static final EmissionColor GLOWSTONE = new EmissionColor(1.0f, 0.78f, 0.42f);
     private static final EmissionColor SHROOMLIGHT = new EmissionColor(1.0f, 0.48f, 0.18f);
     private static final EmissionColor TORCH = new EmissionColor(1.0f, 0.64f, 0.34f);
+    private static final EmissionColor GLOW_LICHEN = new EmissionColor(0.32f, 1.0f, 0.73f);
     private static final EmissionColor WARM = new EmissionColor(1.0f, 0.55f, 0.22f);
     private static final EmissionColor FALLBACK = new EmissionColor(1.0f, 0.86f, 0.66f);
 
@@ -24,6 +25,8 @@ public final class DefaultEmissionColors {
         if (emission <= 0) {
             return EmissionColor.BLACK;
         }
+        if (sourceId.equals("minecraft:furnace")) return TORCH;
+        if (sourceId.equals("minecraft:glow_lichen")) return GLOW_LICHEN;
         if (sourceId.equals("minecraft:soul_lantern")) return SOUL_LANTERN;
         if (sourceId.contains("soul_")) return SOUL;
         if (sourceId.contains("redstone_torch")) return REDSTONE;

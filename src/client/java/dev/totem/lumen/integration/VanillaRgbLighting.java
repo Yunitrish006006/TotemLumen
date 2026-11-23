@@ -26,7 +26,6 @@ public final class VanillaRgbLighting {
     private static final AtomicInteger DIAGNOSTIC_LOGS = new AtomicInteger();
     private static final AtomicInteger INDIGO_DIAGNOSTIC_LOGS = new AtomicInteger();
     private static final ThreadLocal<float[]> RGB_SAMPLE = ThreadLocal.withInitial(() -> new float[3]);
-    private static final Direction[] SAMPLE_DIRECTIONS = Direction.values();
     /** Immutable per-tick snapshot read by parallel terrain-mesh workers. */
     private static volatile SkyPalette skyPalette = new SkyPalette(0.92f, 0.96f, 1.0f, 1.0f, 0.04f, 1.0f, null);
     private VanillaRgbLighting() {
@@ -82,20 +81,8 @@ public final class VanillaRgbLighting {
             }
         }
         int packed = ClientGameplayLightField.packedAtCurrentDimension(pos);
-        int skyLight = world.getBrightness(LightLayer.SKY, pos);
-        if (faceDirection != null) {
-            skyLight = Math.max(
-                    skyLight,
-                    world.getBrightness(
-                            LightLayer.SKY,
-                            new BlockPos(
-                                    pos.getX() + faceDirection.getStepX(),
-                                    pos.getY() + faceDirection.getStepY(),
-                                    pos.getZ() + faceDirection.getStepZ()
-                            )
-                    )
-            );
-        }
+        boolean emissive = state.emissiveRendering() || state.getLightEmission() > 0;
+        int skyLight = emissive ? fallbackSky(world, pos, faceDirection) : 0;
         float red;
         float green;
         float blue;
@@ -153,8 +140,7 @@ public final class VanillaRgbLighting {
         boolean skyLit = false;
         for (int vertex = 0; vertex < 4; vertex++) {
             float vertexSky = RgbSkyLightMath.vertexSkyLevel(
-                    instance.getLightCoords(vertex), skyLight,
-                    state.emissiveRendering() || state.getLightEmission() > 0
+                    instance.getLightCoords(vertex), skyLight, emissive
             );
             skyLit |= vertexSky > 0.0f;
             red = palette.illumination(0, vertexSky, blockRed, blockGain);
@@ -189,16 +175,8 @@ public final class VanillaRgbLighting {
             return;
         }
         ClientGameplayLightField.LocalLookup light = ClientGameplayLightField.localSampler();
-        int packed = smoothedPackedAt(pos, faceDirection, light);
-        int skyLight = world.getBrightness(LightLayer.SKY, pos);
-        if (faceDirection != null) {
-            BlockPos neighbour = new BlockPos(
-                    pos.getX() + faceDirection.getStepX(),
-                    pos.getY() + faceDirection.getStepY(),
-                    pos.getZ() + faceDirection.getStepZ()
-            );
-            skyLight = Math.max(skyLight, world.getBrightness(LightLayer.SKY, neighbour));
-        }
+        boolean emissive = quad.emissive() || state.emissiveRendering() || state.getLightEmission() > 0;
+        int skyLight = emissive ? fallbackSky(world, pos, faceDirection) : 0;
         float fallbackRed = 0.0f;
         float fallbackGreen = 0.0f;
         float fallbackBlue = 0.0f;
@@ -217,8 +195,8 @@ public final class VanillaRgbLighting {
         float blockGain = ClientLightingWorldRules.tuning().brightnessMultiplier();
         if (INDIGO_DIAGNOSTIC_LOGS.get() < 4 && INDIGO_DIAGNOSTIC_LOGS.getAndIncrement() < 4) {
             dev.totem.lumen.TotemLumenClient.LOGGER.info(
-                    "RGB Indigo terrain active: pos={}, packed=0x{}, sky={}, vertexSampling={}",
-                    pos, Integer.toHexString(packed), skyLight,
+                    "RGB Indigo terrain active: pos={}, center=0x{}, vertexSampling={}",
+                    pos, Integer.toHexString(light.packedAtCurrentDimension(pos)),
                     Minecraft.getInstance().options.ambientOcclusion().get()
             );
         }
@@ -257,8 +235,7 @@ public final class VanillaRgbLighting {
             }
             blockGreen = RgbSurfaceLightMath.torchGreen(blockRed, blockGreen, blockBlue);
             float vertexSky = RgbSkyLightMath.vertexSkyLevel(
-                    quad.lightmap(vertex), skyLight,
-                    quad.emissive() || state.emissiveRendering() || state.getLightEmission() > 0
+                    quad.lightmap(vertex), skyLight, emissive
             );
             skyLit |= vertexSky > 0.0f;
             int source = quad.color(vertex);
@@ -343,7 +320,7 @@ public final class VanillaRgbLighting {
         float timeFactor = Math.max(0.0f, (15.0f - level.getSkyDarken()) / 15.0f);
         String dimension = level.dimension().identifier().toString();
         if ("minecraft:the_nether".equals(dimension)) {
-            skyPalette = new SkyPalette(1.0f, 0.34f, 0.16f, timeFactor, ambient, 0.0f, null);
+            skyPalette = new SkyPalette(1.0f, 0.34f, 0.16f, timeFactor, ambient + 0.04f, 0.0f, null);
         } else if ("minecraft:the_end".equals(dimension)) {
             skyPalette = new SkyPalette(0.58f, 0.48f, 1.0f, timeFactor, ambient, 0.0f, null);
         } else {
@@ -370,49 +347,12 @@ public final class VanillaRgbLighting {
         }
     }
 
-    /** Uses the same user-facing ambient-occlusion toggle as vanilla smooth lighting. */
-    private static int smoothedPackedAt(
-            BlockPos pos, Direction faceDirection, ClientGameplayLightField.LocalLookup light
-    ) {
-        int center = light.packedAtCurrentDimension(pos);
-        int face = faceDirection == null ? 0 : light.packedAtCurrentDimension(
-                pos.getX() + faceDirection.getStepX(),
-                pos.getY() + faceDirection.getStepY(),
-                pos.getZ() + faceDirection.getStepZ()
-        );
-        if (!Minecraft.getInstance().options.ambientOcclusion().get()) {
-            return PackedRgbLight.componentMax(center, face);
-        }
-
-        int red = PackedRgbLight.red(center) * 3;
-        int green = PackedRgbLight.green(center) * 3;
-        int blue = PackedRgbLight.blue(center) * 3;
-        int samples = 3;
-        for (Direction direction : SAMPLE_DIRECTIONS) {
-            int sample = light.packedAtCurrentDimension(
-                    pos.getX() + direction.getStepX(),
-                    pos.getY() + direction.getStepY(),
-                    pos.getZ() + direction.getStepZ()
-            );
-            if (sample == 0) {
-                continue;
-            }
-            red += PackedRgbLight.red(sample);
-            green += PackedRgbLight.green(sample);
-            blue += PackedRgbLight.blue(sample);
-            samples++;
-        }
-        if (face != 0 && faceDirection != null) {
-            red += PackedRgbLight.red(face);
-            green += PackedRgbLight.green(face);
-            blue += PackedRgbLight.blue(face);
-            samples++;
-        }
-        return PackedRgbLight.pack(
-                Math.round((float) red / samples),
-                Math.round((float) green / samples),
-                Math.round((float) blue / samples)
-        );
+    // Ordinary quads already carry smoothed sky coordinates from Minecraft.
+    // Emissive geometry needs a world sample because its lightmap may be full-bright.
+    private static int fallbackSky(BlockAndTintGetter world, BlockPos pos, Direction face) {
+        int center = world.getBrightness(LightLayer.SKY, pos);
+        return center == 15 || face == null ? center
+                : Math.max(center, world.getBrightness(LightLayer.SKY, pos.relative(face)));
     }
 
     /** A coarse sky epoch for the RGB terrain mesh; ordinary ticks do not remesh the world. */

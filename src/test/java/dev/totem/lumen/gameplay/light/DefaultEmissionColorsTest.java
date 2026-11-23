@@ -16,6 +16,15 @@ class DefaultEmissionColorsTest {
     }
 
     @Test
+    void furnaceFollowsTorchAndGlowLichenIsLakeGreen() {
+        assertEquals(DefaultEmissionColors.forBlock("minecraft:torch", 14),
+                DefaultEmissionColors.forBlock("minecraft:furnace", 13));
+        assertEquals(EmissionColor.BLACK, DefaultEmissionColors.forBlock("minecraft:furnace", 0));
+        assertEquals(new EmissionColor(0.32f, 1.0f, 0.73f),
+                DefaultEmissionColors.forBlock("minecraft:glow_lichen", 7));
+    }
+
+    @Test
     void specialtyTorchPalettesStaySeparate() {
         EmissionColor torch = DefaultEmissionColors.forBlock("minecraft:torch", 14);
         assertTrue(DefaultEmissionColors.forBlock("minecraft:soul_torch", 10).blue() > torch.blue());
