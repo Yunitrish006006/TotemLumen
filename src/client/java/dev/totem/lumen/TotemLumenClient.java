@@ -194,7 +194,9 @@ public final class TotemLumenClient implements ClientModInitializer {
                 }
                 if (renderProfile == RendererSettings.RenderProfile.MINECRAFT_RGB) ClientGameplayLightPredictor.tick(client.level, client.player);
                 long dirtyEnqueueStart = System.nanoTime();
-                var sectionsToRefresh = ClientGameplayLightField.drainDirtySections(dimensionId, 32);
+                var camera = client.getCameraEntity();
+                var sectionsToRefresh = camera == null ? ClientGameplayLightField.drainDirtySections(dimensionId, 32)
+                        : ClientGameplayLightField.drainDirtySectionsNear(dimensionId, camera.blockPosition(), 32);
                 for (ClientGameplayLightField.SectionCoordinate section : sectionsToRefresh) {
                     // Re-extract only sections touched by RGB propagation. This updates the
                     // vanilla surface tint without invalidating the entire compiled world.

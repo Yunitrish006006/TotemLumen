@@ -117,15 +117,16 @@ public final class ClientGameplayLightPredictor {
         if (scan != null) {
             scan.cancelled = true;
         }
-        List<RemovedSource> removed = removeSourcesInChunk(key);
+        Map<SectionKey, Region> corrections = new HashMap<>();
+        for (BlockKey source : sourcesInChunk(level, key)) {
+            removeSource(source);
+            Region influence = Region.aroundBlock(level, new BlockPos(source.x, source.y, source.z));
+            corrections.merge(SectionKey.fromBlock(source.x, source.y, source.z), influence, Region::union);
+        }
         immediatePropagations.removeIf(task -> Math.floorDiv(task.source.x, 16) == key.x
                 && Math.floorDiv(task.source.z, 16) == key.z);
         ClientGameplayLightField.clearLocalChunk(activeDimension, key.x, key.z);
-        for (RemovedSource source : removed) {
-            scheduleInfluence(Region.aroundBlock(level, new BlockPos(
-                    source.position.x, source.position.y, source.position.z
-            )));
-        }
+        corrections.values().forEach(ClientGameplayLightPredictor::scheduleInfluence);
     }
 
     public static void onBlockChanged(ClientLevel level, BlockPos pos, BlockState oldState, BlockState newState) {
@@ -446,8 +447,13 @@ public final class ClientGameplayLightPredictor {
         }
         SectionKey anchor = new SectionKey(-1, 4, 0);
         try {
-            pendingRebuilds.addLast(new RebuildTask(anchor, light));
+            var task = new RebuildTask(anchor, light);
+            pendingRebuilds.addLast(task);
             queuedRebuilds.add(anchor);
+            if (refreshOverlappingRebuilds(List.of(light)) != 0 || pendingRebuilds.peekFirst() != task) {
+                throw new IllegalStateException("Unstarted RGB rebuilds must retain their queue position");
+            }
+            task.started = true;
             if (refreshOverlappingRebuilds(List.of(new Region(14, 75, 0, 30, 90, 20))) != 0
                     || pendingRebuilds.size() != 1
                     || refreshOverlappingRebuilds(List.of(new Region(13, 75, 0, 30, 90, 20))) != 1
@@ -628,13 +634,8 @@ public final class ClientGameplayLightPredictor {
                 observed.put(source, current);
             }
         }
-        Iterator<Map.Entry<BlockKey, Character>> iterator = sources.entrySet().iterator();
-        while (iterator.hasNext()) {
-            Map.Entry<BlockKey, Character> entry = iterator.next();
-            BlockKey source = entry.getKey();
-            if (Math.floorDiv(source.x, 16) == scan.chunkKey.x
-                    && Math.floorDiv(source.z, 16) == scan.chunkKey.z
-                    && !observed.containsKey(source)) {
+        for (BlockKey source : sourcesInChunk(activeLevel, scan.chunkKey)) {
+            if (!observed.containsKey(source)) {
                 // A block update can add a torch after the scanner has passed its voxel.
                 // Recheck live state before treating its absence from the snapshot as removal.
                 mutablePos.set(source.x, source.y, source.z);
@@ -643,8 +644,7 @@ public final class ClientGameplayLightPredictor {
                     observed.put(source, live);
                     continue;
                 }
-                iterator.remove();
-                unindexSource(source);
+                removeSource(source);
                 Region influence = Region.aroundBlock(activeLevel,
                         new BlockPos(source.x, source.y, source.z));
                 changedInfluences.add(influence);
@@ -672,9 +672,7 @@ public final class ClientGameplayLightPredictor {
                         influence, Region::union);
             }
         }
-        // Every pending rebuild captured a source snapshot when it was enqueued. A later
-        // chunk scan can discover another emitter inside its output region; publishing the
-        // old snapshot after the new source's fast pass would erase that light indefinitely.
+        // Started rebuilds can hold a stale source snapshot after another scan discovers emitters.
         int invalidated = refreshOverlappingRebuilds(changedInfluences);
         for (Region correction : corrections.values()) {
             scheduleInfluence(correction);
@@ -708,19 +706,14 @@ public final class ClientGameplayLightPredictor {
         }
     }
 
-    private static List<RemovedSource> removeSourcesInChunk(ChunkKey chunk) {
-        List<RemovedSource> affected = new ArrayList<>();
-        Iterator<Map.Entry<BlockKey, Character>> iterator = sources.entrySet().iterator();
-        while (iterator.hasNext()) {
-            Map.Entry<BlockKey, Character> entry = iterator.next();
-            BlockKey key = entry.getKey();
-            if (Math.floorDiv(key.x, 16) == chunk.x && Math.floorDiv(key.z, 16) == chunk.z) {
-                affected.add(new RemovedSource(key));
-                iterator.remove();
-                unindexSource(key);
-            }
+    private static List<BlockKey> sourcesInChunk(ClientLevel level, ChunkKey chunk) {
+        List<BlockKey> result = new ArrayList<>();
+        for (int index = 0; index < level.getSectionsCount(); index++) {
+            int y = level.getSectionYFromSectionIndex(index);
+            var entries = sourcesBySection.get(new SectionKey(chunk.x, y, chunk.z));
+            if (entries != null) result.addAll(entries);
         }
-        return affected;
+        return result;
     }
 
     private static Character putSource(BlockKey key, char packed) {
@@ -808,6 +801,7 @@ public final class ClientGameplayLightPredictor {
         }
         Set<SectionKey> stale = new HashSet<>();
         pendingRebuilds.removeIf(task -> {
+            if (!task.started) return false; // start() takes the snapshot when work actually begins.
             boolean overlaps = false;
             for (Region influence : changedInfluences) {
                 if (task.region.intersects(influence)) {
@@ -949,9 +943,6 @@ public final class ClientGameplayLightPredictor {
     }
 
     private record PropagationNode(BlockKey position, int packed) {
-    }
-
-    private record RemovedSource(BlockKey position) {
     }
 
     private record SectionKey(int x, int y, int z) {

@@ -2,7 +2,6 @@ package dev.totem.lumen.mixin;
 
 import dev.totem.lumen.integration.EntityRenderGeometryCache;
 import dev.totem.lumen.integration.EntityRgbLighting;
-import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.client.renderer.entity.EntityRenderer;
 import net.minecraft.client.renderer.entity.state.EntityRenderState;
 import net.minecraft.world.entity.Entity;
@@ -26,9 +25,7 @@ public abstract class EntityRendererStateMixin {
     ) {
         var state = cir.getReturnValue();
         EntityRenderGeometryCache.bind(entity, state);
-        if (entity instanceof LivingEntity living) {
-            ((EntityRgbLighting.State) state).totemLumen$setLighting(
-                    EntityRgbLighting.sample(living, partialTick, state.lightCoords));
-        }
+        ((EntityRgbLighting.State) state).totemLumen$setLighting(
+                EntityRgbLighting.sample(entity, partialTick, state.lightCoords));
     }
 }

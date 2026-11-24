@@ -32,10 +32,25 @@ public final class RgbSectionRefreshVerifier {
         if (second.size() != 12) {
             throw new IllegalStateException("Sky refresh budget must remain bounded on later ticks");
         }
+        verifyNearbyPriority();
         verifyServerAuthority(dimension);
         ClientGameplayLightField.clear();
         System.out.println("RGB section refresh verification PASS: sourcePriority=true, skyBudget=12, "
                 + "deduplicated=true, serverAuthority=true");
+    }
+
+    private static void verifyNearbyPriority() {
+        String dimension = "minecraft:the_nether";
+        for (int x = 10; x < 138; x++) ClientGameplayLightField.markSectionDirty(dimension, x, 4, 0);
+        for (int x = -1; x <= 1; x++)
+            for (int y = 3; y <= 5; y++)
+                for (int z = -1; z <= 1; z++) ClientGameplayLightField.markSectionDirty(dimension, x, y, z);
+        var first = ClientGameplayLightField.drainDirtySectionsNear(dimension, new net.minecraft.core.BlockPos(0, 64, 0), 32);
+        if (first.size() != 32 || !first.getFirst().equals(new ClientGameplayLightField.SectionCoordinate(dimension, 0, 4, 0))
+                || first.stream().filter(section -> section.x() >= 10).count() != 16
+                || ClientGameplayLightField.drainDirtySections(dimension).size() != 123) {
+            throw new IllegalStateException("Nearby mesh refresh must progress alongside queued dimension updates");
+        }
     }
 
     private static void verifyServerAuthority(String dimension) {

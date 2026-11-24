@@ -12,7 +12,10 @@ import net.minecraft.world.entity.monster.Blaze;
 import net.minecraft.world.entity.monster.Vex;
 import net.minecraft.world.entity.boss.wither.WitherBoss;
 import net.minecraft.world.entity.monster.cubemob.MagmaCube;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.entity.vehicle.minecart.AbstractMinecart;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.client.renderer.texture.UvMapping;
 import net.minecraft.world.entity.animal.squid.GlowSquid;
@@ -26,9 +29,11 @@ public record EntityRgbLighting(int lightCoords, int tint, EntityLightVolume vol
 
     private static final ThreadLocal<EntityRgbLighting> CURRENT = new ThreadLocal<>();
 
-    public static EntityRgbLighting sample(LivingEntity entity, float partialTick, int coords) {
+    public static EntityRgbLighting sample(Entity entity, float partialTick, int coords) {
         if (RendererSettings.renderProfile() != RendererSettings.RenderProfile.MINECRAFT_RGB
                 || entity.level() != Minecraft.getInstance().level || entity.isOnFire()) return null;
+        if (!(entity instanceof LivingEntity || entity instanceof AbstractMinecart || entity instanceof ItemEntity)) return null;
+        if (entity instanceof ItemEntity item && HeldItemGlow.isEmissive(item.getItem())) return null;
         if (entity instanceof Allay || entity instanceof Blaze || entity instanceof Vex
                 || entity instanceof WitherBoss || entity instanceof MagmaCube) return null;
         int floor = entity instanceof GlowSquid squid
@@ -36,7 +41,8 @@ public record EntityRgbLighting(int lightCoords, int tint, EntityLightVolume vol
         if (floor == 15) return null;
         var pos = entity.getLightProbePosition(partialTick);
         int tint = VanillaRgbLighting.modelTint(pos.x, pos.y, pos.z, LightCoordsUtil.sky(coords), floor);
-        return new EntityRgbLighting(coords, tint, EntityLightVolume.capture(entity, partialTick, floor), null);
+        var volume = entity instanceof LivingEntity living ? EntityLightVolume.capture(living, partialTick, floor) : null;
+        return new EntityRgbLighting(coords, tint, volume, null);
     }
 
     public EntityRgbLighting forWorld(Vec3 origin) {

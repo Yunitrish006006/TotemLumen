@@ -11,6 +11,8 @@
     "EntityRgbStateMixin",
     "WorldEntityRgbMixin",
     "EntityModelRgbMixin",
+    "ItemSubmitRgbMixin",
+    "ItemFeatureRgbMixin",
     "FirstPersonArmRgbMixin",
     "EntityRenderDispatcherMixin",
     "ItemModelResolverGlowMixin",

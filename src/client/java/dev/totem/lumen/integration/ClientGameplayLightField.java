@@ -234,6 +234,26 @@ public final class ClientGameplayLightField {
         return drainDirtySections(dimension, limit, SKY_SECTIONS_PER_TICK);
     }
 
+    /** Reserve half of the tick for nearby source changes while a dimension sync is in flight. */
+    public static synchronized List<SectionCoordinate> drainDirtySectionsNear(String dimension, BlockPos camera, int limit) {
+        if (limit < 2 || dirtySections.size() <= limit) return drainDirtySections(dimension, limit);
+        int x = camera.getX() >> 4, y = camera.getY() >> 4, z = camera.getZ() >> 4;
+        List<SectionCoordinate> result = new ArrayList<>();
+        var center = new SectionCoordinate(dimension, x, y, z);
+        if (dirtySections.remove(center)) result.add(center);
+        for (int dy = -1; dy <= 1; dy++) {
+            for (int dz = -1; dz <= 1; dz++) {
+                for (int dx = -1; dx <= 1 && result.size() < limit / 2; dx++) {
+                    var section = new SectionCoordinate(dimension, x + dx, y + dy, z + dz);
+                    if (dirtySections.remove(section)) result.add(section);
+                }
+            }
+        }
+        skyDirtySections.removeAll(result);
+        result.addAll(drainDirtySections(dimension, limit - result.size()));
+        return result;
+    }
+
     public static synchronized int pendingDirtySectionCount() {
         return dirtySections.size();
     }
