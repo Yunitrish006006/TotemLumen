@@ -6,6 +6,7 @@ public final class DefaultEmissionColors {
     private static final EmissionColor SOUL_LANTERN = new EmissionColor(0.26f, 0.76f, 1.0f);
     private static final EmissionColor REDSTONE = new EmissionColor(1.0f, 0.18f, 0.06f);
     private static final EmissionColor NETHER_PORTAL = new EmissionColor(0.64f, 0.16f, 1.0f);
+    private static final EmissionColor MAGMA_BLOCK = new EmissionColor(1.0f, 0.50f, 0.22f);
     private static final EmissionColor LAVA = new EmissionColor(1.0f, 0.32f, 0.08f);
     private static final EmissionColor OCHRE_FROGLIGHT = new EmissionColor(1.0f, 0.76f, 0.35f);
     private static final EmissionColor VERDANT_FROGLIGHT = new EmissionColor(0.58f, 1.0f, 0.62f);
@@ -33,6 +34,7 @@ public final class DefaultEmissionColors {
         if (sourceId.contains("soul_")) return SOUL;
         if (sourceId.contains("redstone_torch")) return REDSTONE;
         if (sourceId.contains("redstone_ore")) return REDSTONE;
+        if (sourceId.equals("minecraft:magma_block")) return MAGMA_BLOCK;
         if (sourceId.contains("lava") || sourceId.contains("magma")) return LAVA;
         if (sourceId.contains("ochre_froglight")) return OCHRE_FROGLIGHT;
         if (sourceId.contains("verdant_froglight")) return VERDANT_FROGLIGHT;

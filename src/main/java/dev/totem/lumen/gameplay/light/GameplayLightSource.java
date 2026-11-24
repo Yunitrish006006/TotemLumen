@@ -3,6 +3,7 @@ package dev.totem.lumen.gameplay.light;
 import dev.totem.lumen.world.LightingWorldRule;
 import dev.totem.lumen.world.LightingWorldRulesReloadListener;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 
 /** Shared source and attenuation rules used by both server authority and client prediction. */
@@ -24,7 +25,7 @@ public final class GameplayLightSource {
         String sourceId = BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
         return PackedRgbLight.fromNormalized(
                 DefaultEmissionColors.forBlock(sourceId, vanillaEmission),
-                vanillaEmission
+                state.is(Blocks.MAGMA_BLOCK) ? 5 : vanillaEmission
         );
     }
 

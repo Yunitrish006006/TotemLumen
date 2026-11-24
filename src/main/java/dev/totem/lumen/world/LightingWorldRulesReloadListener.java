@@ -111,7 +111,11 @@ public final class LightingWorldRulesReloadListener extends SimpleReloadListener
             try (Reader reader = entry.getValue().openAsReader()) {
                 JsonElement root = StrictJsonParser.parse(reader);
                 loaded.put(blockId, parseRule(blockId, root));
-                defaultIds.remove(blockId);
+                if (entry.getValue().sourcePackId().equals(TotemLumen.MOD_ID + ":default_lighting")) {
+                    defaultIds.add(blockId);
+                } else {
+                    defaultIds.remove(blockId);
+                }
             } catch (IOException exception) {
                 throw new IllegalStateException(
                         "Failed to read Totem Lumen lighting world rule " + resourceId,

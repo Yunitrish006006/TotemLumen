@@ -1,6 +1,8 @@
 package dev.totem.lumen.world;
 
 import com.google.gson.JsonParser;
+import dev.totem.lumen.gameplay.light.DefaultEmissionColors;
+import dev.totem.lumen.gameplay.light.EmissionColor;
 import org.junit.jupiter.api.Test;
 
 import java.io.InputStreamReader;
@@ -11,6 +13,19 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 final class DefaultLightingDataPackTest {
+    @Test
+    void magmaBlockRuleUsesWarmBrownAtLevelFive() throws Exception {
+        String path = "resourcepacks/default_lighting/data/minecraft/totem_lumen/lighting/magma_block.json";
+        try (var stream = getClass().getClassLoader().getResourceAsStream(path)) {
+            assertNotNull(stream);
+            var rule = JsonParser.parseReader(new InputStreamReader(stream, StandardCharsets.UTF_8)).getAsJsonObject();
+            var rgb = rule.getAsJsonArray("emission_color");
+            assertEquals(5, rule.get("gameplay_strength").getAsInt());
+            assertEquals(DefaultEmissionColors.forBlock("minecraft:magma_block", 3),
+                    new EmissionColor(rgb.get(0).getAsFloat(), rgb.get(1).getAsFloat(), rgb.get(2).getAsFloat()));
+        }
+    }
+
     @Test
     void bundledPackContainsMetadataPaletteAndBrightnessTuning() throws Exception {
         String root = "resourcepacks/default_lighting/";
