@@ -7,6 +7,8 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
@@ -37,6 +39,11 @@ public final class ClientGameplayLightPredictor {
     private static final long TIME_BUDGET_NANOS = 2_000_000L;
     private static final Predicate<BlockState> EMITS_LIGHT = state -> state.getLightEmission() > 0;
 
+    private static final Predicate<BlockState> GROUND_EMITTER =
+            state -> ClientRgbVisualLightSource.isFire(state) || state.is(Blocks.MAGMA_BLOCK);
+    private static final Predicate<BlockState> NON_LAVA_EMITTER =
+            state -> state.getLightEmission() > 0 && !state.is(Blocks.LAVA);
+
     private static ClientLevel activeLevel;
     private static String activeDimension;
     private static final Map<ChunkKey, ScanTask> scans = new HashMap<>();
@@ -47,7 +54,7 @@ public final class ClientGameplayLightPredictor {
     private static final Map<BlockKey, Character> sources = new HashMap<>();
     /** Avoid a whole-world source scan for every bounded RGB correction. */
     private static final Map<SectionKey, Set<BlockKey>> sourcesBySection = new HashMap<>();
-    // Interactive edits go to the front, scanned fires to the back. Bulk lava stays in its own FIFO.
+    // Interactive edits go to the front, priority emitters to the back. Bulk lava stays in its own FIFO.
     private static final ArrayDeque<ImmediatePropagationTask> urgentPropagations = new ArrayDeque<>();
     private static final ArrayDeque<ImmediatePropagationTask> immediatePropagations = new ArrayDeque<>();
     private static final ArrayDeque<RebuildTask> pendingRebuilds = new ArrayDeque<>();
@@ -60,6 +67,7 @@ public final class ClientGameplayLightPredictor {
     private static boolean serverAuthoritative;
     private static boolean scanTurn = true;
     private static boolean immediateTurn = true;
+    private static int urgentSlices;
     private static boolean changedThisTick;
     private static int loggedSourceEvents;
     private static int loggedInitialScans;
@@ -377,18 +385,19 @@ public final class ClientGameplayLightPredictor {
         changedThisTick = false;
         while (remaining > 0 && System.nanoTime() - start < TIME_BUDGET_NANOS) {
             int used;
-            var ready = urgentPropagations.isEmpty() ? immediatePropagations : urgentPropagations;
+            var ready = nextPropagationQueue();
             ImmediatePropagationTask immediate = ready.peekFirst();
             ScanTask scan = nextScan();
             RebuildTask rebuild = nextReadyRebuild();
             if (immediate != null && (immediateTurn || (scan == null && rebuild == null))) {
+                urgentSlices = ready == immediatePropagations ? 0 : Math.min(3, urgentSlices + 1);
                 used = immediate.process(Math.min(remaining, 4096));
                 if (immediate.complete) {
                     ready.removeFirst();
                 }
                 immediateTurn = false;
             } else if (scanBeforeRebuild(scan != null, rebuild != null, scanTurn)) {
-                used = scan.process(Math.min(remaining, 4096));
+                used = scan.process(Math.min(remaining, scan.nether ? 512 : 4096));
                 if (scan.complete) {
                     finishScan(scan);
                 }
@@ -479,7 +488,7 @@ public final class ClientGameplayLightPredictor {
         char packed = (char) 0xF321;
         try {
             activeDimension = "minecraft:overworld";
-            publishDiscoveredSource(source, packed);
+            publishDiscoveredSource(source, packed, false);
             if (ClientGameplayLightField.localPackedAt(activeDimension, source.x, source.y, source.z) != packed
                     || immediatePropagations.size() != 1) {
                 throw new IllegalStateException("Existing RGB sources must seed the field before rebuild");
@@ -502,9 +511,15 @@ public final class ClientGameplayLightPredictor {
         try {
             queueImmediatePropagation(discovered, (char) 0xF321, false);
             BlockKey fire = new BlockKey(2, 64, 0);
-            queueScannedFire(fire, (char) 0xF321);
+            queueScannedEmitter(fire, (char) 0xF321, 0);
             queueImmediatePropagation(placed, (char) 0xF321, true);
-            if (!urgentPropagations.removeFirst().source.equals(placed) || !urgentPropagations.removeFirst().source.equals(fire)
+            urgentSlices = 3;
+            if (nextPropagationQueue() != urgentPropagations || !urgentPropagations.removeFirst().source.equals(placed)
+                    || nextPropagationQueue() != immediatePropagations) {
+                throw new IllegalStateException("Player edits take priority and bulk lava must get a work slice");
+            }
+            urgentSlices = 0;
+            if (nextPropagationQueue() != urgentPropagations || !urgentPropagations.removeFirst().source.equals(fire)
                     || !immediatePropagations.peekFirst().source.equals(discovered)) {
                 throw new IllegalStateException("Local RGB edits must precede background emitters");
             }
@@ -591,7 +606,7 @@ public final class ClientGameplayLightPredictor {
         // A rescan must not remove still-present emitters before the scan finishes. Doing so
         // temporarily drops their RGB contribution and makes lights flash as chunks are revisited.
         ScanTask scan = new ScanTask(level, chunk);
-        if (old != null) scan.earlyFires.addAll(old.earlyFires);
+        if (old != null) scan.earlySources.addAll(old.earlySources);
         scans.put(key, scan);
         if (priority) {
             pendingScans.addFirst(scan);
@@ -632,12 +647,21 @@ public final class ClientGameplayLightPredictor {
         bumpChunkGeneration(scan.chunkKey);
         boolean reseed = reseedAfterRuleChange.remove(scan.chunkKey);
         Map<BlockKey, Character> observed = new HashMap<>();
+        // Live seed values, independent of scan ordering. Keep section borders conservative.
+        char[][] lava = new char[scan.sections.length][];
+        int interiorLava = 0;
         Map<SectionKey, Region> corrections = new HashMap<>();
         List<Region> changedInfluences = new ArrayList<>();
         for (BlockKey source : scan.discoveredSources) {
             mutablePos.set(source.x, source.y, source.z);
-            char current = sourceFor(activeLevel.getBlockState(mutablePos));
+            var state = activeLevel.getBlockState(mutablePos);
+            char current = sourceFor(state);
             if (current != 0) {
+                if (state.is(Blocks.LAVA)) {
+                    int section = scan.chunk.getSectionIndex(source.y);
+                    if (lava[section] == null) lava[section] = new char[4096];
+                    lava[section][localIndex(source)] = current;
+                }
                 observed.put(source, current);
             }
         }
@@ -663,12 +687,14 @@ public final class ClientGameplayLightPredictor {
             BlockKey source = entry.getKey();
             char current = entry.getValue();
             Character previous = putSource(source, current);
-            boolean seededEarly = scan.earlyFires.contains(source);
+            boolean seededEarly = scan.earlySources.contains(source);
             if (previous == null || previous != current || reseed || seededEarly) {
                 if (previous == null || reseed) {
                     // Loaded-world sources need the same fast visual path as newly placed
                     // sources; otherwise their first light waits for a full region rebuild.
-                    publishDiscoveredSource(source, current);
+                    boolean enclosed = enclosedSource(lava[scan.chunk.getSectionIndex(source.y)], localIndex(source), current);
+                    publishDiscoveredSource(source, current, enclosed);
+                    if (enclosed) interiorLava++;
                 }
                 knownSourceSections.add(SectionKey.fromBlock(source.x, source.y, source.z));
                 Region influence = Region.aroundBlock(activeLevel,
@@ -693,20 +719,34 @@ public final class ClientGameplayLightPredictor {
         }
         if (!observed.isEmpty() && loggedInitialScans++ < 4) {
             TotemLumenClient.LOGGER.info(
-                    "RGB existing chunk sources discovered: chunk=({},{}), count={}",
-                    scan.chunkKey.x, scan.chunkKey.z, observed.size()
+                    "RGB existing chunk sources discovered: chunk=({},{}), count={}, interiorLavaJobsSkipped={}, earlyEmitters={}",
+                    scan.chunkKey.x, scan.chunkKey.z, observed.size(), interiorLava, scan.earlySources.size()
             );
         }
     }
 
-    private static void publishDiscoveredSource(BlockKey source, char packed) {
+    private static int localIndex(BlockKey source) {
+        return ((source.y & 15) << 8) | ((source.z & 15) << 4) | (source.x & 15);
+    }
+
+    // Attenuation only reduces a channel. Six equal adjacent sources dominate every first step.
+    static boolean enclosedSource(char[] section, int index, char packed) {
+        if (section == null || section[index] != packed) return false;
+        int x = index & 15, z = (index >> 4) & 15, y = index >> 8;
+        return x > 0 && x < 15 && z > 0 && z < 15 && y > 0 && y < 15
+                && section[index - 1] == packed && section[index + 1] == packed
+                && section[index - 16] == packed && section[index + 16] == packed
+                && section[index - 256] == packed && section[index + 256] == packed;
+    }
+
+    private static void publishDiscoveredSource(BlockKey source, char packed, boolean enclosed) {
         int oldPacked = getLocalPacked(source.x, source.y, source.z);
         setPacked(source.x, source.y, source.z, PackedRgbLight.componentMax(oldPacked, packed));
-        queueImmediatePropagation(source, packed, false);
+        if (!enclosed) queueImmediatePropagation(source, packed, false);
     }
 
     private static void queueImmediatePropagation(BlockKey source, char packed, boolean localEdit) {
-        ImmediatePropagationTask task = new ImmediatePropagationTask(source, packed);
+        ImmediatePropagationTask task = new ImmediatePropagationTask(source, packed, localEdit);
         if (localEdit) {
             urgentPropagations.addFirst(task);
         } else {
@@ -714,11 +754,23 @@ public final class ClientGameplayLightPredictor {
         }
     }
 
-    private static void queueScannedFire(BlockKey source, char packed) {
-        urgentPropagations.addLast(new ImmediatePropagationTask(source, packed));
+    private static int queueScannedEmitter(BlockKey source, char packed, int budget) {
+        var task = new ImmediatePropagationTask(source, packed, false);
+        // Keep the frontier after lighting the immediate neighborhood so propagation can resume.
+        int used = budget > 0 ? task.process(budget) : 0;
+        if (!task.complete) urgentPropagations.addLast(task);
+        return used;
+    }
+
+    private static ArrayDeque<ImmediatePropagationTask> nextPropagationQueue() {
+        var first = urgentPropagations.peekFirst();
+        if (first == null) return immediatePropagations;
+        if (first.localEdit || urgentSlices < 3 || immediatePropagations.isEmpty()) return urgentPropagations;
+        return immediatePropagations;
     }
 
     private static void clearImmediatePropagations() {
+        urgentSlices = 0;
         urgentPropagations.clear();
         immediatePropagations.clear();
     }
@@ -1027,8 +1079,10 @@ public final class ClientGameplayLightPredictor {
         private final LevelChunk chunk;
         private final ChunkKey chunkKey;
         private final LevelChunkSection[] sections;
+        private int[] sectionOrder;
+        private final boolean nether;
         private final List<BlockKey> discoveredSources = new ArrayList<>();
-        private final Set<BlockKey> earlyFires = new HashSet<>();
+        private final Set<BlockKey> earlySources = new HashSet<>();
         private int sectionIndex;
         private int voxelIndex;
         private boolean cancelled;
@@ -1039,12 +1093,32 @@ public final class ClientGameplayLightPredictor {
             this.chunk = chunk;
             this.chunkKey = new ChunkKey(chunk.getPos().x(), chunk.getPos().z());
             this.sections = chunk.getSections();
+            nether = level.dimension().equals(Level.NETHER);
+        }
+
+        private int[] netherScanOrder() {
+            var ground = new java.util.BitSet(sections.length);
+            var other = new java.util.BitSet(sections.length);
+            for (int i = 0; i < sections.length; i++) {
+                if (sections[i].maybeHas(GROUND_EMITTER)) ground.set(i);
+                else if (sections[i].maybeHas(NON_LAVA_EMITTER)) other.set(i);
+            }
+            // Visit every section exactly once even if a palette changes while the scan is pending.
+            int[] order = new int[sections.length];
+            int next = 0;
+            for (int i = ground.nextSetBit(0); i >= 0; i = ground.nextSetBit(i + 1)) order[next++] = i;
+            for (int i = other.nextSetBit(0); i >= 0; i = other.nextSetBit(i + 1)) order[next++] = i;
+            ground.or(other);
+            for (int i = ground.nextClearBit(0); i < sections.length; i = ground.nextClearBit(i + 1)) order[next++] = i;
+            return order;
         }
 
         private int process(int budget) {
+            if (nether && sectionOrder == null) sectionOrder = netherScanOrder();
             int consumed = 0;
             while (sectionIndex < sections.length && consumed < budget) {
-                LevelChunkSection section = sections[sectionIndex];
+                int index = nether ? sectionOrder[sectionIndex] : sectionIndex;
+                LevelChunkSection section = sections[index];
                 // The section palette can reject non-emissive sections without visiting all
                 // 4096 voxels. Most newly loaded terrain sections contain no RGB sources.
                 if (section.hasOnlyAir() || !section.maybeHas(EMITS_LIGHT)) {
@@ -1053,7 +1127,7 @@ public final class ClientGameplayLightPredictor {
                     consumed++;
                     continue;
                 }
-                int sectionY = chunk.getSectionYFromSectionIndex(sectionIndex);
+                int sectionY = chunk.getSectionYFromSectionIndex(index);
                 while (voxelIndex < 4096 && consumed < budget) {
                     int localX = voxelIndex & 15;
                     int localZ = (voxelIndex >>> 4) & 15;
@@ -1067,11 +1141,12 @@ public final class ClientGameplayLightPredictor {
                         if (packed != 0) {
                             BlockKey source = new BlockKey(x, y, z);
                             discoveredSources.add(source);
-                            if (ClientRgbVisualLightSource.isFire(state) && !sources.containsKey(source)) {
+                            if ((nether ? !state.is(Blocks.LAVA) : ClientRgbVisualLightSource.isFire(state)) && !sources.containsKey(source)) {
                                 putSource(source, packed);
-                                earlyFires.add(source);
+                                earlySources.add(source);
                                 setPacked(x, y, z, PackedRgbLight.componentMax(getLocalPacked(x, y, z), packed));
-                                queueScannedFire(source, packed);
+                                int nearBudget = GROUND_EMITTER.test(state) ? 7 : 1;
+                                consumed += queueScannedEmitter(source, packed, Math.min(nearBudget, budget - consumed - 1));
                             }
                         }
                     }
@@ -1227,9 +1302,11 @@ public final class ClientGameplayLightPredictor {
         private final ArrayDeque<PropagationNode> queue = new ArrayDeque<>();
         private final BlockKey source;
         private final char sourcePacked;
+        private final boolean localEdit;
         private boolean complete;
 
-        private ImmediatePropagationTask(BlockKey source, char packed) {
+        private ImmediatePropagationTask(BlockKey source, char packed, boolean localEdit) {
+            this.localEdit = localEdit;
             this.source = source;
             this.sourcePacked = packed;
             queue.add(new PropagationNode(source, packed));
