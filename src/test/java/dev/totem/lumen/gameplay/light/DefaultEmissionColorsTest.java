@@ -25,6 +25,14 @@ class DefaultEmissionColorsTest {
     }
 
     @Test
+    void netherPortalEmitsPurpleAtItsVanillaStrength() {
+        char light = PackedRgbLight.fromNormalized(DefaultEmissionColors.forBlock("minecraft:nether_portal", 11), 11);
+        assertEquals(11, PackedRgbLight.alpha(light));
+        assertTrue(PackedRgbLight.blue(light) > PackedRgbLight.red(light));
+        assertTrue(PackedRgbLight.red(light) > PackedRgbLight.green(light));
+    }
+
+    @Test
     void specialtyTorchPalettesStaySeparate() {
         EmissionColor torch = DefaultEmissionColors.forBlock("minecraft:torch", 14);
         assertTrue(DefaultEmissionColors.forBlock("minecraft:soul_torch", 10).blue() > torch.blue());

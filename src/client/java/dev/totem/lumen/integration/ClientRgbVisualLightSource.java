@@ -5,11 +5,16 @@ import dev.totem.lumen.gameplay.light.PackedRgbLight;
 import dev.totem.lumen.gameplay.light.RgbLightAttenuation;
 import dev.totem.lumen.world.LightingWorldRule;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 
 /** Stateless source rules shared by Minecraft RGB and Raster Ray; server gameplay light is unchanged. */
 final class ClientRgbVisualLightSource {
     private ClientRgbVisualLightSource() {
+    }
+
+    static boolean isFire(BlockState state) {
+        return state.is(Blocks.FIRE) || state.is(Blocks.SOUL_FIRE);
     }
 
     static char packedFor(BlockState state) {

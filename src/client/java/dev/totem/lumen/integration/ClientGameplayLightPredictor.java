@@ -47,6 +47,8 @@ public final class ClientGameplayLightPredictor {
     private static final Map<BlockKey, Character> sources = new HashMap<>();
     /** Avoid a whole-world source scan for every bounded RGB correction. */
     private static final Map<SectionKey, Set<BlockKey>> sourcesBySection = new HashMap<>();
+    // Interactive edits go to the front, scanned fires to the back. Bulk lava stays in its own FIFO.
+    private static final ArrayDeque<ImmediatePropagationTask> urgentPropagations = new ArrayDeque<>();
     private static final ArrayDeque<ImmediatePropagationTask> immediatePropagations = new ArrayDeque<>();
     private static final ArrayDeque<RebuildTask> pendingRebuilds = new ArrayDeque<>();
     private static final Set<SectionKey> queuedRebuilds = new HashSet<>();
@@ -78,7 +80,7 @@ public final class ClientGameplayLightPredictor {
         reseedAfterRuleChange.clear();
         sources.clear();
         sourcesBySection.clear();
-        immediatePropagations.clear();
+        clearImmediatePropagations();
         pendingRebuilds.clear();
         queuedRebuilds.clear();
         knownSourceSections.clear();
@@ -123,7 +125,7 @@ public final class ClientGameplayLightPredictor {
             Region influence = Region.aroundBlock(level, new BlockPos(source.x, source.y, source.z));
             corrections.merge(SectionKey.fromBlock(source.x, source.y, source.z), influence, Region::union);
         }
-        immediatePropagations.removeIf(task -> Math.floorDiv(task.source.x, 16) == key.x
+        removePropagationsIf(task -> Math.floorDiv(task.source.x, 16) == key.x
                 && Math.floorDiv(task.source.z, 16) == key.z);
         ClientGameplayLightField.clearLocalChunk(activeDimension, key.x, key.z);
         corrections.values().forEach(ClientGameplayLightPredictor::scheduleInfluence);
@@ -190,7 +192,7 @@ public final class ClientGameplayLightPredictor {
                 ClientGameplayLightField.requestImmediateUpload();
                 queueImmediatePropagation(key, nextSource, true);
             } else {
-                immediatePropagations.removeIf(task -> task.source.equals(key));
+                removePropagationsIf(task -> task.source.equals(key));
                 // Keep the last complete field visible until the replacement is ready.
                 // Clearing the entire influence radius here made other nearby lights blink.
                 scheduleInfluence(Region.aroundBlock(level, pos));
@@ -228,7 +230,7 @@ public final class ClientGameplayLightPredictor {
             }
         }
         ClientGameplayLightField.clearLocal();
-        immediatePropagations.clear();
+        clearImmediatePropagations();
         pendingRebuilds.clear();
         queuedRebuilds.clear();
         reseedAfterRuleChange.clear();
@@ -375,13 +377,14 @@ public final class ClientGameplayLightPredictor {
         changedThisTick = false;
         while (remaining > 0 && System.nanoTime() - start < TIME_BUDGET_NANOS) {
             int used;
-            ImmediatePropagationTask immediate = immediatePropagations.peekFirst();
+            var ready = urgentPropagations.isEmpty() ? immediatePropagations : urgentPropagations;
+            ImmediatePropagationTask immediate = ready.peekFirst();
             ScanTask scan = nextScan();
             RebuildTask rebuild = nextReadyRebuild();
             if (immediate != null && (immediateTurn || (scan == null && rebuild == null))) {
                 used = immediate.process(Math.min(remaining, 4096));
                 if (immediate.complete) {
-                    immediatePropagations.removeFirst();
+                    ready.removeFirst();
                 }
                 immediateTurn = false;
             } else if (scanBeforeRebuild(scan != null, rebuild != null, scanTurn)) {
@@ -417,7 +420,7 @@ public final class ClientGameplayLightPredictor {
                 WORK_BUDGET - remaining,
                 scans.size(),
                 pendingRebuilds.size(),
-                immediatePropagations.size()
+                immediatePropagations.size() + urgentPropagations.size()
         );
     }
 
@@ -482,7 +485,7 @@ public final class ClientGameplayLightPredictor {
                 throw new IllegalStateException("Existing RGB sources must seed the field before rebuild");
             }
         } finally {
-            immediatePropagations.clear();
+            clearImmediatePropagations();
             ClientGameplayLightField.clearLocal();
             activeDimension = previousDimension;
             changedThisTick = false;
@@ -498,12 +501,15 @@ public final class ClientGameplayLightPredictor {
         BlockKey placed = new BlockKey(1, 64, 0);
         try {
             queueImmediatePropagation(discovered, (char) 0xF321, false);
+            BlockKey fire = new BlockKey(2, 64, 0);
+            queueScannedFire(fire, (char) 0xF321);
             queueImmediatePropagation(placed, (char) 0xF321, true);
-            if (!immediatePropagations.peekFirst().source.equals(placed)) {
+            if (!urgentPropagations.removeFirst().source.equals(placed) || !urgentPropagations.removeFirst().source.equals(fire)
+                    || !immediatePropagations.peekFirst().source.equals(discovered)) {
                 throw new IllegalStateException("Local RGB edits must precede background emitters");
             }
         } finally {
-            immediatePropagations.clear();
+            clearImmediatePropagations();
         }
     }
 
@@ -534,7 +540,7 @@ public final class ClientGameplayLightPredictor {
         reseedAfterRuleChange.clear();
         sources.clear();
         sourcesBySection.clear();
-        immediatePropagations.clear();
+        clearImmediatePropagations();
         pendingRebuilds.clear();
         queuedRebuilds.clear();
         knownSourceSections.clear();
@@ -585,6 +591,7 @@ public final class ClientGameplayLightPredictor {
         // A rescan must not remove still-present emitters before the scan finishes. Doing so
         // temporarily drops their RGB contribution and makes lights flash as chunks are revisited.
         ScanTask scan = new ScanTask(level, chunk);
+        if (old != null) scan.earlyFires.addAll(old.earlyFires);
         scans.put(key, scan);
         if (priority) {
             pendingScans.addFirst(scan);
@@ -656,7 +663,8 @@ public final class ClientGameplayLightPredictor {
             BlockKey source = entry.getKey();
             char current = entry.getValue();
             Character previous = putSource(source, current);
-            if (previous == null || previous != current || reseed) {
+            boolean seededEarly = scan.earlyFires.contains(source);
+            if (previous == null || previous != current || reseed || seededEarly) {
                 if (previous == null || reseed) {
                     // Loaded-world sources need the same fast visual path as newly placed
                     // sources; otherwise their first light waits for a full region rebuild.
@@ -665,7 +673,7 @@ public final class ClientGameplayLightPredictor {
                 knownSourceSections.add(SectionKey.fromBlock(source.x, source.y, source.z));
                 Region influence = Region.aroundBlock(activeLevel,
                         new BlockPos(source.x, source.y, source.z));
-                if (previous == null || previous != current) {
+                if (previous == null || previous != current || seededEarly) {
                     changedInfluences.add(influence);
                 }
                 corrections.merge(SectionKey.fromBlock(source.x, source.y, source.z),
@@ -700,10 +708,24 @@ public final class ClientGameplayLightPredictor {
     private static void queueImmediatePropagation(BlockKey source, char packed, boolean localEdit) {
         ImmediatePropagationTask task = new ImmediatePropagationTask(source, packed);
         if (localEdit) {
-            immediatePropagations.addFirst(task);
+            urgentPropagations.addFirst(task);
         } else {
             immediatePropagations.addLast(task);
         }
+    }
+
+    private static void queueScannedFire(BlockKey source, char packed) {
+        urgentPropagations.addLast(new ImmediatePropagationTask(source, packed));
+    }
+
+    private static void clearImmediatePropagations() {
+        urgentPropagations.clear();
+        immediatePropagations.clear();
+    }
+
+    private static void removePropagationsIf(Predicate<ImmediatePropagationTask> predicate) {
+        urgentPropagations.removeIf(predicate);
+        immediatePropagations.removeIf(predicate);
     }
 
     private static List<BlockKey> sourcesInChunk(ClientLevel level, ChunkKey chunk) {
@@ -1006,6 +1028,7 @@ public final class ClientGameplayLightPredictor {
         private final ChunkKey chunkKey;
         private final LevelChunkSection[] sections;
         private final List<BlockKey> discoveredSources = new ArrayList<>();
+        private final Set<BlockKey> earlyFires = new HashSet<>();
         private int sectionIndex;
         private int voxelIndex;
         private boolean cancelled;
@@ -1044,6 +1067,12 @@ public final class ClientGameplayLightPredictor {
                         if (packed != 0) {
                             BlockKey source = new BlockKey(x, y, z);
                             discoveredSources.add(source);
+                            if (ClientRgbVisualLightSource.isFire(state) && !sources.containsKey(source)) {
+                                putSource(source, packed);
+                                earlyFires.add(source);
+                                setPacked(x, y, z, PackedRgbLight.componentMax(getLocalPacked(x, y, z), packed));
+                                queueScannedFire(source, packed);
+                            }
                         }
                     }
                     voxelIndex++;

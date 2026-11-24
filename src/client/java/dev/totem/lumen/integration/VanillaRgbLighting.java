@@ -81,6 +81,8 @@ public final class VanillaRgbLighting {
             }
         }
         int packed = ClientGameplayLightField.packedAtCurrentDimension(pos);
+        boolean fire = ClientRgbVisualLightSource.isFire(state);
+        if (fire) packed = PackedRgbLight.componentMax(packed, ClientRgbVisualLightSource.packedFor(state));
         boolean emissive = state.emissiveRendering() || state.getLightEmission() > 0;
         int skyLight = emissive ? fallbackSky(world, pos, faceDirection) : 0;
         float red;
@@ -96,7 +98,7 @@ public final class VanillaRgbLighting {
             blockRed = red;
             blockGreen = green;
             blockBlue = blue;
-        } else if (state.getLightEmission() > 0) {
+        } else if (!fire && state.getLightEmission() > 0) {
             String sourceId = BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
             LightingWorldRule rule = ClientLightingWorldRules.ruleFor(sourceId);
             EmissionColor color = rule == null
@@ -180,7 +182,13 @@ public final class VanillaRgbLighting {
         float fallbackRed = 0.0f;
         float fallbackGreen = 0.0f;
         float fallbackBlue = 0.0f;
-        if (state.getLightEmission() > 0) {
+        boolean fire = ClientRgbVisualLightSource.isFire(state);
+        if (fire) {
+            int source = ClientRgbVisualLightSource.packedFor(state);
+            fallbackRed = PackedRgbLight.red(source) / 15.0f;
+            fallbackGreen = PackedRgbLight.green(source) / 15.0f;
+            fallbackBlue = PackedRgbLight.blue(source) / 15.0f;
+        } else if (state.getLightEmission() > 0) {
             String sourceId = BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
             LightingWorldRule rule = ClientLightingWorldRules.ruleFor(sourceId);
             EmissionColor color = rule == null
@@ -227,7 +235,11 @@ public final class VanillaRgbLighting {
             float blockRed = blockRgb[0];
             float blockGreen = blockRgb[1];
             float blockBlue = blockRgb[2];
-            if (blockRed == 0.0f && blockGreen == 0.0f && blockBlue == 0.0f
+            if (fire) {
+                blockRed = Math.max(blockRed, fallbackRed);
+                blockGreen = Math.max(blockGreen, fallbackGreen);
+                blockBlue = Math.max(blockBlue, fallbackBlue);
+            } else if (blockRed == 0.0f && blockGreen == 0.0f && blockBlue == 0.0f
                     && state.getLightEmission() > 0) {
                 blockRed = fallbackRed;
                 blockGreen = fallbackGreen;

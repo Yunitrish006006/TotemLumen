@@ -32,11 +32,28 @@ public final class RgbSectionRefreshVerifier {
         if (second.size() != 12) {
             throw new IllegalStateException("Sky refresh budget must remain bounded on later ticks");
         }
+        verifyPacketBoundary();
         verifyNearbyPriority();
         verifyServerAuthority(dimension);
         ClientGameplayLightField.clear();
         System.out.println("RGB section refresh verification PASS: sourcePriority=true, skyBudget=12, "
                 + "deduplicated=true, serverAuthority=true");
+    }
+
+    private static void verifyPacketBoundary() {
+        Identifier nether = Identifier.fromNamespaceAndPath("minecraft", "the_nether");
+        String dim = nether.toString();
+        char[] cells = new char[4096];
+        cells[8 * 16 + 8] = (char) 0xFF83; // Fire on the bottom face above a floor in the next mesh.
+        var section = new GameplayLightSectionsPayload.Section(-1, 4, 0, cells);
+        ClientGameplayLightField.apply(new GameplayLightSectionsPayload(nether, 1L, List.of(section), false));
+        var expected = java.util.Set.of(new ClientGameplayLightField.SectionCoordinate(dim, -1, 4, 0),
+                new ClientGameplayLightField.SectionCoordinate(dim, -1, 3, 0));
+        if (!java.util.Set.copyOf(ClientGameplayLightField.drainDirtySections(dim)).equals(expected))
+            throw new IllegalStateException("A newly synced fire must also refresh the floor mesh");
+        ClientGameplayLightField.apply(new GameplayLightSectionsPayload(nether, 2L, List.of(), true));
+        if (!java.util.Set.copyOf(ClientGameplayLightField.drainDirtySections(dim)).equals(expected))
+            throw new IllegalStateException("Removing the fire must refresh the same floor mesh");
     }
 
     private static void verifyNearbyPriority() {
@@ -83,11 +100,16 @@ public final class RgbSectionRefreshVerifier {
 
         ClientGameplayLightField.markSpeculativeRegion(dimension, 0, 64, 0, 0, 64, 0);
         ClientGameplayLightField.replaceLocalRegion(dimension, 0, 64, 0, 0, 64, 0, staged);
+        ClientGameplayLightField.drainDirtySections(dimension);
         for (int tick = 0; tick < 200; tick++) {
             ClientGameplayLightField.advancePredictionTick();
         }
         if (ClientGameplayLightField.localPackedAt(dimension, 0, 64, 0) != 0xF123) {
             throw new IllegalStateException("Unacknowledged prediction must expire to server state");
+        }
+        if (!ClientGameplayLightField.drainDirtySections(dimension).contains(
+                new ClientGameplayLightField.SectionCoordinate(dimension, 0, 3, 0))) {
+            throw new IllegalStateException("Expiring boundary prediction must restore the adjacent floor mesh");
         }
 
         ClientGameplayLightField.drainDirtySections(dimension);

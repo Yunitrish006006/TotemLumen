@@ -72,16 +72,12 @@ public final class ClientGameplayLightField {
             }
         }
         if (payload.fullSync()) {
-            for (Key key : SECTIONS.keySet()) {
-                if (key.dimension.equals(dimension)) {
-                    dirtySections.add(new SectionCoordinate(dimension, key.x, key.y, key.z));
-                }
-            }
-            for (Key key : LOCAL_SECTIONS.keySet()) {
-                if (key.dimension.equals(dimension)) {
-                    dirtySections.add(new SectionCoordinate(dimension, key.x, key.y, key.z));
-                }
-            }
+            SECTIONS.forEach((key, values) -> {
+                if (key.dimension.equals(dimension)) markSectionReplacement(key, values, null);
+            });
+            LOCAL_SECTIONS.forEach((key, values) -> {
+                if (key.dimension.equals(dimension)) markSectionReplacement(key, values, null);
+            });
             SECTIONS.keySet().removeIf(key -> key.dimension.equals(dimension));
             LOCAL_SECTIONS.keySet().removeIf(key -> key.dimension.equals(dimension));
             authoritativeSections.removeIf(key -> key.dimension.equals(dimension));
@@ -91,9 +87,10 @@ public final class ClientGameplayLightField {
             Key key = new Key(dimension, section.x(), section.y(), section.z());
             authoritativeSections.add(key);
             speculativeSections.remove(key);
-            LOCAL_SECTIONS.remove(key);
-            dirtySections.add(new SectionCoordinate(dimension, section.x(), section.y(), section.z()));
+            char[] previous = LOCAL_SECTIONS.remove(key);
+            if (previous == null) previous = SECTIONS.get(key);
             char[] values = section.values();
+            markSectionReplacement(key, previous, values);
             boolean empty = true;
             for (char value : values) {
                 if (value != 0) {
@@ -413,9 +410,12 @@ public final class ClientGameplayLightField {
             if (!speculativeSections.remove(key, expiry.deadline)) {
                 continue;
             }
-            if (authoritativeSections.contains(key) && LOCAL_SECTIONS.remove(key) != null) {
-                dirtySections.add(new SectionCoordinate(key.dimension, key.x, key.y, key.z));
-                changed = true;
+            if (authoritativeSections.contains(key)) {
+                char[] previous = LOCAL_SECTIONS.remove(key);
+                if (previous != null) {
+                    markSectionReplacement(key, previous, SECTIONS.get(key));
+                    changed = true;
+                }
             }
         }
         finishLocalBatch(changed);
@@ -469,6 +469,30 @@ public final class ClientGameplayLightField {
         values[index] = (char) packed;
         markAffectedMeshes(dimension, x, y, z);
         return true;
+    }
+
+    /** Baked vertices across a face, edge or corner also sample the incoming network section. */
+    private static void markSectionReplacement(Key key, char[] before, char[] after) {
+        dirtySections.add(new SectionCoordinate(key.dimension, key.x, key.y, key.z));
+        if (before == after) return;
+        for (int dy = -1; dy <= 1; dy++)
+            for (int dz = -1; dz <= 1; dz++)
+                for (int dx = -1; dx <= 1; dx++) {
+                    if ((dx | dy | dz) == 0) continue;
+                    if (boundaryChanged(before, after, dx, dy, dz)) {
+                        dirtySections.add(new SectionCoordinate(key.dimension, key.x + dx, key.y + dy, key.z + dz));
+                    }
+                }
+    }
+
+    private static boolean boundaryChanged(char[] before, char[] after, int dx, int dy, int dz) {
+        for (int y = dy > 0 ? 15 : 0; y <= (dy < 0 ? 0 : 15); y++)
+            for (int z = dz > 0 ? 15 : 0; z <= (dz < 0 ? 0 : 15); z++)
+                for (int x = dx > 0 ? 15 : 0; x <= (dx < 0 ? 0 : 15); x++) {
+                    int i = (y << 8) | (z << 4) | x;
+                    if ((before == null ? 0 : before[i]) != (after == null ? 0 : after[i])) return true;
+                }
+        return false;
     }
 
     /** A vertex on a section edge can interpolate RGB cells from the adjacent section. */
@@ -560,9 +584,7 @@ public final class ClientGameplayLightField {
         if (LOCAL_SECTIONS.isEmpty()) {
             return;
         }
-        for (Key key : LOCAL_SECTIONS.keySet()) {
-            dirtySections.add(new SectionCoordinate(key.dimension, key.x, key.y, key.z));
-        }
+        LOCAL_SECTIONS.forEach((key, values) -> markSectionReplacement(key, values, SECTIONS.get(key)));
         LOCAL_SECTIONS.clear();
         revision++;
         invalidateSnapshot();
@@ -573,8 +595,7 @@ public final class ClientGameplayLightField {
         boolean changed = false;
         for (Key key : List.copyOf(LOCAL_SECTIONS.keySet())) {
             if (key.dimension.equals(dimension) && key.x == chunkX && key.z == chunkZ) {
-                LOCAL_SECTIONS.remove(key);
-                dirtySections.add(new SectionCoordinate(dimension, key.x, key.y, key.z));
+                markSectionReplacement(key, LOCAL_SECTIONS.remove(key), SECTIONS.get(key));
                 changed = true;
             }
         }

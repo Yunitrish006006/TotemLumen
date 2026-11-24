@@ -5,6 +5,7 @@ public final class DefaultEmissionColors {
     private static final EmissionColor SOUL = new EmissionColor(0.28f, 0.78f, 1.0f);
     private static final EmissionColor SOUL_LANTERN = new EmissionColor(0.26f, 0.76f, 1.0f);
     private static final EmissionColor REDSTONE = new EmissionColor(1.0f, 0.18f, 0.06f);
+    private static final EmissionColor NETHER_PORTAL = new EmissionColor(0.64f, 0.16f, 1.0f);
     private static final EmissionColor LAVA = new EmissionColor(1.0f, 0.32f, 0.08f);
     private static final EmissionColor OCHRE_FROGLIGHT = new EmissionColor(1.0f, 0.76f, 0.35f);
     private static final EmissionColor VERDANT_FROGLIGHT = new EmissionColor(0.58f, 1.0f, 0.62f);
@@ -25,6 +26,7 @@ public final class DefaultEmissionColors {
         if (emission <= 0) {
             return EmissionColor.BLACK;
         }
+        if (sourceId.equals("minecraft:nether_portal")) return NETHER_PORTAL;
         if (sourceId.equals("minecraft:furnace")) return TORCH;
         if (sourceId.equals("minecraft:glow_lichen")) return GLOW_LICHEN;
         if (sourceId.equals("minecraft:soul_lantern")) return SOUL_LANTERN;

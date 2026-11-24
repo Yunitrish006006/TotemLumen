@@ -4,6 +4,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.util.ARGB;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.monster.Strider;
 import net.minecraft.world.entity.boss.enderdragon.EnderDragon;
 import net.minecraft.world.level.LightLayer;
 import net.minecraft.world.phys.AABB;
@@ -24,7 +25,8 @@ public final class EntityLightVolume {
 
     static EntityLightVolume capture(LivingEntity entity, float partialTick, int emissionFloor) {
         AABB box = entity.getInterpolatedBoundingBox(partialTick);
-        if (box.getXsize() < 1.25 && box.getZsize() < 1.25 && box.getYsize() < 2.0) return null;
+        // Striders stand directly on emitters. Their feet and head can see different light even as babies.
+        if (!(entity instanceof Strider) && box.getXsize() < 1.25 && box.getZsize() < 1.25 && box.getYsize() < 2.0) return null;
         if (entity instanceof EnderDragon dragon) {
             for (var part : dragon.getSubEntities()) box = box.minmax(part.getInterpolatedBoundingBox(partialTick));
         }
