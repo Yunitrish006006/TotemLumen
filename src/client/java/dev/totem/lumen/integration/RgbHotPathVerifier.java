@@ -17,6 +17,7 @@ public final class RgbHotPathVerifier {
         ClientGameplayLightField.clear();
         ClientGameplayLightField.setActiveDimension(dimension);
         try {
+            verifyEmptyInterpolation(dimension);
             if (ClientGameplayLightField.packedAtCurrentDimension(-17, 64, 3) != 0) {
                 throw new IllegalStateException("An absent RGB section must read as zero");
             }
@@ -36,6 +37,33 @@ public final class RgbHotPathVerifier {
             ClientGameplayLightField.clear();
         }
         System.out.println("RGB hot-path verification PASS: localSources=true, negativeSections=true, lookupInvalidation=true, scanScheduling=true, rebuildOverlap=true, discoveredSourceFastPath=true, localSourcePriority=true");
+    }
+
+    private static void verifyEmptyInterpolation(String dimension) {
+        var light = ClientGameplayLightField.localSampler();
+        if (!light.interpolationSectionEmpty(-18, 64, 3)
+                || light.interpolationSectionEmpty(-17, 64, 3)
+                || light.interpolationSectionEmpty(-18, 79, 3)
+                || light.interpolationSectionEmpty(-18, 64, 15)) {
+            throw new IllegalStateException("Only a footprint contained in an empty section can skip sampling");
+        }
+        var held = ClientHeldLightField.visible;
+        try {
+            var sections = new it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap<char[]>();
+            sections.put(net.minecraft.core.SectionPos.asLong(-2, 4, 0), new char[4096]);
+            ClientHeldLightField.visible = new ClientHeldLightField.Snapshot(dimension, sections);
+            if (light.interpolationSectionEmpty(-18, 64, 3)) {
+                throw new IllegalStateException("A held light in an otherwise empty section needs sampling");
+            }
+        } finally {
+            ClientHeldLightField.visible = held;
+        }
+        ClientGameplayLightField.setLocalPacked(dimension, -18, 64, 3, 0xF321);
+        if (ClientGameplayLightField.localSampler().interpolationSectionEmpty(-18, 64, 3)) {
+            throw new IllegalStateException("New placed light must invalidate the empty-section shortcut");
+        }
+        ClientGameplayLightField.finishLocalBatch(true);
+        ClientGameplayLightField.clearLocalChunk(dimension, -2, 0);
     }
 
     private static void verifyEnclosedLava() {

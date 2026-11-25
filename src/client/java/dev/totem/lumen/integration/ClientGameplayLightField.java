@@ -657,6 +657,18 @@ public final class ClientGameplayLightField {
             return heldValues == null ? placed : PackedRgbLight.componentMax(placed, heldValues[index]);
         }
 
+        // The interpolation footprint is at most two cells on each axis. At a section
+        // boundary the caller must still sample both sides, including held lighting.
+        boolean interpolationSectionEmpty(int x, int y, int z) {
+            if ((x & 15) == 15 || (y & 15) == 15 || (z & 15) == 15) return false;
+            String dim = activeDimension;
+            int sx = x >> 4, sy = y >> 4, sz = z >> 4;
+            if (sectionValues(dim, sx, sy, sz) != null) return false;
+            var held = ClientHeldLightField.visible;
+            return held.sections().isEmpty() || !held.dimension().equals(dim)
+                    || !held.sections().containsKey(net.minecraft.core.SectionPos.asLong(sx, sy, sz));
+        }
+
         int packedAtCurrentDimension(BlockPos pos) {
             return packedAtCurrentDimension(pos.getX(), pos.getY(), pos.getZ());
         }

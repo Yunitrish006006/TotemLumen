@@ -59,6 +59,7 @@ public final class ClientGameplayLightPredictor {
     private static final ArrayDeque<ImmediatePropagationTask> immediatePropagations = new ArrayDeque<>();
     private static final ArrayDeque<RebuildTask> pendingRebuilds = new ArrayDeque<>();
     private static final Set<SectionKey> queuedRebuilds = new HashSet<>();
+    private static final Set<SectionKey> nearbyCorrections = new HashSet<>();
     private static long nextChunkGeneration;
     private static final BlockPos.MutableBlockPos mutablePos = new BlockPos.MutableBlockPos();
     private static int centerChunkX;
@@ -91,6 +92,7 @@ public final class ClientGameplayLightPredictor {
         clearImmediatePropagations();
         pendingRebuilds.clear();
         queuedRebuilds.clear();
+        nearbyCorrections.clear();
         loggedInitialScans = 0;
         loggedRebuildInvalidations = 0;
         centerKnown = false;
@@ -146,34 +148,31 @@ public final class ClientGameplayLightPredictor {
         }
         activate(level);
         enterServerAuthorityIfAvailable();
-        bumpChunkGeneration(new ChunkKey(
-                Math.floorDiv(pos.getX(), 16),
-                Math.floorDiv(pos.getZ(), 16)
-        ));
         BlockKey key = new BlockKey(pos.getX(), pos.getY(), pos.getZ());
-        SectionKey section = SectionKey.fromBlock(pos.getX(), pos.getY(), pos.getZ());
         // The source scan is intentionally incremental. During that window a torch can be
         // removed before it has entered `sources`; derive the old value from the actual client
         // block state as well, otherwise the stale propagated field is never scheduled for a
         // rebuild and the light remains visible.
         char oldSource = sources.getOrDefault(key, sourceFor(oldState));
         char nextSource = sourceFor(newState);
-        if (nextSource == 0) {
-            removeSource(key);
-        } else {
-            putSource(key, nextSource);
-        }
         boolean sourceChanged = oldSource != nextSource;
         boolean propagationChanged = oldState.getLightDampening() != newState.getLightDampening();
-        if (propagationChanged) ClientHeldLightField.chunkChanged(level, pos.getX() >> 4, pos.getZ() >> 4);
-        if (sourceChanged || propagationChanged) {
-            Region influence = Region.aroundBlock(level, pos);
-            ClientGameplayLightField.markSpeculativeRegion(
-                    activeDimension,
-                    influence.minX, influence.minY, influence.minZ,
-                    influence.maxX, influence.maxY, influence.maxZ
-            );
+        // A flame's age can change before its first scan. Indexing it here without
+        // seeding it would make both the near scan and the full scan skip propagation.
+        if (!sourceChanged && !propagationChanged) return;
+
+        bumpChunkGeneration(new ChunkKey(pos.getX() >> 4, pos.getZ() >> 4));
+        if (sourceChanged) {
+            if (nextSource == 0) removeSource(key);
+            else putSource(key, nextSource);
         }
+        if (propagationChanged) ClientHeldLightField.chunkChanged(level, pos.getX() >> 4, pos.getZ() >> 4);
+        Region influence = Region.aroundBlock(level, pos);
+        ClientGameplayLightField.markSpeculativeRegion(
+                activeDimension,
+                influence.minX, influence.minY, influence.minZ,
+                influence.maxX, influence.maxY, influence.maxZ
+        );
         if (sourceChanged && loggedSourceEvents++ < 16) {
             TotemLumenClient.LOGGER.info(
                     "RGBA source changed: pos={}, oldA={}, newA={}, newHue=({},{},{})",
@@ -182,14 +181,9 @@ public final class ClientGameplayLightPredictor {
                     PackedRgbLight.hueBlue(nextSource)
             );
         }
-        if (sourceChanged || propagationChanged) {
-            // A queued scan or rebuild may have captured the old block before this update.
-            // Restart overlapping work with the current source map and block state.
-            Region affected = sourceChanged ? Region.aroundBlock(level, pos)
-                    : new Region(pos.getX(), pos.getY(), pos.getZ(),
-                            pos.getX(), pos.getY(), pos.getZ());
-            refreshOverlappingRebuilds(List.of(affected));
-        }
+        Region affected = sourceChanged ? influence
+                : new Region(pos.getX(), pos.getY(), pos.getZ(), pos.getX(), pos.getY(), pos.getZ());
+        refreshOverlappingRebuilds(List.of(affected));
         if (sourceChanged) {
             if (oldSource == 0 && nextSource != 0) {
                 // Additions follow the vanilla fast path: publish the source and propagate from
@@ -199,16 +193,23 @@ public final class ClientGameplayLightPredictor {
                 );
                 ClientGameplayLightField.finishLocalBatch(true);
                 ClientGameplayLightField.requestImmediateUpload();
-                queueImmediatePropagation(key, nextSource, true);
+                // Flowing lava produces ordinary block updates as it spreads. Keep that
+                // background work behind player edits and newly discovered ground emitters.
+                boolean flowingLava = level.dimension().equals(Level.NETHER) && newState.is(Blocks.LAVA)
+                        && !newState.getFluidState().isSource();
+                queueImmediatePropagation(key, nextSource, !flowingLava);
             } else {
                 removePropagationsIf(task -> task.source.equals(key));
                 // Keep the last complete field visible until the replacement is ready.
                 // Clearing the entire influence radius here made other nearby lights blink.
-                scheduleInfluence(Region.aroundBlock(level, pos));
+                scheduleInfluence(influence);
+                if (level.dimension().equals(Level.NETHER) && (GROUND_EMITTER.test(oldState) || GROUND_EMITTER.test(newState))) {
+                    prioritizeNearbyCorrection(pos, influence);
+                }
                 ClientGameplayLightField.requestImmediateUpload();
             }
-        } else if (propagationChanged) {
-            scheduleInfluence(Region.aroundBlock(level, pos));
+        } else {
+            scheduleInfluence(influence);
         }
     }
 
@@ -242,6 +243,7 @@ public final class ClientGameplayLightPredictor {
         clearImmediatePropagations();
         pendingRebuilds.clear();
         queuedRebuilds.clear();
+        nearbyCorrections.clear();
         reseedAfterRuleChange.clear();
         for (BlockKey source : sources.keySet()) {
             Region influence = Region.aroundBlock(activeLevel, new BlockPos(source.x, source.y, source.z));
@@ -409,9 +411,9 @@ public final class ClientGameplayLightPredictor {
                     boolean published = rebuild.publish();
                     pendingRebuilds.removeFirst();
                     queuedRebuilds.remove(rebuild.anchor);
-                    if (!published) {
-                        scheduleCoreRebuild(rebuild.anchor);
-                    }
+                    if (published) nearbyCorrections.remove(rebuild.anchor);
+                    else if (nearbyCorrections.contains(rebuild.anchor)) rescheduleCoreRebuild(rebuild.anchor);
+                    else scheduleCoreRebuild(rebuild.anchor);
                 }
                 scanTurn = true;
                 immediateTurn = true;
@@ -475,6 +477,7 @@ public final class ClientGameplayLightPredictor {
         } finally {
             pendingRebuilds.clear();
             queuedRebuilds.clear();
+            nearbyCorrections.clear();
         }
     }
 
@@ -558,6 +561,7 @@ public final class ClientGameplayLightPredictor {
         clearImmediatePropagations();
         pendingRebuilds.clear();
         queuedRebuilds.clear();
+        nearbyCorrections.clear();
         centerKnown = false;
         ClientGameplayLightField.clearLocal();
     }
@@ -627,7 +631,7 @@ public final class ClientGameplayLightPredictor {
         for (int cz = (player.getZ() - 8) >> 4; cz <= (player.getZ() + 8) >> 4; cz++) {
             for (int cx = (player.getX() - 8) >> 4; cx <= (player.getX() + 8) >> 4; cx++) {
                 ScanTask scan = scans.get(new ChunkKey(cx, cz));
-                if (scan == null || scan.nearbyComplete) continue;
+                if (scan == null) continue;
                 if (System.nanoTime() - start >= TIME_BUDGET_NANOS / 2) return used;
                 used += scan.primeNearby(player, 128, start);
             }
@@ -926,6 +930,26 @@ public final class ClientGameplayLightPredictor {
         }
     }
 
+    // A removal or hue change needs a full replacement, since additive propagation
+    // cannot subtract the old channels. Run visible corrections ahead of bulk discovery.
+    private static void prioritizeNearbyCorrection(BlockPos pos, Region influence) {
+        var player = Minecraft.getInstance().player;
+        if (player == null || !player.blockPosition().closerThan(pos, 32)) return;
+        var visible = new ArrayList<RebuildTask>();
+        pendingRebuilds.removeIf(task -> {
+            var key = task.anchor;
+            if (key.x < (influence.minX >> 4) || key.x > (influence.maxX >> 4)
+                    || key.y < (influence.minY >> 4) || key.y > (influence.maxY >> 4)
+                    || key.z < (influence.minZ >> 4) || key.z > (influence.maxZ >> 4)) return false;
+            visible.add(task);
+            nearbyCorrections.add(key);
+            return true;
+        });
+        visible.sort(Comparator.comparingDouble(task -> pos.distToCenterSqr(
+                task.anchor.x * 16 + 8, task.anchor.y * 16 + 8, task.anchor.z * 16 + 8)));
+        for (var task : visible.reversed()) pendingRebuilds.addFirst(task);
+    }
+
     private static void scheduleCoreRebuild(SectionKey anchor) {
         if (activeLevel == null || !loaded(anchor.x * 16, anchor.z * 16)) {
             return;
@@ -937,12 +961,15 @@ public final class ClientGameplayLightPredictor {
 
     private static void rescheduleCoreRebuild(SectionKey anchor) {
         if (activeLevel == null || !loaded(anchor.x * 16, anchor.z * 16)) {
+            nearbyCorrections.remove(anchor);
             return;
         }
         pendingRebuilds.removeIf(task -> task.anchor.equals(anchor));
         queuedRebuilds.remove(anchor);
         if (queuedRebuilds.add(anchor)) {
-            pendingRebuilds.addFirst(new RebuildTask(anchor, Region.around(activeLevel, anchor)));
+            var task = new RebuildTask(anchor, Region.around(activeLevel, anchor));
+            if (nearbyCorrections.isEmpty() || nearbyCorrections.contains(anchor)) pendingRebuilds.addFirst(task);
+            else pendingRebuilds.addLast(task);
         }
     }
 
@@ -1131,13 +1158,19 @@ public final class ClientGameplayLightPredictor {
         }
 
         private Region nearby;
+        private BlockPos nearbyOrigin;
         private int[] nearbyHeights;
         private int nearbyCursor;
         private boolean nearbyComplete;
 
         private int primeNearby(BlockPos player, int budget, long start) {
-            if (nearby == null) {
+            if (nearbyOrigin == null || Math.abs(player.getX() - nearbyOrigin.getX()) > 4
+                    || Math.abs(player.getZ() - nearbyOrigin.getZ()) > 4
+                    || Math.abs(player.getY() - nearbyOrigin.getY()) > 2) {
                 if (!level.isInsideBuildHeight(player.getY())) return 0;
+                nearbyOrigin = player.immutable();
+                nearbyCursor = 0;
+                nearbyComplete = false;
                 int x = chunkKey.x << 4, z = chunkKey.z << 4;
                 int y = player.getY();
                 nearby = new Region(Math.max(x, player.getX() - 8), Math.max(level.getMinY(), y - 2),
@@ -1145,6 +1178,7 @@ public final class ClientGameplayLightPredictor {
                         Math.min(level.getMaxY() - 1, y + 2), Math.min(z + 15, player.getZ() + 8));
                 nearbyHeights = nearestFirst(nearby.sizeY(), y - nearby.minY);
             }
+            if (nearbyComplete) return 0;
             int width = nearby.sizeX(), plane = width * nearby.sizeZ(), size = plane * nearby.sizeY();
             int used = 0;
             while (nearbyCursor < size && used < budget) {
@@ -1155,7 +1189,7 @@ public final class ClientGameplayLightPredictor {
                 var state = sections[chunk.getSectionIndex(y)].getBlockState(x & 15, y & 15, z & 15);
                 used++;
                 if (GROUND_EMITTER.test(state)) {
-                    used += seedEarly(new BlockKey(x, y, z), sourceFor(state), Math.min(7, budget - used));
+                    used += seedEarly(new BlockKey(x, y, z), sourceFor(state), Math.min(32, budget - used));
                 }
             }
             nearbyComplete = nearbyCursor >= size;

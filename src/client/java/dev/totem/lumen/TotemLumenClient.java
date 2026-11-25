@@ -15,6 +15,7 @@ import dev.totem.lumen.integration.MinecraftBlockModelMeshResolver;
 import dev.totem.lumen.integration.P13EnvironmentCapture;
 import dev.totem.lumen.integration.RgbLatencyDiagnostics;
 import dev.totem.lumen.integration.SceneExtractionBridge;
+import dev.totem.lumen.integration.NetherRgbSectionRefresh;
 import dev.totem.lumen.integration.RasterLightingScene;
 import dev.totem.lumen.integration.RasterLightingRenderer;
 import dev.totem.lumen.integration.RasterMaterialCapture;
@@ -200,10 +201,7 @@ public final class TotemLumenClient implements ClientModInitializer {
                 for (ClientGameplayLightField.SectionCoordinate section : sectionsToRefresh) {
                     // Re-extract only sections touched by RGB propagation. This updates the
                     // vanilla surface tint without invalidating the entire compiled world.
-                    client.level.setSectionRangeDirty(
-                            section.x(), section.y(), section.z(),
-                            section.x(), section.y(), section.z()
-                    );
+                    NetherRgbSectionRefresh.refresh(client, section);
                 }
                 RgbLatencyDiagnostics.recordDirtyDrain(
                         sectionsToRefresh.size(),

@@ -284,6 +284,7 @@ public final class VanillaRgbLighting {
         out[0] = 0.0f;
         out[1] = 0.0f;
         out[2] = 0.0f;
+        if (light.interpolationSectionEmpty(baseX, baseY, baseZ)) return;
         for (int dy = 0; dy <= 1; dy++) {
             float weightY = dy == 0 ? 1.0f - fractionY : fractionY;
             if (weightY <= 0.0f) continue;
@@ -297,6 +298,7 @@ public final class VanillaRgbLighting {
                     int packed = light.packedAtCurrentDimension(
                             baseX + dx, baseY + dy, baseZ + dz
                     );
+                    if (packed == 0) continue;
                     out[0] += weight * PackedRgbLight.red(packed) / 15.0f;
                     out[1] += weight * PackedRgbLight.green(packed) / 15.0f;
                     out[2] += weight * PackedRgbLight.blue(packed) / 15.0f;

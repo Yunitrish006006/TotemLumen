@@ -23,6 +23,7 @@
     "MinecraftBlockModelMeshResolverMixin",
     "OptionsSubScreenAccessor",
     "LevelRendererTakeoverMixin",
+    "NetherRgbSectionRefreshMixin",
     "RasterMaterialCaptureMixin",
     "RasterMaterialLayersInvoker",
     "SceneExtractionBridgeBlockEntityMixin",
