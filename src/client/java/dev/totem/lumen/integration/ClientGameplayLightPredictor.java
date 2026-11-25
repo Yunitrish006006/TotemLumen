@@ -380,6 +380,9 @@ public final class ClientGameplayLightPredictor {
         long start = System.nanoTime();
         int remaining = WORK_BUDGET;
         changedThisTick = false;
+        if (player != null && level.dimension().equals(Level.NETHER) && !scans.isEmpty()) {
+            remaining -= primeNearbyGroundLights(player.blockPosition(), start);
+        }
         while (remaining > 0 && System.nanoTime() - start < TIME_BUDGET_NANOS) {
             int used;
             var ready = nextPropagationQueue();
@@ -615,6 +618,21 @@ public final class ClientGameplayLightPredictor {
         } else {
             pendingScans.addLast(scan);
         }
+    }
+
+    // A nearby flame may lie across a chunk border while the main scanner is busy with lava.
+    // Give the player's immediate surroundings a bounded slice of the existing tick budget.
+    private static int primeNearbyGroundLights(BlockPos player, long start) {
+        int used = 0;
+        for (int cz = (player.getZ() - 8) >> 4; cz <= (player.getZ() + 8) >> 4; cz++) {
+            for (int cx = (player.getX() - 8) >> 4; cx <= (player.getX() + 8) >> 4; cx++) {
+                ScanTask scan = scans.get(new ChunkKey(cx, cz));
+                if (scan == null || scan.nearbyComplete) continue;
+                if (System.nanoTime() - start >= TIME_BUDGET_NANOS / 2) return used;
+                used += scan.primeNearby(player, 128, start);
+            }
+        }
+        return used;
     }
 
     private static ScanTask nextScan() {
@@ -1076,12 +1094,26 @@ public final class ClientGameplayLightPredictor {
         }
     }
 
+    static int[] nearestFirst(int count, int origin) {
+        int center = Math.clamp(origin, 0, count - 1);
+        int[] order = new int[count];
+        order[0] = center;
+        int size = 1;
+        for (int offset = 1; size < count; offset++) {
+            if (center - offset >= 0) order[size++] = center - offset;
+            if (center + offset < count) order[size++] = center + offset;
+        }
+        return order;
+    }
+
     private static final class ScanTask {
         private final ClientLevel level;
         private final LevelChunk chunk;
         private final ChunkKey chunkKey;
         private final LevelChunkSection[] sections;
         private int[] sectionOrder;
+        private int playerSection;
+        private int[] nearbyLayers;
         private final boolean nether;
         private final List<BlockKey> discoveredSources = new ArrayList<>();
         private final Set<BlockKey> earlySources = new HashSet<>();
@@ -1098,6 +1130,46 @@ public final class ClientGameplayLightPredictor {
             nether = level.dimension().equals(Level.NETHER);
         }
 
+        private Region nearby;
+        private int[] nearbyHeights;
+        private int nearbyCursor;
+        private boolean nearbyComplete;
+
+        private int primeNearby(BlockPos player, int budget, long start) {
+            if (nearby == null) {
+                if (!level.isInsideBuildHeight(player.getY())) return 0;
+                int x = chunkKey.x << 4, z = chunkKey.z << 4;
+                int y = player.getY();
+                nearby = new Region(Math.max(x, player.getX() - 8), Math.max(level.getMinY(), y - 2),
+                        Math.max(z, player.getZ() - 8), Math.min(x + 15, player.getX() + 8),
+                        Math.min(level.getMaxY() - 1, y + 2), Math.min(z + 15, player.getZ() + 8));
+                nearbyHeights = nearestFirst(nearby.sizeY(), y - nearby.minY);
+            }
+            int width = nearby.sizeX(), plane = width * nearby.sizeZ(), size = plane * nearby.sizeY();
+            int used = 0;
+            while (nearbyCursor < size && used < budget) {
+                if ((nearbyCursor & 31) == 0 && System.nanoTime() - start >= TIME_BUDGET_NANOS / 2) break;
+                int i = nearbyCursor++;
+                int x = nearby.minX + i % width, z = nearby.minZ + i % plane / width;
+                int y = nearby.minY + nearbyHeights[i / plane];
+                var state = sections[chunk.getSectionIndex(y)].getBlockState(x & 15, y & 15, z & 15);
+                used++;
+                if (GROUND_EMITTER.test(state)) {
+                    used += seedEarly(new BlockKey(x, y, z), sourceFor(state), Math.min(7, budget - used));
+                }
+            }
+            nearbyComplete = nearbyCursor >= size;
+            return used;
+        }
+
+        private int seedEarly(BlockKey source, char packed, int budget) {
+            if (packed == 0 || sources.containsKey(source)) return 0;
+            putSource(source, packed);
+            earlySources.add(source);
+            setPacked(source.x, source.y, source.z, PackedRgbLight.componentMax(getLocalPacked(source.x, source.y, source.z), packed));
+            return queueScannedEmitter(source, packed, budget);
+        }
+
         private int[] netherScanOrder() {
             var ground = new java.util.BitSet(sections.length);
             var other = new java.util.BitSet(sections.length);
@@ -1107,11 +1179,15 @@ public final class ClientGameplayLightPredictor {
             }
             // Visit every section exactly once even if a palette changes while the scan is pending.
             int[] order = new int[sections.length];
+            var player = Minecraft.getInstance().player;
+            int y = player == null ? level.getMinY() : player.blockPosition().getY();
+            playerSection = chunk.getSectionIndex(y);
+            nearbyLayers = nearestFirst(16, Math.floorMod(y, 16));
+            int[] byDistance = nearestFirst(sections.length, playerSection);
             int next = 0;
-            for (int i = ground.nextSetBit(0); i >= 0; i = ground.nextSetBit(i + 1)) order[next++] = i;
-            for (int i = other.nextSetBit(0); i >= 0; i = other.nextSetBit(i + 1)) order[next++] = i;
-            ground.or(other);
-            for (int i = ground.nextClearBit(0); i < sections.length; i = ground.nextClearBit(i + 1)) order[next++] = i;
+            for (int i : byDistance) if (ground.get(i)) order[next++] = i;
+            for (int i : byDistance) if (other.get(i)) order[next++] = i;
+            for (int i : byDistance) if (!ground.get(i) && !other.get(i)) order[next++] = i;
             return order;
         }
 
@@ -1134,6 +1210,10 @@ public final class ClientGameplayLightPredictor {
                     int localX = voxelIndex & 15;
                     int localZ = (voxelIndex >>> 4) & 15;
                     int localY = (voxelIndex >>> 8) & 15;
+                    if (nether) {
+                        if (index == playerSection) localY = nearbyLayers[localY];
+                        else if (index < playerSection) localY = 15 - localY;
+                    }
                     BlockState state = section.getBlockState(localX, localY, localZ);
                     if (state.getLightEmission() > 0) {
                         int x = chunkKey.x * 16 + localX;
@@ -1143,12 +1223,9 @@ public final class ClientGameplayLightPredictor {
                         if (packed != 0) {
                             BlockKey source = new BlockKey(x, y, z);
                             discoveredSources.add(source);
-                            if ((nether ? !state.is(Blocks.LAVA) : ClientRgbVisualLightSource.isFire(state)) && !sources.containsKey(source)) {
-                                putSource(source, packed);
-                                earlySources.add(source);
-                                setPacked(x, y, z, PackedRgbLight.componentMax(getLocalPacked(x, y, z), packed));
+                            if (nether ? !state.is(Blocks.LAVA) : ClientRgbVisualLightSource.isFire(state)) {
                                 int nearBudget = GROUND_EMITTER.test(state) ? 7 : 1;
-                                consumed += queueScannedEmitter(source, packed, Math.min(nearBudget, budget - consumed - 1));
+                                consumed += seedEarly(source, packed, Math.min(nearBudget, budget - consumed - 1));
                             }
                         }
                     }
