@@ -46,6 +46,97 @@ lighting is not removed. Current preview is not full-world lighting or path trac
 
 ## Rendering paths and staged limits
 
+### Stage 2e implementation: owned surface handoff replaces material replay
+
+The staged-render branch supersedes the Stage 2a-2d **material replay mechanism** while preserving
+those sections below as historical experiment evidence. The crash-producing path is removed from the
+active mixin list and its replay classes/shaders are deleted.
+
+After Minecraft completes world drawing, `RasterSurfaceCapture` now creates a frame-local owned
+surface:
+
+- native scene color -> Totem-owned color texture via GPU copy;
+- native depth -> Totem-owned `R32_FLOAT` texture via a small fullscreen depth-capture pipeline;
+- an owned full-resolution approximate normal field -> `RGBA16_FLOAT`, reconstructed once from
+  native depth inside SURFACE_CAPTURE;
+- `RasterSurfaceFrame` carries device, extent, frame serial, color semantic, color/depth/normal
+  views to later stages;
+- Raster lighting no longer reads the main target depth directly and no longer owns its own duplicate
+  scene-copy resource;
+- client tick/stop lifecycle explicitly retires the surface stage.
+
+The published color semantic is `NATIVE_LIT_COLOR`. Therefore the earlier diagnostic independent
+RGB/material mode is intentionally not active on this safe path: multiplying Totem independent light
+over already-lit vanilla color would be a false material model. A future MATERIAL_RESOLVE stage must
+produce `UNLIT_MATERIAL_COLOR` plus owned normal/material identity before that lighting mode returns.
+
+This change is an architectural/lifetime fix, not visual or FPS acceptance. Required native gates:
+resize, profile switch, disconnect/rejoin, world exit/re-entry and shutdown with no closed-buffer or
+render-pass errors, followed by fixed-scene output checks. Apple/MoltenVK remains a separate gate.
+
+### Stage 2f implementation: active secondary lighting split into INDIRECT_GI + COMPOSITE
+
+The safe `NATIVE_LIT_COLOR` path no longer compiles the old combined `raster_ray` fragment shader.
+That shader still contained direct-RGB point-light selection/visibility and material-preview branches
+that could not legally run without unlit material input.
+
+The active graph is now:
+
+```text
+SURFACE_CAPTURE
+      |
+      v
+INDIRECT_GI
+      |
+      v
+COMPOSITE
+```
+
+`RasterIndirectGiStage` owns the voxel atlas and reduced-resolution radiance texture. Its shader
+consumes `DepthSampler`, `NormalSampler` and `VoxelSampler`; primary normal reconstruction has
+moved entirely into SURFACE_CAPTURE. It performs the existing bounded secondary diffuse/emissive and
+occlusion correction and traces no primary visibility rays. `RasterLightingFrame` carries the
+radiance view plus the source surface frame serial. `RasterCompositeStage` validates that serial
+before sampling the surface and lighting outputs and is the sole staged pass writing the world color
+target.
+
+The direct-light data structures remain tested research code, but section extraction no longer builds
+their emitter summaries and the active shader has no `LightSampler`, `directRgb` or point-light
+visibility loop. DIRECT_LIGHT returns only after MATERIAL_RESOLVE publishes `UNLIT_MATERIAL_COLOR`.
+This is a compilation/ownership separation, not a claim that the current native-lit indirect
+correction equals the future independent-lighting renderer.
+
+
+### Stage 2g implementation: partial unlit material coverage
+
+The optional MATERIAL_RESOLVE development stage now publishes two additional owned full-resolution
+outputs without replaying Minecraft draw buffers.
+
+- `baseProperties` is RGBA16F and decodes the existing MaterialDefinition ABI as base
+  roughness / metallic / opacity / normalized emission level.
+- `unlitAlbedo` is RGBA16F and is currently valid only for static canonical textured cubes.
+  The stage reuses the existing P18 cube surface-set ABI (face UVs, texture handle and captured
+  biome/block tint) plus the packed P18 texture-scene ABI. RGB is unlit sampled albedo multiplied by
+  tint; alpha is **coverage**, not permission to replace every raster surface.
+- Surface-set ID zero, missing/unloaded texture handles, animated textures, unsupported geometry and
+  unresolved pixels return zero coverage and therefore require native-lit fallback.
+- The large P18 texture scene is uploaded only when the P18 texture registry revision changes.
+  Material-LUT resizing, surface-set LUT lifetime and P18 texture LUT lifetime are independent.
+
+Generic meshes, fluids, entities and animated textures still lack complete unlit surface coverage,
+and P18 sampled normal/specular/AO data has not yet been promoted to resolved per-pixel outputs.
+
+An isolated DIRECT_LIGHT producer exists behind
+`-Dtotem.lumen.rasterDirectLightStage=true` together with MATERIAL_RESOLVE. It reuses the shared
+VOXEL_SCENE GPU atlas, selects at most 32 RGB emitters and traces at most four bounded visibility
+rays for material-covered pixels.
+
+A separate `-Dtotem.lumen.rasterDirectLightComposite=true` diagnostic may consume that output.
+It changes only covered near-field static textured cubes; every uncovered/far/unsupported pixel
+retains native-lit + INDIRECT_GI fallback through the unchanged safe composite pipeline. The preview
+uses a small diagnostic ambient term and has no sun/moon/sky, so it is not a production independent
+lighting claim. Both flags are off by default.
+
 ### Stage 2d candidate: stable publication and light payload order
 
 Unchanged section refreshes previously published a fresh volume every tick, so the

@@ -32,11 +32,27 @@ public final class RasterLightingVolume {
 
     public static final class Section {
         private final int[] abgr;
+        private final char[] materialIds;
+        private final char[] surfaceSetIds;
         private final int[] emitters;
-        public Section(int[] abgr) { this(abgr, false); }
+        public Section(int[] abgr) { this(abgr, new char[4096], null, false); }
+        public Section(int[] abgr, char[] materialIds) { this(abgr, materialIds, null, false); }
+        public Section(int[] abgr, char[] materialIds, char[] surfaceSetIds) {
+            this(abgr, materialIds, surfaceSetIds, false);
+        }
         public Section(int[] abgr, boolean collectEmitters) {
-            if (abgr.length != 4096) throw new IllegalArgumentException("Expected 16 cubed voxels");
+            this(abgr, new char[4096], null, collectEmitters);
+        }
+        public Section(int[] abgr, char[] materialIds, boolean collectEmitters) {
+            this(abgr, materialIds, null, collectEmitters);
+        }
+        public Section(int[] abgr, char[] materialIds, char[] surfaceSetIds, boolean collectEmitters) {
+            if (abgr.length != 4096 || materialIds.length != 4096
+                    || (surfaceSetIds != null && surfaceSetIds.length != 4096))
+                throw new IllegalArgumentException("Expected 16 cubed voxel/material/surface arrays");
             this.abgr = abgr.clone();
+            this.materialIds = materialIds.clone();
+            this.surfaceSetIds = surfaceSetIds == null ? new char[0] : surfaceSetIds.clone();
             emitters = new int[collectEmitters ? 8 : 0];
             java.util.Arrays.fill(emitters, -1);
             if (collectEmitters) for (int i = 0; i < 4096; i++) {
@@ -50,6 +66,9 @@ public final class RasterLightingVolume {
             }
         }
         public int voxel(int index) { return abgr[index]; }
+        public int materialId(int index) { return materialIds[index]; }
+        public int surfaceSetId(int index) { return surfaceSetIds.length == 0 ? 0 : surfaceSetIds[index]; }
+        public boolean hasSurfaceSetIds() { return surfaceSetIds.length != 0; }
         public int emitterCount() { return emitters.length; }
         public int emitter(int octant) { return emitters[octant]; }
         private static int energy(int v) { return Math.max(v & 255, Math.max((v >>> 8) & 255, (v >>> 16) & 255)); }

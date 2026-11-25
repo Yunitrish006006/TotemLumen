@@ -20,7 +20,7 @@ public final class HeldLightShaderVerifier {
         String directive = "#include <minecraft:dynamictransforms.glsl>";
         verify(readResource("assets/totem-lumen/shaders/core/hybrid_terrain.fsh").replace(directive, include),
                 "totem-lumen:core/hybrid_terrain");
-        verify(readResource("assets/totem-lumen/shaders/core/raster_ray.fsh").replace(directive, include), "totem-lumen:core/raster_ray");
+        verify(readResource("assets/totem-lumen/shaders/core/raster_indirect_gi.fsh").replace(directive, include), "totem-lumen:core/raster_indirect_gi");
         verify(readResource("assets/totem-lumen/shaders/core/raster_ray_composite.fsh").replace(directive, include), "totem-lumen:core/raster_ray_composite");
     }
 

@@ -27,6 +27,37 @@ class RasterLightingVolumeTest {
         }
     }
 
+    @Test void sectionMaterialIdsAreImmutableUnsigned16BitPayloads() {
+        int[] pixels = new int[4096];
+        char[] materials = new char[4096];
+        materials[0] = (char) 1;
+        materials[1] = (char) 0xFFFF;
+        var section = new RasterLightingVolume.Section(pixels, materials);
+        materials[0] = 99;
+        assertEquals(1, section.materialId(0));
+        assertEquals(65535, section.materialId(1));
+        assertEquals(0, section.materialId(2));
+        assertThrows(IllegalArgumentException.class,
+                () -> new RasterLightingVolume.Section(new int[4096], new char[1]));
+    }
+
+    @Test void sectionSurfaceSetIdsAreOptionalImmutableUnsigned16BitPayloads() {
+        int[] pixels = new int[4096];
+        char[] materials = new char[4096];
+        char[] surfaces = new char[4096];
+        surfaces[0] = (char) 1;
+        surfaces[1] = (char) 0xFFFF;
+        var section = new RasterLightingVolume.Section(pixels, materials, surfaces);
+        surfaces[0] = 99;
+        assertTrue(section.hasSurfaceSetIds());
+        assertEquals(1, section.surfaceSetId(0));
+        assertEquals(65535, section.surfaceSetId(1));
+        assertEquals(0, section.surfaceSetId(2));
+        assertEquals(0, new RasterLightingVolume.Section(pixels, materials).surfaceSetId(0));
+        assertThrows(IllegalArgumentException.class,
+                () -> new RasterLightingVolume.Section(pixels, materials, new char[1]));
+    }
+
     @Test void immutablePublicationAndUnknownCells() {
         int[] pixels = new int[4096]; pixels[0] = RasterLightingVolume.AIR;
         var section = new RasterLightingVolume.Section(pixels);
@@ -46,16 +77,21 @@ class RasterLightingVolumeTest {
         assertTrue(settings.contains("return renderProfile == RenderProfile.TOTEM_LUMEN;"));
         assertTrue(settings.contains("return renderProfile == RenderProfile.RASTER_RAY;"));
         String renderer = source("integration/RasterLightingRenderer.java");
-        assertTrue(renderer.contains("if (!RendererSettings.rasterLightingEnabled() || failed) return;"));
+        assertTrue(renderer.contains("if (!RendererSettings.rasterLightingEnabled() || failed || surface == null) return;"));
         assertFalse(renderer.contains("P5StableLookupRenderer"));
         assertFalse(renderer.contains("ClientLevel"));
         assertFalse(renderer.contains("getBlockState"));
-        assertTrue(renderer.contains("GpuTexture.USAGE_COPY_DST | GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_RENDER_ATTACHMENT"));
+        String voxelScene = source("integration/RasterVoxelSceneGpu.java");
+        assertTrue(voxelScene.contains("GpuTexture.USAGE_COPY_DST | GpuTexture.USAGE_TEXTURE_BINDING"));
+        assertTrue(voxelScene.contains("| GpuTexture.USAGE_RENDER_ATTACHMENT"));
+        String indirect = source("integration/RasterIndirectGiStage.java");
+        assertFalse(indirect.contains("GpuTexture.USAGE_COPY_DST"));
+        assertFalse(renderer.contains("createTexture("));
         assertTrue(source("integration/RgbFrameMetrics.java").contains("if (RendererSettings.rasterLightingEnabled()) return RasterLightingRenderer.ready();"));
     }
 
     @Test void shadersHaveSecondaryRayBudgetAndKeepFarGeometry() throws Exception {
-        String lighting = Files.readString(Path.of("src/client/resources/assets/totem-lumen/shaders/core/raster_ray.fsh"));
+        String lighting = Files.readString(Path.of("src/client/resources/assets/totem-lumen/shaders/core/raster_indirect_gi.fsh"));
         String composite = Files.readString(Path.of("src/client/resources/assets/totem-lumen/shaders/core/raster_ray_composite.fsh"));
         assertTrue(lighting.contains("i < 64"));
         assertTrue(lighting.contains("i < 3"));
@@ -78,6 +114,7 @@ class RasterLightingVolumeTest {
         assertFalse(callback.contains("RasterLightingRenderer.close()"));
         assertFalse(callback.contains("RasterLightingScene.clear()"));
         assertTrue(client.contains("RasterLightingRenderer.tickLifecycle(client)"));
+        assertTrue(client.contains("RasterSurfaceCapture.tickLifecycle(client)"));
     }
 
     private static String source(String path) throws Exception {

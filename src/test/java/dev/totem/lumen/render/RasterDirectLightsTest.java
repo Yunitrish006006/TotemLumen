@@ -103,17 +103,30 @@ class RasterDirectLightsTest {
         }
     }
 
-    @Test void shaderBudgetsAndProfileIsolationRemainExplicit() throws Exception {
-        String shader = Files.readString(Path.of("src/client/resources/assets/totem-lumen/shaders/core/raster_ray.fsh"));
-        assertTrue(shader.contains("for (int i = 0; i < 32; i++)"));
-        assertTrue(shader.contains("if (v.a < 0.25) return 0.0;"));
-        assertTrue(shader.contains("if (all(equal(cell, destination))) return 1.0;"));
-        assertTrue(shader.contains("if (v.a > 0.75) return 0.0;"));
-        assertTrue(shader.contains("visibility(surface + normal * 0.08, positions[i])"));
+    @Test void directLightRemainsSeparatedFromIndirectAndFinalComposite() throws Exception {
+        String indirect = Files.readString(Path.of("src/client/resources/assets/totem-lumen/shaders/core/raster_indirect_gi.fsh"));
+        assertFalse(indirect.contains("LightSampler"));
+        assertFalse(indirect.contains("directRgb("));
+        assertFalse(indirect.contains("visibility("));
+
+        String direct = Files.readString(Path.of("src/client/resources/assets/totem-lumen/shaders/core/raster_direct_light.fsh"));
+        assertTrue(direct.contains("LightSampler"));
+        assertTrue(direct.contains("directRgb("));
+        assertTrue(direct.contains("visibility("));
+
         String scene = Files.readString(Path.of("src/client/java/dev/totem/lumen/integration/RasterLightingScene.java"));
-        assertTrue(scene.contains("new RasterLightingVolume.Section(pixels, RasterMaterialCapture.lightingPreviewRequested())"));
+        assertTrue(scene.contains("RasterDirectLightStage.requested()"));
+        assertFalse(scene.contains("RasterMaterialCapture"));
+
+        String renderer = Files.readString(Path.of("src/client/java/dev/totem/lumen/integration/RasterLightingRenderer.java"));
+        assertTrue(renderer.contains("surface.supportsIndependentLighting()"));
+        assertTrue(renderer.contains("RasterDirectLightStage.record("));
+        assertTrue(renderer.contains("return false;"));
+
+        String composite = Files.readString(Path.of("src/client/java/dev/totem/lumen/integration/RasterCompositeStage.java"));
+        assertFalse(composite.contains("RasterDirectLightFrame"));
+
         String metrics = Files.readString(Path.of("src/client/java/dev/totem/lumen/integration/RgbFrameMetrics.java"));
         assertTrue(metrics.contains("rasterMaterialLighting={}"));
-        assertTrue(metrics.contains("DIRECT_RGB_POINT_SHADOWS"));
     }
 }
