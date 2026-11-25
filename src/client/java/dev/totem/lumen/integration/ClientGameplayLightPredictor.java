@@ -59,7 +59,7 @@ public final class ClientGameplayLightPredictor {
     private static final ArrayDeque<ImmediatePropagationTask> immediatePropagations = new ArrayDeque<>();
     private static final ArrayDeque<RebuildTask> pendingRebuilds = new ArrayDeque<>();
     private static final Set<SectionKey> queuedRebuilds = new HashSet<>();
-    private static final Set<SectionKey> knownSourceSections = new HashSet<>();
+    private static long nextChunkGeneration;
     private static final BlockPos.MutableBlockPos mutablePos = new BlockPos.MutableBlockPos();
     private static int centerChunkX;
     private static int centerChunkZ;
@@ -91,7 +91,6 @@ public final class ClientGameplayLightPredictor {
         clearImmediatePropagations();
         pendingRebuilds.clear();
         queuedRebuilds.clear();
-        knownSourceSections.clear();
         loggedInitialScans = 0;
         loggedRebuildInvalidations = 0;
         centerKnown = false;
@@ -112,6 +111,8 @@ public final class ClientGameplayLightPredictor {
                 chunk.getPos().x(), chunk.getPos().z(), player
         ))) {
             enqueueScan(level, chunk, false);
+        } else {
+            bumpChunkGeneration(new ChunkKey(chunk.getPos().x(), chunk.getPos().z()));
         }
     }
 
@@ -120,12 +121,12 @@ public final class ClientGameplayLightPredictor {
             return;
         }
         ChunkKey key = new ChunkKey(chunk.getPos().x(), chunk.getPos().z());
-        bumpChunkGeneration(key);
+        chunkGenerations.remove(key);
         chunkSourceStates.remove(key);
         reseedAfterRuleChange.remove(key);
         ScanTask scan = scans.remove(key);
         if (scan != null) {
-            scan.cancelled = true;
+            pendingScans.removeFirstOccurrence(scan);
         }
         Map<SectionKey, Region> corrections = new HashMap<>();
         for (BlockKey source : sourcesInChunk(level, key)) {
@@ -368,11 +369,7 @@ public final class ClientGameplayLightPredictor {
             int nextChunkX = Math.floorDiv(player.blockPosition().getX(), 16);
             int nextChunkZ = Math.floorDiv(player.blockPosition().getZ(), 16);
             if (!centerKnown || Math.abs(nextChunkX - centerChunkX) > 1 || Math.abs(nextChunkZ - centerChunkZ) > 1) {
-                if (serverAuthoritative && centerKnown) {
-                    // Prediction is a near-player hint once stable server sync exists. Do not
-                    // accumulate source scans and correction jobs from every visited chunk.
-                    clearPredictionWork();
-                }
+                // Loaded chunks retain their source index and light until an edit or unload.
                 centerChunkX = nextChunkX;
                 centerChunkZ = nextChunkZ;
                 centerKnown = true;
@@ -558,7 +555,6 @@ public final class ClientGameplayLightPredictor {
         clearImmediatePropagations();
         pendingRebuilds.clear();
         queuedRebuilds.clear();
-        knownSourceSections.clear();
         centerKnown = false;
         ClientGameplayLightField.clearLocal();
     }
@@ -597,9 +593,15 @@ public final class ClientGameplayLightPredictor {
                 && !reseedAfterRuleChange.contains(key)) {
             return;
         }
+        ScanTask old = scans.get(key);
+        if (priority && old != null && old.chunk == chunk
+                && chunkSourceStates.get(key) == ChunkSourceState.SCANNING) {
+            pendingScans.removeFirstOccurrence(old);
+            pendingScans.addFirst(old);
+            return;
+        }
         bumpChunkGeneration(key);
         chunkSourceStates.put(key, ChunkSourceState.SCANNING);
-        ScanTask old = scans.remove(key);
         if (old != null) {
             old.cancelled = true;
         }
@@ -696,7 +698,6 @@ public final class ClientGameplayLightPredictor {
                     publishDiscoveredSource(source, current, enclosed);
                     if (enclosed) interiorLava++;
                 }
-                knownSourceSections.add(SectionKey.fromBlock(source.x, source.y, source.z));
                 Region influence = Region.aroundBlock(activeLevel,
                         new BlockPos(source.x, source.y, source.z));
                 if (previous == null || previous != current || seededEarly) {
@@ -977,7 +978,8 @@ public final class ClientGameplayLightPredictor {
     }
 
     private static void bumpChunkGeneration(ChunkKey key) {
-        chunkGenerations.merge(key, 1L, Long::sum);
+        // Unique across unload/reload so an old rebuild cannot match a new chunk by accident.
+        chunkGenerations.put(key, ++nextChunkGeneration);
     }
 
     private static char sourceFor(BlockState state) {
