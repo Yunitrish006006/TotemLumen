@@ -38,6 +38,12 @@ public final class TotemLumenVideoSettingsIntegration {
                 ignored -> client.gui.setScreen(new ServerLightingPacksScreen(screen))
         ).bounds(0, 0, 150, 20).build();
         list.addSmall(preview, packs);
+        list.addBig(settingButton(
+                () -> Component.translatable("screen.totem-lumen.beta_rendering",
+                        Component.translatable(RendererSettings.betaRendering() ? "options.on" : "options.off")),
+                RendererSettings::toggleBetaRendering,
+                () -> reopenVideoSettings(client, screen)
+        ));
     }
 
     public static void addQualityControls(
@@ -48,11 +54,11 @@ public final class TotemLumenVideoSettingsIntegration {
 
         RendererSettingSlider profileSlider = new RendererSettingSlider(
                 0, 0, 150, 20,
-                RendererSettings.RenderProfile.values().length - 1,
-                () -> RendererSettings.renderProfile().ordinal(),
+                RendererSettings.availableProfiles().size() - 1,
+                () -> RendererSettings.availableProfiles().indexOf(RendererSettings.renderProfile()),
                 RendererSettings::setRenderProfile,
                 index -> TotemLumenVideoSettingsScreen.renderProfileLabel(
-                        RendererSettings.RenderProfile.values()[index]
+                        RendererSettings.availableProfiles().get(index)
                 ),
                 () -> reopenVideoSettings(client, screen)
         );

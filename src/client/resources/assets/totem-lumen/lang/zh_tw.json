@@ -1,4 +1,6 @@
 {
+  "key.category.totem-lumen.lighting": "Totem Lumen",
+  "key.totem-lumen.cycle_render_profile": "切換光影設定檔（按住並滾動滾輪）",
   "key.category.totem-lumen.debug": "Totem Lumen 除錯",
   "key.totem-lumen.cycle_debug_mode": "切換除錯視覺模式",
   "message.totem-lumen.compile.backend": "[Totem Lumen] 正在等待 Minecraft Vulkan 後端…",
@@ -100,8 +102,9 @@
   "screen.totem-lumen.render_profile": "渲染設定檔：%s",
   "screen.totem-lumen.render_profile.minecraft_pure": "Minecraft 純原版",
   "screen.totem-lumen.render_profile.minecraft_rgb": "Minecraft 原版 + RGB 光源",
-  "screen.totem-lumen.render_profile.totem": "Totem Lumen",
-  "screen.totem-lumen.render_profile.raster_ray": "原版＋次級射線（實驗／24 格）",
+  "screen.totem-lumen.beta_rendering": "使用 Beta 渲染方式：%s",
+  "screen.totem-lumen.render_profile.totem": "Totem Lumen (Beta)",
+  "screen.totem-lumen.render_profile.raster_ray": "原版＋次級射線（Beta／24 格）",
   "message.totem-lumen.config.reloaded": "Totem Lumen 伺服器光照設定已重新載入。",
   "message.totem-lumen.config.unchanged": "Totem Lumen 伺服器光照設定沒有變更。",
   "message.totem-lumen.config.invalid": "伺服器光照設定無效：%s",

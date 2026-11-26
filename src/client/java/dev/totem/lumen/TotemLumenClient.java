@@ -2,6 +2,7 @@ package dev.totem.lumen;
 
 import com.mojang.blaze3d.platform.InputConstants;
 import dev.totem.lumen.gui.TotemLumenVideoSettingsIntegration;
+import dev.totem.lumen.gui.TotemLumenVideoSettingsScreen;
 import dev.totem.lumen.gui.ClientServerLightingViewState;
 import dev.totem.lumen.integration.ClientLightingWorldRules;
 import dev.totem.lumen.integration.ClientGameplayLightField;
@@ -51,13 +52,26 @@ public final class TotemLumenClient implements ClientModInitializer {
     public static final String MOD_ID = "totem-lumen";
     public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
 
+    private static KeyMapping cycleRenderProfile;
     private static KeyMapping cycleDebugMode;
     private static KeyMapping cyclePerformanceProbe;
     private static boolean rendererRuntimeFailed;
     private static RendererSettings.RenderProfile lastRenderProfile;
 
+    public static boolean scrollRenderProfile(int steps) {
+        if (steps == 0 || cycleRenderProfile == null || !cycleRenderProfile.isDown()) {
+            return false;
+        }
+        var profile = RendererSettings.cycleRenderProfile(steps);
+        net.minecraft.client.Minecraft.getInstance().player.sendOverlayMessage(
+                TotemLumenVideoSettingsScreen.renderProfileLabel(profile)
+        );
+        return true;
+    }
+
     @Override
     public void onInitializeClient() {
+        dev.totem.lumen.integration.IntegratedNetherChunkWarmup.register();
         LOGGER.info("Initializing Totem Lumen");
         ClientLifecycleEvents.CLIENT_STARTED.register(client -> {
             // The development client otherwise pauses the integrated server as soon as the
@@ -125,6 +139,13 @@ public final class TotemLumenClient implements ClientModInitializer {
             VulkanComputeProgram.prewarmMainGiShader();
         }
 
+        KeyMapping.Category lightingCategory = KeyMapping.Category.register(
+                Identifier.fromNamespaceAndPath(MOD_ID, "lighting")
+        );
+        cycleRenderProfile = KeyMappingHelper.registerKeyMapping(new KeyMapping(
+                "key.totem-lumen.cycle_render_profile", InputConstants.Type.KEYBOARD,
+                InputConstants.UNKNOWN.getValue(), lightingCategory
+        ));
         KeyMapping.Category debugCategory = KeyMapping.Category.register(
                 Identifier.fromNamespaceAndPath(MOD_ID, "debug")
         );

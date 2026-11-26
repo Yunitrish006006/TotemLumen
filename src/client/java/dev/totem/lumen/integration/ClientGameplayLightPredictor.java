@@ -7,6 +7,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
+import net.minecraft.util.Util;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
@@ -16,6 +17,9 @@ import net.minecraft.world.level.chunk.status.ChunkStatus;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.BitSet;
+import java.util.LinkedHashMap;
+import java.util.concurrent.CompletableFuture;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -38,6 +42,12 @@ public final class ClientGameplayLightPredictor {
     private static final int WORK_BUDGET = 24_000;
     private static final long TIME_BUDGET_NANOS = 2_000_000L;
     private static final Predicate<BlockState> EMITS_LIGHT = state -> state.getLightEmission() > 0;
+
+    private static final Map<SectionKey, FirePreview> firePreviews = new LinkedHashMap<>();
+    private static final int MAX_FIRE_PREVIEWS = 128;
+    private static final long PREVIEW_BUDGET_NANOS = TIME_BUDGET_NANOS / 2;
+    private static long previewNanos;
+    private static int previewWork;
 
     private static final Predicate<BlockState> GROUND_EMITTER =
             state -> ClientRgbVisualLightSource.isFire(state) || state.is(Blocks.MAGMA_BLOCK);
@@ -65,6 +75,11 @@ public final class ClientGameplayLightPredictor {
     private static int centerChunkX;
     private static int centerChunkZ;
     private static boolean centerKnown;
+    private static double lastTravelX = Double.NaN, lastTravelZ;
+    private static double travelX, travelZ;
+    private static int headingTicks;
+    private static double lastTravelY, travelY;
+    private static int flankCursor, corridorTurn;
     private static boolean serverAuthoritative;
     private static boolean scanTurn = true;
     private static boolean immediateTurn = true;
@@ -80,8 +95,14 @@ public final class ClientGameplayLightPredictor {
     }
 
     public static void clear() {
+        NetherRgbMeshWarmup.clear();
+        lastTravelX = Double.NaN;
+        headingTicks = 0;
+        flankCursor = 0;
+        corridorTurn = 0;
         activeLevel = null;
         activeDimension = null;
+        clearFirePreviews();
         scans.clear();
         pendingScans.clear();
         chunkSourceStates.clear();
@@ -109,10 +130,12 @@ public final class ClientGameplayLightPredictor {
         activate(level);
         enterServerAuthorityIfAvailable();
         LocalPlayer player = Minecraft.getInstance().player;
-        if (!serverAuthoritative || (player != null && nearPlayerChunk(
+        boolean preview = player != null && nearbyFireChunk(level, chunk, player);
+        if (!serverAuthoritative || preview || (player != null && nearPlayerChunk(
                 chunk.getPos().x(), chunk.getPos().z(), player
         ))) {
             enqueueScan(level, chunk, false);
+            if (preview) requestNearbyFire(scans.get(new ChunkKey(chunk.getPos().x(), chunk.getPos().z())), player);
         } else {
             bumpChunkGeneration(new ChunkKey(chunk.getPos().x(), chunk.getPos().z()));
         }
@@ -260,6 +283,7 @@ public final class ClientGameplayLightPredictor {
         for (ChunkKey chunk : List.copyOf(chunkSourceStates.keySet())) {
             bumpChunkGeneration(chunk);
         }
+        clearFirePreviews();
         chunkSourceStates.clear();
         // A previous rule may have suppressed an emitter entirely, so it will not be in
         // `sources`. Revisit loaded nearby chunks on the next tick as well.
@@ -379,11 +403,18 @@ public final class ClientGameplayLightPredictor {
             }
         }
 
-        long start = System.nanoTime();
-        int remaining = WORK_BUDGET;
+        long start = System.nanoTime() - previewNanos;
+        int remaining = WORK_BUDGET - previewWork;
+        previewNanos = 0;
+        previewWork = 0;
         changedThisTick = false;
-        if (player != null && level.dimension().equals(Level.NETHER) && !scans.isEmpty()) {
-            remaining -= primeNearbyGroundLights(player.blockPosition(), start);
+        if (player != null && level.dimension().equals(Level.NETHER)) {
+            updateTravelHeading(player);
+            remaining -= publishFirePreviews(start + PREVIEW_BUDGET_NANOS);
+            if (!scans.isEmpty()) {
+                remaining -= primeNearbyGroundLights(player.blockPosition(), start + TIME_BUDGET_NANOS / 4);
+                remaining -= primeTravelCorridor(player, start + TIME_BUDGET_NANOS / 2);
+            }
         }
         while (remaining > 0 && System.nanoTime() - start < TIME_BUDGET_NANOS) {
             int used;
@@ -551,6 +582,7 @@ public final class ClientGameplayLightPredictor {
     }
 
     private static void clearPredictionWork() {
+        clearFirePreviews();
         scans.clear();
         pendingScans.clear();
         chunkSourceStates.clear();
@@ -573,10 +605,31 @@ public final class ClientGameplayLightPredictor {
                 && Math.abs(chunkZ - playerChunkZ) <= CHUNK_RADIUS;
     }
 
+    private static boolean nearbyFireChunk(ClientLevel level, LevelChunk chunk, LocalPlayer player) {
+        if (level.dimension() != Level.NETHER || Math.abs(chunk.getPos().x() - player.chunkPosition().x()) > 5
+                || Math.abs(chunk.getPos().z() - player.chunkPosition().z()) > 5) return false;
+        int center = chunk.getSectionIndex(player.blockPosition().getY());
+        var sections = chunk.getSections();
+        for (int i = Math.max(0, center - 1); i <= Math.min(sections.length - 1, center + 1); i++) {
+            if (sections[i].maybeHas(ClientRgbVisualLightSource::isFire)) return true;
+        }
+        return false;
+    }
+
+    private static void requestNearbyFire(ScanTask scan, LocalPlayer player) {
+        if (scan == null) return;
+        int center = scan.chunk.getSectionIndex(player.blockPosition().getY());
+        requestFirePreview(scan, center);
+        requestFirePreview(scan, center - 1);
+        requestFirePreview(scan, center + 1);
+    }
+
     private static void enqueueVisibleChunks(ClientLevel level) {
         // addFirst in outer-to-inner order puts the player's own chunk ahead of the
         // potentially large FIFO accumulated while an existing world was loading.
-        for (int radius = CHUNK_RADIUS; radius >= 0; radius--) {
+        var player = Minecraft.getInstance().player;
+        int radiusLimit = level.dimension() == Level.NETHER && player != null ? 5 : CHUNK_RADIUS;
+        for (int radius = radiusLimit; radius >= 0; radius--) {
             for (int offsetZ = -radius; offsetZ <= radius; offsetZ++) {
                 for (int offsetX = -radius; offsetX <= radius; offsetX++) {
                     if (Math.max(Math.abs(offsetX), Math.abs(offsetZ)) != radius) {
@@ -585,8 +638,11 @@ public final class ClientGameplayLightPredictor {
                     int chunkX = centerChunkX + offsetX;
                     int chunkZ = centerChunkZ + offsetZ;
                     LevelChunk chunk = level.getChunkSource().getChunk(chunkX, chunkZ, ChunkStatus.FULL, false);
-                    if (chunk != null) {
+                    if (chunk == null) continue;
+                    boolean preview = player != null && nearbyFireChunk(level, chunk, player);
+                    if (radius <= CHUNK_RADIUS || preview) {
                         enqueueScan(level, chunk, true);
+                        if (preview) requestNearbyFire(scans.get(new ChunkKey(chunkX, chunkZ)), player);
                     }
                 }
             }
@@ -626,14 +682,154 @@ public final class ClientGameplayLightPredictor {
 
     // A nearby flame may lie across a chunk border while the main scanner is busy with lava.
     // Give the player's immediate surroundings a bounded slice of the existing tick budget.
-    private static int primeNearbyGroundLights(BlockPos player, long start) {
+    private static int primeNearbyGroundLights(BlockPos player, long deadline) {
         int used = 0;
         for (int cz = (player.getZ() - 8) >> 4; cz <= (player.getZ() + 8) >> 4; cz++) {
             for (int cx = (player.getX() - 8) >> 4; cx <= (player.getX() + 8) >> 4; cx++) {
                 ScanTask scan = scans.get(new ChunkKey(cx, cz));
                 if (scan == null) continue;
-                if (System.nanoTime() - start >= TIME_BUDGET_NANOS / 2) return used;
-                used += scan.primeNearby(player, 128, start);
+                if (System.nanoTime() >= deadline) return used;
+                used += scan.primeNearby(player, 128, deadline);
+            }
+        }
+        return used;
+    }
+
+    private static void updateTravelHeading(LocalPlayer player) {
+        double dx = player.getX() - lastTravelX, dz = player.getZ() - lastTravelZ;
+        travelY = Double.isNaN(lastTravelX) ? 0 : Math.clamp(player.getY() - lastTravelY, -1.5, 1.5);
+        lastTravelY = player.getY();
+        lastTravelX = player.getX();
+        lastTravelZ = player.getZ();
+        double speed = Math.hypot(dx, dz);
+        if (speed >= 0.02 && speed <= 12) {
+            travelX = dx / speed;
+            travelZ = dz / speed;
+            headingTicks = 5;
+        } else if (speed == 0 && headingTicks > 0) {
+            headingTicks--;
+        } else {
+            double yaw = Math.toRadians(player.getYRot());
+            travelX = -Math.sin(yaw);
+            travelZ = Math.cos(yaw);
+            headingTicks = 0;
+        }
+    }
+
+    // Only probe chunks already received. Keep a separate cursor so turning or crossing
+    // a chunk border doesn't restart the immediate scan or disturb the full scan queue.
+    private static int primeTravelCorridor(LocalPlayer player, long deadline) {
+        int used = 0;
+        var origin = player.blockPosition();
+        int y = origin.getY() + (int) Math.round(travelY * 12);
+        // Include the current column on descents. Probe ahead, then sweep both sides
+        // over successive ticks so a sharp turn can reuse earlier discovery.
+        int first = corridorTurn++ & 3;
+        long corridorDeadline = deadline - TIME_BUDGET_NANOS / 12;
+        for (int i = 0; i < 4 && System.nanoTime() < corridorDeadline; i++) {
+            int distance = ((first + i) & 3) * 16;
+            int x = (int) Math.floor(player.getX() + travelX * distance);
+            int z = (int) Math.floor(player.getZ() + travelZ * distance);
+            ScanTask scan = scans.get(new ChunkKey(x >> 4, z >> 4));
+            if (scan != null) used += scan.primeAhead(y, corridorDeadline, 1024);
+        }
+        for (int i = 0; i < 8 && System.nanoTime() < deadline; i++) {
+            int slot = flankCursor++;
+            if (flankCursor == 49) flankCursor = 0;
+            int cx = (origin.getX() >> 4) + slot % 7 - 3;
+            int cz = (origin.getZ() >> 4) + slot / 7 - 3;
+            var scan = scans.get(new ChunkKey(cx, cz));
+            if (scan != null) used += scan.primeAhead(y, deadline, 512);
+        }
+        return used;
+    }
+
+    // Extract immutable section data on the client thread. Workers only locate possible
+    // flames; block rules, propagation and publishing always run against live client state.
+    private record FirePreview(ScanTask scan, int index, CompletableFuture<BitSet> positions) {}
+
+    private static void clearFirePreviews() {
+        firePreviews.values().forEach(task -> task.positions.cancel(false));
+        firePreviews.clear();
+        previewNanos = 0;
+        previewWork = 0;
+    }
+
+    private static void requestFirePreview(ScanTask scan, int index) {
+        if (index < 0 || index >= scan.sections.length || scan.previewRequested.get(index)
+                || firePreviews.size() >= MAX_FIRE_PREVIEWS) return;
+        scan.previewRequested.set(index);
+        var section = scan.sections[index];
+        if (!section.maybeHas(ClientRgbVisualLightSource::isFire)) return;
+        var snapshot = section.getStates().copy();
+        var positions = CompletableFuture.supplyAsync(() -> {
+            var result = new BitSet();
+            for (int i = 0; i < 4096; i++) {
+                if (ClientRgbVisualLightSource.isFire(snapshot.get(i & 15, i >> 8, (i >> 4) & 15))) result.set(i);
+            }
+            return result;
+        }, Util.backgroundExecutor());
+        var key = new SectionKey(scan.chunkKey.x, scan.chunk.getSectionYFromSectionIndex(index), scan.chunkKey.z);
+        var previous = firePreviews.put(key, new FirePreview(scan, index, positions));
+        if (previous != null) previous.positions.cancel(false);
+    }
+
+    // Region extraction runs before worker-side vertex tinting. Never wait for a future.
+    public static void previewFireSection(ClientLevel level, int cx, int sy, int cz) {
+        if (!Minecraft.getInstance().isSameThread() || level != activeLevel || level.dimension() != Level.NETHER
+                || RendererSettings.renderProfile() != RendererSettings.RenderProfile.MINECRAFT_RGB
+                || previewNanos >= PREVIEW_BUDGET_NANOS || previewWork >= 4096) return;
+        var player = Minecraft.getInstance().player;
+        if (player == null || Math.abs(cx - player.chunkPosition().x()) > 5
+                || Math.abs(cz - player.chunkPosition().z()) > 5) return;
+        var scan = scans.get(new ChunkKey(cx, cz));
+        if (scan == null) return;
+        long start = System.nanoTime();
+        int index = scan.chunk.getSectionIndexFromSectionY(sy);
+        requestFirePreview(scan, index);
+        var key = new SectionKey(cx, sy, cz);
+        var task = firePreviews.get(key);
+        if (task != null && task.scan == scan && task.positions.isDone()) {
+            int seeds = scan.earlySources.size();
+            previewWork += publishFlames(task, start + PREVIEW_BUDGET_NANOS - previewNanos, 4096 - previewWork);
+            if (scan.earlySources.size() != seeds) ClientGameplayLightField.finishLocalBatch(true);
+        }
+        previewNanos += System.nanoTime() - start;
+    }
+
+    private static int publishFirePreviews(long deadline) {
+        int work = 0;
+        var it = firePreviews.values().iterator();
+        while (it.hasNext() && work < 4096 && System.nanoTime() < deadline) {
+            var task = it.next();
+            if (scans.get(task.scan.chunkKey) != task.scan) {
+                task.positions.cancel(false);
+                it.remove();
+                continue;
+            }
+            if (!task.positions.isDone()) continue;
+            work += publishFlames(task, deadline, 4096 - work);
+            if (task.positions.isCompletedExceptionally() || task.positions.getNow(null).isEmpty()) it.remove();
+        }
+        return work;
+    }
+
+    private static int publishFlames(FirePreview task, long deadline, int budget) {
+        if (task.positions.isCompletedExceptionally()) return 0;
+        var positions = task.positions.getNow(null);
+        int used = 0;
+        var scan = task.scan;
+        var section = scan.sections[task.index];
+        int y = scan.chunk.getSectionYFromSectionIndex(task.index) << 4;
+        for (int i = positions.nextSetBit(0); i >= 0 && used < budget && System.nanoTime() < deadline;
+             i = positions.nextSetBit(i + 1)) {
+            positions.clear(i);
+            used++;
+            int lx = i & 15, ly = i >> 8, lz = (i >> 4) & 15;
+            var state = section.getBlockState(lx, ly, lz);
+            if (ClientRgbVisualLightSource.isFire(state)) {
+                var pos = new BlockKey(scan.chunkKey.x * 16 + lx, y + ly, scan.chunkKey.z * 16 + lz);
+                used += scan.seedEarly(pos, sourceFor(state), Math.min(128, budget - used));
             }
         }
         return used;
@@ -652,7 +848,9 @@ public final class ClientGameplayLightPredictor {
     }
 
     private static RebuildTask nextReadyRebuild() {
-        int attempts = pendingRebuilds.size();
+        // Unready jobs rotate to the tail. A large lava backlog must not use up the
+        // tick budget solely checking the same neighboring chunks for readiness.
+        int attempts = Math.min(8, pendingRebuilds.size());
         while (attempts-- > 0 && !pendingRebuilds.isEmpty()) {
             RebuildTask task = pendingRebuilds.removeFirst();
             if (task.started || regionSourcesReady(task.region)) {
@@ -1163,7 +1361,7 @@ public final class ClientGameplayLightPredictor {
         private int nearbyCursor;
         private boolean nearbyComplete;
 
-        private int primeNearby(BlockPos player, int budget, long start) {
+        private int primeNearby(BlockPos player, int budget, long deadline) {
             if (nearbyOrigin == null || Math.abs(player.getX() - nearbyOrigin.getX()) > 4
                     || Math.abs(player.getZ() - nearbyOrigin.getZ()) > 4
                     || Math.abs(player.getY() - nearbyOrigin.getY()) > 2) {
@@ -1182,7 +1380,7 @@ public final class ClientGameplayLightPredictor {
             int width = nearby.sizeX(), plane = width * nearby.sizeZ(), size = plane * nearby.sizeY();
             int used = 0;
             while (nearbyCursor < size && used < budget) {
-                if ((nearbyCursor & 31) == 0 && System.nanoTime() - start >= TIME_BUDGET_NANOS / 2) break;
+                if ((nearbyCursor & 31) == 0 && System.nanoTime() >= deadline) break;
                 int i = nearbyCursor++;
                 int x = nearby.minX + i % width, z = nearby.minZ + i % plane / width;
                 int y = nearby.minY + nearbyHeights[i / plane];
@@ -1196,10 +1394,57 @@ public final class ClientGameplayLightPredictor {
             return used;
         }
 
+        // Keep an independent cursor per section. Changing height or direction never
+        // discards a partially scanned layer. Palette misses cost one operation.
+        private final BitSet previewRequested = new BitSet();
+        private int[] aheadCursors;
+        private int[] firstLayer;
+        private int primeAhead(int y, long deadline, int budget) {
+            if (aheadCursors == null) {
+                aheadCursors = new int[sections.length];
+                firstLayer = new int[sections.length];
+            }
+            int center = Math.clamp(chunk.getSectionIndex(y), 0, sections.length - 1);
+            // Retry chunks received before the player existed or while the preview queue was full.
+            requestFirePreview(this, center);
+            int used = 0;
+            for (int offset = 0; offset <= 4 && used < budget; offset++) {
+                int section = center + ((offset & 1) == 0 ? offset / 2 : -(offset + 1) / 2);
+                if (section < 0 || section >= sections.length || aheadCursors[section] == 4096) continue;
+                var layer = sections[section];
+                int baseY = chunk.getSectionYFromSectionIndex(section) << 4;
+                if (aheadCursors[section] == 0) {
+                    if (!layer.maybeHas(GROUND_EMITTER)) {
+                        aheadCursors[section] = 4096;
+                        used++;
+                        continue;
+                    }
+                    firstLayer[section] = Math.clamp(y - baseY, 0, 15);
+                }
+                while (aheadCursors[section] < 4096 && used < budget) {
+                    if (System.nanoTime() >= deadline) return used;
+                    int end = Math.min(4096, aheadCursors[section] + 64);
+                    while (aheadCursors[section] < end && used < budget) {
+                        int i = aheadCursors[section]++;
+                        int x = i & 15, z = (i >> 4) & 15;
+                        int ly = ((i >> 8) + firstLayer[section]) & 15;
+                        var state = layer.getBlockState(x, ly, z);
+                        used++;
+                        if (GROUND_EMITTER.test(state)) {
+                            var key = new BlockKey(chunkKey.x * 16 + x, baseY + ly, chunkKey.z * 16 + z);
+                            used += seedEarly(key, sourceFor(state), Math.min(128, budget - used));
+                        }
+                    }
+                }
+            }
+            return used;
+        }
+
         private int seedEarly(BlockKey source, char packed, int budget) {
             if (packed == 0 || sources.containsKey(source)) return 0;
             putSource(source, packed);
             earlySources.add(source);
+            if (nether) NetherRgbMeshWarmup.request(source.x, source.y, source.z);
             setPacked(source.x, source.y, source.z, PackedRgbLight.componentMax(getLocalPacked(source.x, source.y, source.z), packed));
             return queueScannedEmitter(source, packed, budget);
         }

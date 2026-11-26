@@ -8,6 +8,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Properties;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -20,8 +21,8 @@ public final class RendererSettings {
         RASTER_RAY;
 
         public RenderProfile next() {
-            RenderProfile[] values = values();
-            return values[(ordinal() + 1) % values.length];
+            var profiles = availableProfiles();
+            return profiles.get((profiles.indexOf(this) + 1) % profiles.size());
         }
     }
 
@@ -177,7 +178,10 @@ public final class RendererSettings {
             .resolve("totem-lumen.properties");
     private static final AtomicLong REVISION = new AtomicLong();
 
-    private static RenderProfile renderProfile = RenderProfile.TOTEM_LUMEN;
+    private static final List<RenderProfile> STABLE_PROFILES = List.of(RenderProfile.MINECRAFT_PURE, RenderProfile.MINECRAFT_RGB);
+    private static final List<RenderProfile> ALL_PROFILES = List.of(RenderProfile.values());
+    private static volatile boolean betaRendering;
+    private static RenderProfile renderProfile = RenderProfile.MINECRAFT_RGB;
     private static GiQuality giQuality = GiQuality.BALANCED;
     private static Quality shadowQuality = Quality.BALANCED;
     private static int rayDistance = 64;
@@ -200,6 +204,7 @@ public final class RendererSettings {
         Properties properties = new Properties();
         try (InputStream input = Files.newInputStream(CONFIG_PATH)) {
             properties.load(input);
+            betaRendering = parseBoolean(properties, "betaRendering", false);
             String savedProfile = properties.getProperty("renderProfile");
             if (savedProfile != null) {
                 renderProfile = parseRenderProfile(savedProfile, renderProfile);
@@ -209,6 +214,7 @@ public final class RendererSettings {
                         ? RenderProfile.TOTEM_LUMEN
                         : RenderProfile.MINECRAFT_PURE;
             }
+            ensureAvailableProfile();
             giQuality = parseEnum(properties, "giQuality", GiQuality.class, giQuality);
             shadowQuality = parseEnum(properties, "shadowQuality", Quality.class, shadowQuality);
             rayDistance = sanitizeRayDistance(parseInt(properties, "rayDistance", rayDistance));
@@ -293,22 +299,43 @@ public final class RendererSettings {
 
     /** Legacy compatibility for callers that still think in terms of an enable toggle. */
     public static synchronized boolean toggleRendererEnabled() {
-        renderProfile = rendererEnabled()
-                ? RenderProfile.MINECRAFT_PURE
-                : RenderProfile.TOTEM_LUMEN;
-        changed();
+        if (betaRendering) {
+            setRenderProfile(rendererEnabled() ? RenderProfile.MINECRAFT_PURE.ordinal() : RenderProfile.TOTEM_LUMEN.ordinal());
+        }
         return rendererEnabled();
     }
 
-    public static synchronized RenderProfile cycleRenderProfile() {
-        renderProfile = renderProfile.next();
+    public static boolean betaRendering() {
+        return betaRendering;
+    }
+
+    public static synchronized void toggleBetaRendering() {
+        betaRendering = !betaRendering;
+        ensureAvailableProfile();
         changed();
-        return renderProfile;
+    }
+
+    public static List<RenderProfile> availableProfiles() {
+        return betaRendering ? ALL_PROFILES : STABLE_PROFILES;
+    }
+
+    private static void ensureAvailableProfile() {
+        if (!availableProfiles().contains(renderProfile)) renderProfile = RenderProfile.MINECRAFT_RGB;
+    }
+
+    public static synchronized RenderProfile cycleRenderProfile() {
+        return cycleRenderProfile(1);
+    }
+
+    public static synchronized RenderProfile cycleRenderProfile(int steps) {
+        var profiles = availableProfiles();
+        int current = profiles.indexOf(renderProfile);
+        return setRenderProfile(Math.floorMod(current + steps % profiles.size(), profiles.size()));
     }
 
     public static synchronized RenderProfile setRenderProfile(int index) {
-        RenderProfile[] values = RenderProfile.values();
-        renderProfile = values[Math.max(0, Math.min(values.length - 1, index))];
+        var profiles = availableProfiles();
+        renderProfile = profiles.get(Math.clamp(index, 0, profiles.size() - 1));
         changed();
         return renderProfile;
     }
@@ -561,6 +588,7 @@ public final class RendererSettings {
 
     private static void save() {
         Properties properties = new Properties();
+        properties.setProperty("betaRendering", Boolean.toString(betaRendering));
         properties.setProperty("renderProfile", renderProfile.name());
         properties.setProperty("rendererEnabled", Boolean.toString(rendererEnabled()));
         properties.setProperty("giQuality", giQuality.name());

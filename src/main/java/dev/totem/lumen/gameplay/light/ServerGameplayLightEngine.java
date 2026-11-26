@@ -257,12 +257,10 @@ public final class ServerGameplayLightEngine {
         int chunkX = chunk.getPos().x();
         int chunkZ = chunk.getPos().z();
         ChunkKey chunkKey = new ChunkKey(chunkX, chunkZ);
-        rememberUnloadedChunk(chunkKey);
         bumpChunkGeneration(chunkKey);
         chunkSourceStates.remove(chunkKey);
         warmSourcesByChunk.remove(chunkKey);
         warmSectionsByChunk.remove(chunkKey);
-        provisionalWarmSections.removeIf(key -> key.x() == chunkX && key.z() == chunkZ);
 
         ChunkScanTask scan = scansByChunk.remove(chunkKey);
         if (scan != null) {
@@ -270,60 +268,40 @@ public final class ServerGameplayLightEngine {
             scan.releaseDirtyMarks();
         }
 
+        // Unloading after a teleport can retire hundreds of chunks at once. Only
+        // visit this column's sections and retain each warm snapshot before removal.
+        List<SourceSnapshot> sourceSnapshots = new ArrayList<>();
+        List<SectionSnapshot> sectionSnapshots = new ArrayList<>();
         Set<ServerSectionKey> removedSourceSections = new LinkedHashSet<>();
-        Iterator<Map.Entry<ServerSectionKey, Map<ServerBlockKey, Character>>> sourceIterator =
-                sources.entrySet().iterator();
-        while (sourceIterator.hasNext()) {
-            Map.Entry<ServerSectionKey, Map<ServerBlockKey, Character>> entry = sourceIterator.next();
-            ServerSectionKey key = entry.getKey();
-            if (key.x() == chunkX && key.z() == chunkZ) {
-                if (!entry.getValue().isEmpty()) {
-                    removedSourceSections.add(key);
-                }
-                sourceIterator.remove();
+        for (int i = 0; i < chunk.getSectionsCount(); i++) {
+            var key = new ServerSectionKey(chunkX, chunk.getSectionYFromSectionIndex(i), chunkZ);
+            provisionalWarmSections.remove(key);
+            dirtySections.remove(key);
+            var bucket = sources.remove(key);
+            if (bucket != null && !bucket.isEmpty()) {
+                removedSourceSections.add(key);
+                bucket.forEach((pos, packed) ->
+                        sourceSnapshots.add(new SourceSnapshot(pos.x(), pos.y(), pos.z(), packed)));
+            }
+            var old = sections.remove(key);
+            if (old != null) {
+                sectionSnapshots.add(snapshot(key, old));
+                changedSections.add(key);
             }
         }
-
-        Set<ServerSectionKey> removedSections = sections.keySet().stream()
-                .filter(key -> key.x() == chunkX && key.z() == chunkZ)
-                .collect(java.util.stream.Collectors.toSet());
-        changedSections.addAll(removedSections);
-        sections.keySet().removeAll(removedSections);
-        if (!removedSections.isEmpty()) {
-            fieldRevision++;
-        }
-        dirtySections.keySet().removeIf(key -> key.x() == chunkX && key.z() == chunkZ);
-
-        for (ServerSectionKey key : removedSourceSections) {
-            scheduleRebuild(key);
-        }
+        if (!sectionSnapshots.isEmpty()) fieldRevision++;
+        rememberUnloadedChunk(chunkKey, sourceSnapshots, sectionSnapshots);
+        for (ServerSectionKey key : removedSourceSections) scheduleRebuild(key);
     }
 
-    private void rememberUnloadedChunk(ChunkKey chunk) {
+    private void rememberUnloadedChunk(ChunkKey chunk, List<SourceSnapshot> sourceSnapshots,
+                                       List<SectionSnapshot> sectionSnapshots) {
         forgetUnloadedChunk(chunk);
-        List<SourceSnapshot> sourceSnapshots = new ArrayList<>();
-        for (Map.Entry<ServerSectionKey, Map<ServerBlockKey, Character>> entry : sources.entrySet()) {
-            ServerSectionKey section = entry.getKey();
-            if (section.x() != chunk.x() || section.z() != chunk.z()) {
-                continue;
-            }
-            for (Map.Entry<ServerBlockKey, Character> source : entry.getValue().entrySet()) {
-                ServerBlockKey pos = source.getKey();
-                sourceSnapshots.add(new SourceSnapshot(pos.x(), pos.y(), pos.z(), source.getValue()));
-            }
-        }
         if (!sourceSnapshots.isEmpty()) {
             unloadedSourcesByChunk.put(chunk, sourceSnapshots);
             unloadedWarmSourceCount += sourceSnapshots.size();
         }
 
-        List<SectionSnapshot> sectionSnapshots = new ArrayList<>();
-        for (Map.Entry<ServerSectionKey, ServerLightSection> entry : sections.entrySet()) {
-            ServerSectionKey section = entry.getKey();
-            if (section.x() == chunk.x() && section.z() == chunk.z()) {
-                sectionSnapshots.add(snapshot(section, entry.getValue()));
-            }
-        }
         if (!sectionSnapshots.isEmpty()) {
             unloadedSectionsByChunk.put(chunk, sectionSnapshots);
             unloadedWarmSectionCount += sectionSnapshots.size();
@@ -663,6 +641,7 @@ public final class ServerGameplayLightEngine {
         List<SourceSnapshot> warmSources = warmSourcesByChunk.remove(chunk);
         if (warmSources != null) {
             for (SourceSnapshot source : warmSources) {
+                if (!level.isInsideBuildHeight(source.y())) continue;
                 updateIndexedSource(
                         new ServerBlockKey(source.x(), source.y(), source.z()),
                         source.packedRgb(),
@@ -676,19 +655,9 @@ public final class ServerGameplayLightEngine {
             return;
         }
         for (SectionSnapshot snapshot : warmSections) {
+            if (snapshot.y() < level.getMinSectionY() || snapshot.y() > level.getMaxSectionY()) continue;
             ServerSectionKey key = new ServerSectionKey(snapshot.x(), snapshot.y(), snapshot.z());
-            ServerLightSection section = new ServerLightSection();
-            char[] values = snapshot.values();
-            for (int index = 0; index < values.length; index++) {
-                char value = values[index];
-                if (value == 0) {
-                    continue;
-                }
-                int localX = index & 15;
-                int localZ = (index >>> 4) & 15;
-                int localY = (index >>> 8) & 15;
-                section.set(localX, localY, localZ, value);
-            }
+            ServerLightSection section = new ServerLightSection(snapshot.values());
             if (!section.isEmpty()) {
                 sections.put(key, section);
                 provisionalWarmSections.add(key);
@@ -936,16 +905,10 @@ public final class ServerGameplayLightEngine {
             // live chunk snapshot so offline world edits or a cache written before a crash cannot
             // leave phantom emitters in the authoritative source index.
             Set<ServerSectionKey> removedSourceAnchors = new LinkedHashSet<>();
-            Iterator<Map.Entry<ServerSectionKey, Map<ServerBlockKey, Character>>> sourceIterator =
-                    sources.entrySet().iterator();
-            while (sourceIterator.hasNext()) {
-                Map.Entry<ServerSectionKey, Map<ServerBlockKey, Character>> entry = sourceIterator.next();
-                ServerSectionKey sectionKey = entry.getKey();
-                if (sectionKey.x() != chunkKey.x || sectionKey.z() != chunkKey.z) {
-                    continue;
-                }
-                Iterator<Map.Entry<ServerBlockKey, Character>> bucketIterator =
-                        entry.getValue().entrySet().iterator();
+            for (ServerSectionKey sectionKey : dirtyMarks) {
+                Map<ServerBlockKey, Character> bucket = sources.get(sectionKey);
+                if (bucket == null) continue;
+                var bucketIterator = bucket.entrySet().iterator();
                 while (bucketIterator.hasNext()) {
                     Map.Entry<ServerBlockKey, Character> sourceEntry = bucketIterator.next();
                     if (observedEmitters.contains(sourceEntry.getKey())) {
@@ -960,8 +923,8 @@ public final class ServerGameplayLightEngine {
                     }
                     bucketIterator.remove();
                 }
-                if (entry.getValue().isEmpty()) {
-                    sourceIterator.remove();
+                if (bucket.isEmpty()) {
+                    sources.remove(sectionKey);
                 }
             }
 

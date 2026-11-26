@@ -3,6 +3,7 @@
   "package": "dev.totem.lumen.mixin",
   "client": [
     "GpuDeviceAccessor",
+    "RenderProfileScrollMixin",
     "VulkanDeviceLifetimeMixin",
     "ClientLevelBlockUpdateMixin",
     "FluidRendererCaptureMixin",
@@ -24,6 +25,9 @@
     "OptionsSubScreenAccessor",
     "LevelRendererTakeoverMixin",
     "NetherRgbSectionRefreshMixin",
+    "NetherRgbMeshWarmupMixin",
+    "NetherFireMeshInputMixin",
+    "NetherChunkLightQueueMixin",
     "RasterMaterialCaptureMixin",
     "RasterMaterialLayersInvoker",
     "SceneExtractionBridgeBlockEntityMixin",

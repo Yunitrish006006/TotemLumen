@@ -41,10 +41,10 @@ public final class TotemLumenVideoSettingsScreen extends Screen {
         int halfWidth = (contentWidth - 6) / 2;
 
         this.renderProfileSlider = addSettingSlider(
-                left, 44, contentWidth, RendererSettings.RenderProfile.values().length - 1,
-                () -> RendererSettings.renderProfile().ordinal(),
+                left, 44, contentWidth, RendererSettings.availableProfiles().size() - 1,
+                () -> RendererSettings.availableProfiles().indexOf(RendererSettings.renderProfile()),
                 RendererSettings::setRenderProfile,
-                index -> renderProfileLabel(RendererSettings.RenderProfile.values()[index])
+                index -> renderProfileLabel(RendererSettings.availableProfiles().get(index))
         );
 
         int rowY = 70;
@@ -200,7 +200,7 @@ public final class TotemLumenVideoSettingsScreen extends Screen {
         return renderProfileLabel(RendererSettings.renderProfile());
     }
 
-    static Component renderProfileLabel(RendererSettings.RenderProfile profile) {
+    public static Component renderProfileLabel(RendererSettings.RenderProfile profile) {
         String key = switch (profile) {
             case MINECRAFT_PURE -> "screen.totem-lumen.render_profile.minecraft_pure";
             case MINECRAFT_RGB -> "screen.totem-lumen.render_profile.minecraft_rgb";

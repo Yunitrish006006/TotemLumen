@@ -82,4 +82,18 @@ final class PackedRgbLightTest {
         assertTrue(section.set(1, 2, 3, 0));
         assertTrue(section.isEmpty());
     }
+
+    @Test
+    void restoredSectionOwnsItsCellsAndCountsRemainingLight() {
+        char[] snapshot = new char[ServerLightSection.VOXEL_COUNT];
+        snapshot[ServerLightSection.index(1, 2, 3)] = 4;
+        snapshot[ServerLightSection.index(4, 5, 6)] = 8;
+        var section = new ServerLightSection(snapshot);
+        snapshot[ServerLightSection.index(1, 2, 3)] = 0;
+        assertEquals(4, section.get(1, 2, 3));
+        section.set(1, 2, 3, 0);
+        assertFalse(section.isEmpty());
+        section.set(4, 5, 6, 0);
+        assertTrue(section.isEmpty());
+    }
 }

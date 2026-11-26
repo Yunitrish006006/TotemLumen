@@ -7,8 +7,19 @@ final class ServerLightSection {
     static final int SIZE = 16;
     static final int VOXEL_COUNT = SIZE * SIZE * SIZE;
 
-    private final char[] values = new char[VOXEL_COUNT];
+    private final char[] values;
     private int nonZeroCount;
+
+    ServerLightSection() {
+        values = new char[VOXEL_COUNT];
+    }
+
+    ServerLightSection(char[] snapshot) {
+        values = snapshot.clone();
+        for (char value : values) {
+            if (value != 0) nonZeroCount++;
+        }
+    }
 
     int get(int localX, int localY, int localZ) {
         return values[index(localX, localY, localZ)];

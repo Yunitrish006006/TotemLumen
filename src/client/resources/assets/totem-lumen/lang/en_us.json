@@ -1,4 +1,6 @@
 {
+  "key.category.totem-lumen.lighting": "Totem Lumen",
+  "key.totem-lumen.cycle_render_profile": "Switch Lighting Profile (Hold + Scroll)",
   "key.category.totem-lumen.debug": "Totem Lumen Debug",
   "key.totem-lumen.cycle_debug_mode": "Cycle Debug Visualization",
   "message.totem-lumen.compile.backend": "[Totem Lumen] Waiting for Minecraft's Vulkan backend...",
@@ -100,8 +102,9 @@
   "screen.totem-lumen.render_profile": "Render profile: %s",
   "screen.totem-lumen.render_profile.minecraft_pure": "Minecraft Vanilla",
   "screen.totem-lumen.render_profile.minecraft_rgb": "Minecraft + RGB Lighting",
-  "screen.totem-lumen.render_profile.totem": "Totem Lumen",
-  "screen.totem-lumen.render_profile.raster_ray": "Raster Ray (experimental, 24 blocks)",
+  "screen.totem-lumen.beta_rendering": "Use Beta Rendering Methods: %s",
+  "screen.totem-lumen.render_profile.totem": "Totem Lumen (Beta)",
+  "screen.totem-lumen.render_profile.raster_ray": "Raster Ray (Beta, 24 blocks)",
   "message.totem-lumen.config.reloaded": "Totem Lumen server lighting settings reloaded.",
   "message.totem-lumen.config.unchanged": "Totem Lumen server lighting settings are unchanged.",
   "message.totem-lumen.config.invalid": "Invalid server lighting settings: %s",
