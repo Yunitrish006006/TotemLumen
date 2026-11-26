@@ -18,7 +18,6 @@ public final class DefaultEmissionColors {
     private static final EmissionColor TORCH = new EmissionColor(1.0f, 0.64f, 0.34f);
     private static final EmissionColor GLOW_LICHEN = new EmissionColor(0.32f, 1.0f, 0.73f);
     private static final EmissionColor WARM = new EmissionColor(1.0f, 0.55f, 0.22f);
-    private static final EmissionColor FALLBACK = new EmissionColor(1.0f, 0.86f, 0.66f);
 
     private DefaultEmissionColors() {
     }
@@ -50,6 +49,6 @@ public final class DefaultEmissionColors {
                 || sourceId.contains("jack_o_lantern")) {
             return WARM;
         }
-        return FALLBACK;
+        return BlockTextureColor.forBlock(sourceId);
     }
 }

@@ -1,5 +1,5 @@
 {
-  "fallback": [1.0, 0.86, 0.66],
+  "fallback": "texture_average",
   "matchers": [
     {"exact": "minecraft:nether_portal", "color": [0.64, 0.16, 1.0]},
     {"exact": "minecraft:furnace", "color": [1.0, 0.64, 0.34]},

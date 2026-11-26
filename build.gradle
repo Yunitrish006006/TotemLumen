@@ -348,3 +348,11 @@ tasks.named('check') {
     }
     tasks.named('check') { dependsOn tasks.named(taskName) }
 }
+
+tasks.register('generateVanillaEmitterPalette', JavaExec) {
+    group = 'build setup'
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath + sourceSets.client.runtimeClasspath
+    mainClass = 'dev.totem.lumen.gameplay.light.VanillaEmitterPaletteGenerator'
+    args file('src/main/resources/totem-lumen/vanilla-emitter-colors.properties')
+}

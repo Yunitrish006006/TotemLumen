@@ -4,6 +4,7 @@ import dev.totem.lumen.config.ServerLightingConfig;
 import dev.totem.lumen.config.ServerLightingConfigStore;
 import dev.totem.lumen.gameplay.light.EmissionColor;
 import dev.totem.lumen.gameplay.light.DefaultEmissionColors;
+import dev.totem.lumen.gameplay.light.BlockTextureColor;
 import net.minecraft.resources.Identifier;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.block.Block;
@@ -55,8 +56,11 @@ public final class EffectiveLightingRules {
                 boolean emits = block.getStateDefinition().getPossibleStates().stream()
                         .anyMatch(state -> state.getLightEmission() > 0);
                 if (emits) {
-                    merged.putIfAbsent(BuiltInRegistries.BLOCK.getKey(block),
-                            new LightingWorldRule(1.0f, 1.0f, 1.0f));
+                    Identifier id = BuiltInRegistries.BLOCK.getKey(block);
+                    merged.computeIfAbsent(id, key -> {
+                        var color = BlockTextureColor.forBlock(key.toString());
+                        return new LightingWorldRule(color.red(), color.green(), color.blue());
+                    });
                 }
             }
         }
@@ -69,7 +73,7 @@ public final class EffectiveLightingRules {
             if (color == null && base == null) {
                 color = defaultPackActive
                         ? DefaultEmissionColors.forBlock(id.toString(), 15)
-                        : new EmissionColor(1.0f, 1.0f, 1.0f);
+                        : BlockTextureColor.forBlock(id.toString());
             }
             merged.put(id, new LightingWorldRule(
                     color == null ? base.emissionR() : color.red(),

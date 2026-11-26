@@ -41,7 +41,7 @@ final class DefaultLightingDataPackTest {
             assertNotNull(paletteStream);
             var palette = JsonParser.parseReader(new InputStreamReader(paletteStream,
                     StandardCharsets.UTF_8)).getAsJsonObject();
-            assertEquals(3, palette.getAsJsonArray("fallback").size());
+            assertEquals("texture_average", palette.get("fallback").getAsString());
             assertTrue(palette.getAsJsonArray("matchers").size() > 10);
         }
         try (var tuningStream = getClass().getClassLoader().getResourceAsStream(

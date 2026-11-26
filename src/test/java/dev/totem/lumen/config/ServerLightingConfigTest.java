@@ -88,7 +88,7 @@ final class ServerLightingConfigTest {
     }
 
     @Test
-    void disablingDefaultPackUsesNeutralLightButKeepsWorldRules() {
+    void disablingDefaultPackUsesOriginalPixelsButKeepsWorldRules() {
         net.minecraft.SharedConstants.tryDetectVersion();
         net.minecraft.server.Bootstrap.bootStrap();
         Identifier torch = Identifier.fromNamespaceAndPath("minecraft", "torch");
@@ -97,8 +97,8 @@ final class ServerLightingConfigTest {
                 ore, new LightingWorldRule(0.8f, 0.1f, 0.1f)));
         var snapshot = EffectiveLightingRules.compose(world, ServerLightingConfig.DEFAULT, Set.of(), false);
         assertEquals(1.0f, snapshot.rules().ruleFor(torch).emissionR());
-        assertEquals(1.0f, snapshot.rules().ruleFor(torch).emissionG());
-        assertEquals(1.0f, snapshot.rules().ruleFor(torch).emissionB());
+        assertEquals(0x74 / (float) 0x8e, snapshot.rules().ruleFor(torch).emissionG());
+        assertEquals(0x41 / (float) 0x8e, snapshot.rules().ruleFor(torch).emissionB());
         assertEquals(0.1f, snapshot.rules().ruleFor(ore).emissionG());
         assertEquals(EffectiveLightingRules.Origin.DATA_PACK, snapshot.origins().get(ore));
     }

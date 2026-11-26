@@ -7,6 +7,7 @@ import com.google.gson.JsonParseException;
 import dev.totem.lumen.TotemLumen;
 import dev.totem.lumen.config.ServerLightingConfigStore;
 import dev.totem.lumen.gameplay.light.EmissionColor;
+import dev.totem.lumen.gameplay.light.BlockTextureColor;
 import net.fabricmc.fabric.api.resource.v1.reloader.SimpleReloadListener;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.FileToIdConverter;
@@ -215,7 +216,10 @@ public final class LightingWorldRulesReloadListener extends SimpleReloadListener
     }
 
     private static Map<Identifier, LightingWorldRule> parsePalette(JsonObject palette) {
-        EmissionColor fallback = parseColor(palette.get("fallback"), "fallback");
+        var fallbackValue = palette.get("fallback");
+        boolean textureAverage = fallbackValue != null && fallbackValue.isJsonPrimitive()
+                && "texture_average".equals(fallbackValue.getAsString());
+        EmissionColor fallback = textureAverage ? null : parseColor(fallbackValue, "fallback");
         JsonArray matchersJson = palette.getAsJsonArray("matchers");
         if (matchersJson == null || matchersJson.size() > 256) {
             throw new JsonParseException("matchers must be an array of at most 256 rules");
@@ -242,6 +246,7 @@ public final class LightingWorldRulesReloadListener extends SimpleReloadListener
             for (Matcher matcher : matchers) {
                 if (matcher.matches(id.toString())) { color = matcher.color(); break; }
             }
+            if (color == null) color = BlockTextureColor.forBlock(id.toString());
             rules.put(id, new LightingWorldRule(color.red(), color.green(), color.blue()));
         }
         return rules;
