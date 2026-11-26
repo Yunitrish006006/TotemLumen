@@ -27,7 +27,8 @@ public final class DefaultEmissionColors {
             return EmissionColor.BLACK;
         }
         if (sourceId.equals("minecraft:nether_portal")) return NETHER_PORTAL;
-        if (sourceId.equals("minecraft:furnace")) return TORCH;
+        if (sourceId.equals("minecraft:furnace") || sourceId.equals("minecraft:blast_furnace")
+                || sourceId.equals("minecraft:smoker")) return TORCH;
         if (sourceId.equals("minecraft:glow_lichen")) return GLOW_LICHEN;
         if (sourceId.equals("minecraft:soul_lantern")) return SOUL_LANTERN;
         if (sourceId.contains("soul_")) return SOUL;

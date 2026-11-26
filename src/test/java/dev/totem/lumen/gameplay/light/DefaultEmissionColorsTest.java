@@ -1,11 +1,31 @@
 package dev.totem.lumen.gameplay.light;
 
+import net.minecraft.SharedConstants;
+import net.minecraft.server.Bootstrap;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import org.junit.jupiter.api.Test;
+
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class DefaultEmissionColorsTest {
+    @Test
+    void furnaceFamilyEmitsTheSameLightOnlyWhileLit() {
+        SharedConstants.tryDetectVersion();
+        Bootstrap.bootStrap();
+        var lit = BlockStateProperties.LIT;
+        var furnace = Blocks.FURNACE.defaultBlockState().setValue(lit, true);
+        char expected = GameplayLightSource.packedFor(furnace, null);
+        assertTrue(expected != 0);
+        for (var block : List.of(Blocks.BLAST_FURNACE, Blocks.SMOKER)) {
+            assertEquals(expected, GameplayLightSource.packedFor(block.defaultBlockState().setValue(lit, true), null));
+            assertEquals((char) 0, GameplayLightSource.packedFor(block.defaultBlockState().setValue(lit, false), null));
+        }
+    }
+
     @Test
     void ordinaryTorchesAreWarmerThanWhiteButLessRedThanBefore() {
         EmissionColor torch = DefaultEmissionColors.forBlock("minecraft:torch", 14);

@@ -3,6 +3,8 @@
   "matchers": [
     {"exact": "minecraft:nether_portal", "color": [0.64, 0.16, 1.0]},
     {"exact": "minecraft:furnace", "color": [1.0, 0.64, 0.34]},
+    {"exact": "minecraft:blast_furnace", "color": [1.0, 0.64, 0.34]},
+    {"exact": "minecraft:smoker", "color": [1.0, 0.64, 0.34]},
     {"exact": "minecraft:glow_lichen", "color": [0.32, 1.0, 0.73]},
     {"exact": "minecraft:soul_lantern", "color": [0.26, 0.76, 1.0]},
     {"contains": "soul_", "color": [0.28, 0.78, 1.0]},
