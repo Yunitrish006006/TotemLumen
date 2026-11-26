@@ -43,8 +43,8 @@ public final class ClientGameplayLightPredictor {
     private static final long TIME_BUDGET_NANOS = 2_000_000L;
     private static final Predicate<BlockState> EMITS_LIGHT = state -> state.getLightEmission() > 0;
 
-    private static final Map<SectionKey, FirePreview> firePreviews = new LinkedHashMap<>();
-    private static final int MAX_FIRE_PREVIEWS = 128;
+    private static final Map<SectionKey, EmitterPreview> emitterPreviews = new LinkedHashMap<>();
+    private static final int MAX_EMITTER_PREVIEWS = 128;
     private static final long PREVIEW_BUDGET_NANOS = TIME_BUDGET_NANOS / 2;
     private static long previewNanos;
     private static int previewWork;
@@ -102,7 +102,7 @@ public final class ClientGameplayLightPredictor {
         corridorTurn = 0;
         activeLevel = null;
         activeDimension = null;
-        clearFirePreviews();
+        clearEmitterPreviews();
         scans.clear();
         pendingScans.clear();
         chunkSourceStates.clear();
@@ -130,12 +130,12 @@ public final class ClientGameplayLightPredictor {
         activate(level);
         enterServerAuthorityIfAvailable();
         LocalPlayer player = Minecraft.getInstance().player;
-        boolean preview = player != null && nearbyFireChunk(level, chunk, player);
+        boolean preview = player != null && nearbyEmitterChunk(chunk, player);
         if (!serverAuthoritative || preview || (player != null && nearPlayerChunk(
                 chunk.getPos().x(), chunk.getPos().z(), player
         ))) {
             enqueueScan(level, chunk, false);
-            if (preview) requestNearbyFire(scans.get(new ChunkKey(chunk.getPos().x(), chunk.getPos().z())), player);
+            if (preview) requestNearbyEmitters(scans.get(new ChunkKey(chunk.getPos().x(), chunk.getPos().z())), player);
         } else {
             bumpChunkGeneration(new ChunkKey(chunk.getPos().x(), chunk.getPos().z()));
         }
@@ -226,7 +226,7 @@ public final class ClientGameplayLightPredictor {
                 // Keep the last complete field visible until the replacement is ready.
                 // Clearing the entire influence radius here made other nearby lights blink.
                 scheduleInfluence(influence);
-                if (level.dimension().equals(Level.NETHER) && (GROUND_EMITTER.test(oldState) || GROUND_EMITTER.test(newState))) {
+                if (NON_LAVA_EMITTER.test(oldState) || NON_LAVA_EMITTER.test(newState)) {
                     prioritizeNearbyCorrection(pos, influence);
                 }
                 ClientGameplayLightField.requestImmediateUpload();
@@ -283,7 +283,7 @@ public final class ClientGameplayLightPredictor {
         for (ChunkKey chunk : List.copyOf(chunkSourceStates.keySet())) {
             bumpChunkGeneration(chunk);
         }
-        clearFirePreviews();
+        clearEmitterPreviews();
         chunkSourceStates.clear();
         // A previous rule may have suppressed an emitter entirely, so it will not be in
         // `sources`. Revisit loaded nearby chunks on the next tick as well.
@@ -408,9 +408,9 @@ public final class ClientGameplayLightPredictor {
         previewNanos = 0;
         previewWork = 0;
         changedThisTick = false;
-        if (player != null && level.dimension().equals(Level.NETHER)) {
+        if (player != null) {
             updateTravelHeading(player);
-            remaining -= publishFirePreviews(start + PREVIEW_BUDGET_NANOS);
+            remaining -= publishEmitterPreviews(player, start + PREVIEW_BUDGET_NANOS);
             if (!scans.isEmpty()) {
                 remaining -= primeNearbyGroundLights(player.blockPosition(), start + TIME_BUDGET_NANOS / 4);
                 remaining -= primeTravelCorridor(player, start + TIME_BUDGET_NANOS / 2);
@@ -582,7 +582,7 @@ public final class ClientGameplayLightPredictor {
     }
 
     private static void clearPredictionWork() {
-        clearFirePreviews();
+        clearEmitterPreviews();
         scans.clear();
         pendingScans.clear();
         chunkSourceStates.clear();
@@ -605,30 +605,30 @@ public final class ClientGameplayLightPredictor {
                 && Math.abs(chunkZ - playerChunkZ) <= CHUNK_RADIUS;
     }
 
-    private static boolean nearbyFireChunk(ClientLevel level, LevelChunk chunk, LocalPlayer player) {
-        if (level.dimension() != Level.NETHER || Math.abs(chunk.getPos().x() - player.chunkPosition().x()) > 5
+    private static boolean nearbyEmitterChunk(LevelChunk chunk, LocalPlayer player) {
+        if (Math.abs(chunk.getPos().x() - player.chunkPosition().x()) > 5
                 || Math.abs(chunk.getPos().z() - player.chunkPosition().z()) > 5) return false;
         int center = chunk.getSectionIndex(player.blockPosition().getY());
         var sections = chunk.getSections();
         for (int i = Math.max(0, center - 1); i <= Math.min(sections.length - 1, center + 1); i++) {
-            if (sections[i].maybeHas(ClientRgbVisualLightSource::isFire)) return true;
+            if (sections[i].maybeHas(EMITS_LIGHT)) return true;
         }
         return false;
     }
 
-    private static void requestNearbyFire(ScanTask scan, LocalPlayer player) {
+    private static void requestNearbyEmitters(ScanTask scan, LocalPlayer player) {
         if (scan == null) return;
         int center = scan.chunk.getSectionIndex(player.blockPosition().getY());
-        requestFirePreview(scan, center);
-        requestFirePreview(scan, center - 1);
-        requestFirePreview(scan, center + 1);
+        requestEmitterPreview(scan, center);
+        requestEmitterPreview(scan, center - 1);
+        requestEmitterPreview(scan, center + 1);
     }
 
     private static void enqueueVisibleChunks(ClientLevel level) {
         // addFirst in outer-to-inner order puts the player's own chunk ahead of the
         // potentially large FIFO accumulated while an existing world was loading.
         var player = Minecraft.getInstance().player;
-        int radiusLimit = level.dimension() == Level.NETHER && player != null ? 5 : CHUNK_RADIUS;
+        int radiusLimit = player != null ? 5 : CHUNK_RADIUS;
         for (int radius = radiusLimit; radius >= 0; radius--) {
             for (int offsetZ = -radius; offsetZ <= radius; offsetZ++) {
                 for (int offsetX = -radius; offsetX <= radius; offsetX++) {
@@ -639,10 +639,10 @@ public final class ClientGameplayLightPredictor {
                     int chunkZ = centerChunkZ + offsetZ;
                     LevelChunk chunk = level.getChunkSource().getChunk(chunkX, chunkZ, ChunkStatus.FULL, false);
                     if (chunk == null) continue;
-                    boolean preview = player != null && nearbyFireChunk(level, chunk, player);
+                    boolean preview = player != null && nearbyEmitterChunk(chunk, player);
                     if (radius <= CHUNK_RADIUS || preview) {
                         enqueueScan(level, chunk, true);
-                        if (preview) requestNearbyFire(scans.get(new ChunkKey(chunkX, chunkZ)), player);
+                        if (preview) requestNearbyEmitters(scans.get(new ChunkKey(chunkX, chunkZ)), player);
                     }
                 }
             }
@@ -745,78 +745,117 @@ public final class ClientGameplayLightPredictor {
     }
 
     // Extract immutable section data on the client thread. Workers only locate possible
-    // flames; block rules, propagation and publishing always run against live client state.
-    private record FirePreview(ScanTask scan, int index, CompletableFuture<BitSet> positions) {}
+    // emitters; block rules, propagation and publishing always run against live client state.
+    private record EmitterPreview(ScanTask scan, int index, CompletableFuture<EmitterPositions> positions) {}
 
-    private static void clearFirePreviews() {
-        firePreviews.values().forEach(task -> task.positions.cancel(false));
-        firePreviews.clear();
+    private record EmitterPositions(BitSet regular, BitSet lava) {}
+    private static final int LAVA_PREVIEW_WORK = 32;
+
+    private static void clearEmitterPreviews() {
+        emitterPreviews.values().forEach(task -> task.positions.cancel(false));
+        emitterPreviews.clear();
         previewNanos = 0;
         previewWork = 0;
     }
 
-    private static void requestFirePreview(ScanTask scan, int index) {
+    private static void requestEmitterPreview(ScanTask scan, int index) {
         if (index < 0 || index >= scan.sections.length || scan.previewRequested.get(index)
-                || firePreviews.size() >= MAX_FIRE_PREVIEWS) return;
-        scan.previewRequested.set(index);
+                || emitterPreviews.size() >= MAX_EMITTER_PREVIEWS) return;
         var section = scan.sections[index];
-        if (!section.maybeHas(ClientRgbVisualLightSource::isFire)) return;
+        // Leave worker slots for small, distinct lights during a lava-ocean chunk burst.
+        if (emitterPreviews.size() >= MAX_EMITTER_PREVIEWS / 2 && !section.maybeHas(NON_LAVA_EMITTER)) return;
+        scan.previewRequested.set(index);
+        if (!section.maybeHas(EMITS_LIGHT)) return;
         var snapshot = section.getStates().copy();
         var positions = CompletableFuture.supplyAsync(() -> {
-            var result = new BitSet();
+            var regular = new BitSet();
+            var lava = new BitSet();
             for (int i = 0; i < 4096; i++) {
-                if (ClientRgbVisualLightSource.isFire(snapshot.get(i & 15, i >> 8, (i >> 4) & 15))) result.set(i);
+                int x = i & 15, y = i >> 8, z = i >> 4 & 15;
+                var state = snapshot.get(x, y, z);
+                if (!EMITS_LIGHT.test(state)) continue;
+                if (!state.is(Blocks.LAVA)) regular.set(i);
+                else if (x == 0 || y == 0 || z == 0 || x == 15 || y == 15 || z == 15
+                        || snapshot.get(x - 1, y, z) != state || snapshot.get(x + 1, y, z) != state
+                        || snapshot.get(x, y - 1, z) != state || snapshot.get(x, y + 1, z) != state
+                        || snapshot.get(x, y, z - 1) != state || snapshot.get(x, y, z + 1) != state) lava.set(i);
             }
-            return result;
+            return new EmitterPositions(regular, lava);
         }, Util.backgroundExecutor());
         var key = new SectionKey(scan.chunkKey.x, scan.chunk.getSectionYFromSectionIndex(index), scan.chunkKey.z);
-        var previous = firePreviews.put(key, new FirePreview(scan, index, positions));
+        var previous = emitterPreviews.put(key, new EmitterPreview(scan, index, positions));
         if (previous != null) previous.positions.cancel(false);
     }
 
     // Region extraction runs before worker-side vertex tinting. Never wait for a future.
-    public static void previewFireSection(ClientLevel level, int cx, int sy, int cz) {
-        if (!Minecraft.getInstance().isSameThread() || level != activeLevel || level.dimension() != Level.NETHER
+    public static void previewEmitterSection(ClientLevel level, int cx, int sy, int cz) {
+        if (!Minecraft.getInstance().isSameThread() || level != activeLevel
                 || RendererSettings.renderProfile() != RendererSettings.RenderProfile.MINECRAFT_RGB
                 || previewNanos >= PREVIEW_BUDGET_NANOS || previewWork >= 4096) return;
         var player = Minecraft.getInstance().player;
         if (player == null || Math.abs(cx - player.chunkPosition().x()) > 5
                 || Math.abs(cz - player.chunkPosition().z()) > 5) return;
-        var scan = scans.get(new ChunkKey(cx, cz));
-        if (scan == null) return;
         long start = System.nanoTime();
-        int index = scan.chunk.getSectionIndexFromSectionY(sy);
-        requestFirePreview(scan, index);
+        var chunkKey = new ChunkKey(cx, cz);
+        var scan = scans.get(chunkKey);
+        int index = level.getSectionIndexFromSectionY(sy);
+        if (scan == null) {
+            // A visible canopy or cavern can lie outside the player's three prefetch layers.
+            if (chunkSourceStates.get(chunkKey) == ChunkSourceState.READY) return;
+            var chunk = level.getChunkSource().getChunk(cx, cz, ChunkStatus.FULL, false);
+            if (chunk == null || index < 0 || index >= chunk.getSections().length
+                    || !chunk.getSections()[index].maybeHas(EMITS_LIGHT)) return;
+            enqueueScan(level, chunk, false);
+            scan = scans.get(chunkKey);
+        }
+        requestEmitterPreview(scan, index);
         var key = new SectionKey(cx, sy, cz);
-        var task = firePreviews.get(key);
+        var task = emitterPreviews.get(key);
         if (task != null && task.scan == scan && task.positions.isDone()) {
             int seeds = scan.earlySources.size();
-            previewWork += publishFlames(task, start + PREVIEW_BUDGET_NANOS - previewNanos, 4096 - previewWork);
+            previewWork += publishEmitters(task, false, start + PREVIEW_BUDGET_NANOS - previewNanos, 4096 - previewWork);
             if (scan.earlySources.size() != seeds) ClientGameplayLightField.finishLocalBatch(true);
         }
         previewNanos += System.nanoTime() - start;
     }
 
-    private static int publishFirePreviews(long deadline) {
+    private static int publishEmitterPreviews(LocalPlayer player, long deadline) {
         int work = 0;
-        var it = firePreviews.values().iterator();
-        while (it.hasNext() && work < 4096 && System.nanoTime() < deadline) {
-            var task = it.next();
+        if (emitterPreviews.isEmpty()) return work;
+        var tasks = new ArrayList<>(emitterPreviews.values());
+        double cx = player.getX() / 16, cz = player.getZ() / 16;
+        tasks.sort(Comparator.comparingDouble(task -> {
+            double x = task.scan.chunkKey.x + 0.5 - cx, z = task.scan.chunkKey.z + 0.5 - cz;
+            return x * x + z * z - 2 * (x * travelX + z * travelZ);
+        }));
+        // Reserve a small slice for lava. Extraction only consumes the regular lane.
+        long regularDeadline = deadline - PREVIEW_BUDGET_NANOS / 8;
+        for (var task : tasks) {
+            if (System.nanoTime() >= regularDeadline || work >= 4096) break;
+            work += publishEmitters(task, false, regularDeadline, 4096 - work);
+        }
+        int lavaWork = 0;
+        for (var task : tasks) {
+            if (System.nanoTime() >= deadline || lavaWork >= LAVA_PREVIEW_WORK) break;
+            lavaWork += publishEmitters(task, true, deadline, LAVA_PREVIEW_WORK - lavaWork);
+        }
+        emitterPreviews.values().removeIf(task -> {
             if (scans.get(task.scan.chunkKey) != task.scan) {
                 task.positions.cancel(false);
-                it.remove();
-                continue;
+                return true;
             }
-            if (!task.positions.isDone()) continue;
-            work += publishFlames(task, deadline, 4096 - work);
-            if (task.positions.isCompletedExceptionally() || task.positions.getNow(null).isEmpty()) it.remove();
-        }
-        return work;
+            if (task.positions.isCompletedExceptionally()) return true;
+            var result = task.positions.getNow(null);
+            return result != null && result.regular.isEmpty() && result.lava.isEmpty();
+        });
+        return work + lavaWork;
     }
 
-    private static int publishFlames(FirePreview task, long deadline, int budget) {
-        if (task.positions.isCompletedExceptionally()) return 0;
-        var positions = task.positions.getNow(null);
+    private static int publishEmitters(EmitterPreview task, boolean lava, long deadline, int budget) {
+        if (scans.get(task.scan.chunkKey) != task.scan || task.positions.isCompletedExceptionally()) return 0;
+        var result = task.positions.getNow(null);
+        if (result == null) return 0;
+        var positions = lava ? result.lava : result.regular;
         int used = 0;
         var scan = task.scan;
         var section = scan.sections[task.index];
@@ -827,9 +866,15 @@ public final class ClientGameplayLightPredictor {
             used++;
             int lx = i & 15, ly = i >> 8, lz = (i >> 4) & 15;
             var state = section.getBlockState(lx, ly, lz);
-            if (ClientRgbVisualLightSource.isFire(state)) {
+            if (EMITS_LIGHT.test(state) && state.is(Blocks.LAVA) == lava) {
                 var pos = new BlockKey(scan.chunkKey.x * 16 + lx, y + ly, scan.chunkKey.z * 16 + lz);
-                used += scan.seedEarly(pos, sourceFor(state), Math.min(128, budget - used));
+                char packed = sourceFor(state);
+                if (!lava) used += scan.seedEarly(pos, packed, Math.min(128, budget - used));
+                else if (packed != 0 && !sources.containsKey(pos)) {
+                    putSource(pos, packed);
+                    scan.earlySources.add(pos);
+                    publishDiscoveredSource(pos, packed, false);
+                }
             }
         }
         return used;
@@ -1386,7 +1431,7 @@ public final class ClientGameplayLightPredictor {
                 int y = nearby.minY + nearbyHeights[i / plane];
                 var state = sections[chunk.getSectionIndex(y)].getBlockState(x & 15, y & 15, z & 15);
                 used++;
-                if (GROUND_EMITTER.test(state)) {
+                if (NON_LAVA_EMITTER.test(state)) {
                     used += seedEarly(new BlockKey(x, y, z), sourceFor(state), Math.min(32, budget - used));
                 }
             }
@@ -1406,7 +1451,7 @@ public final class ClientGameplayLightPredictor {
             }
             int center = Math.clamp(chunk.getSectionIndex(y), 0, sections.length - 1);
             // Retry chunks received before the player existed or while the preview queue was full.
-            requestFirePreview(this, center);
+            requestEmitterPreview(this, center);
             int used = 0;
             for (int offset = 0; offset <= 4 && used < budget; offset++) {
                 int section = center + ((offset & 1) == 0 ? offset / 2 : -(offset + 1) / 2);
@@ -1414,7 +1459,7 @@ public final class ClientGameplayLightPredictor {
                 var layer = sections[section];
                 int baseY = chunk.getSectionYFromSectionIndex(section) << 4;
                 if (aheadCursors[section] == 0) {
-                    if (!layer.maybeHas(GROUND_EMITTER)) {
+                    if (!layer.maybeHas(NON_LAVA_EMITTER)) {
                         aheadCursors[section] = 4096;
                         used++;
                         continue;
@@ -1430,7 +1475,7 @@ public final class ClientGameplayLightPredictor {
                         int ly = ((i >> 8) + firstLayer[section]) & 15;
                         var state = layer.getBlockState(x, ly, z);
                         used++;
-                        if (GROUND_EMITTER.test(state)) {
+                        if (NON_LAVA_EMITTER.test(state)) {
                             var key = new BlockKey(chunkKey.x * 16 + x, baseY + ly, chunkKey.z * 16 + z);
                             used += seedEarly(key, sourceFor(state), Math.min(128, budget - used));
                         }

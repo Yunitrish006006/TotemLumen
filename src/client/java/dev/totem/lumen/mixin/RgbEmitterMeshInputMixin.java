@@ -11,9 +11,9 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 @Mixin(RenderRegionCache.class)
-abstract class NetherFireMeshInputMixin {
+abstract class RgbEmitterMeshInputMixin {
     @Inject(method = "createRegion", at = @At("HEAD"))
-    private void totemLumen$primeNearbyFire(ClientLevel level, long node, CallbackInfoReturnable<RenderSectionRegion> ci) {
-        ClientGameplayLightPredictor.previewFireSection(level, SectionPos.x(node), SectionPos.y(node), SectionPos.z(node));
+    private void totemLumen$primeNearbyEmitters(ClientLevel level, long node, CallbackInfoReturnable<RenderSectionRegion> ci) {
+        ClientGameplayLightPredictor.previewEmitterSection(level, SectionPos.x(node), SectionPos.y(node), SectionPos.z(node));
     }
 }
