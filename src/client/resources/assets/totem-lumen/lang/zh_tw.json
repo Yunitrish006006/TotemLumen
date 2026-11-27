@@ -114,6 +114,7 @@
   "screen.totem-lumen.render_profile.minecraft_rgb": "Minecraft 原版 + RGB 光源",
   "screen.totem-lumen.beta_rendering": "使用 Beta 渲染方式：%s",
   "screen.totem-lumen.render_profile.totem": "Totem Lumen (Beta)",
+  "screen.totem-lumen.render_profile.lumia": "Lumia (Beta)",
   "screen.totem-lumen.render_profile.raster_ray": "原版＋次級射線（Beta／24 格）",
   "message.totem-lumen.config.reloaded": "Totem Lumen 伺服器光照設定已重新載入。",
   "message.totem-lumen.config.unchanged": "Totem Lumen 伺服器光照設定沒有變更。",

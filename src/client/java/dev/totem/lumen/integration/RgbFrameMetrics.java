@@ -53,6 +53,14 @@ public final class RgbFrameMetrics {
             reset();
         } else if (state == FrameIntervalWindow.State.COMPLETE) {
             var result = WINDOW.summary();
+            if (profile == RendererSettings.RenderProfile.LUMIA) {
+                TotemLumenClient.LOGGER.info("Lumia frame metrics: samples={}, seconds={}, averageFps={}, "
+                                + "onePercentLowFps={}, intervalP95Ms={}, viewport={}x{}, renderDistance={}, fpsLimit={}, vsync={}",
+                        result.samples(), rounded(result.seconds()), rounded(result.averageFps()),
+                        rounded(result.onePercentLowFps()), rounded(result.intervalP95Ms()), width, height, renderDistance, fpsLimit, vsync);
+                reset();
+                return;
+            }
             Runtime runtime = Runtime.getRuntime();
             TotemLumenClient.LOGGER.info(
                     "Profile frame metrics: profile={}, samples={}, seconds={}, averageFps={}, onePercentLowFps={}, "
@@ -83,6 +91,7 @@ public final class RgbFrameMetrics {
     private static boolean eligible(Minecraft client, boolean renderLevel) {
         if (client.level == null || !renderLevel || client.isPaused() || client.gui.screen() != null
                 || client.gui.overlay() != null || !client.isWindowActive()) return false;
+        if (RendererSettings.lumiaEnabled()) return LumiaScene.ready();
         if (RendererSettings.rasterLightingEnabled()) return RasterLightingRenderer.ready();
         return RendererSettings.renderProfile() != RendererSettings.RenderProfile.TOTEM_LUMEN
                 || (P5StableLookupRenderer.readyForWorldTakeover()

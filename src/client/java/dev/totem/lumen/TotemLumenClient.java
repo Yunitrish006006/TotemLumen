@@ -42,6 +42,7 @@ import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
 import net.fabricmc.fabric.api.client.rendering.v1.level.LevelExtractionEvents;
 import net.fabricmc.loader.api.FabricLoader;
+import dev.totem.lumen.integration.LumiaScene;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
@@ -88,7 +89,7 @@ public final class TotemLumenClient implements ClientModInitializer {
         ClientPlayNetworking.registerGlobalReceiver(LightingWorldRulesPayload.TYPE, (payload, context) -> {
             if (ClientLightingWorldRules.apply(payload.rules(), payload.tuning())) {
                 SceneExtractionBridge.refreshLightingWorldRules();
-                if (RendererSettings.rasterLightingEnabled()) RasterLightingScene.requestRefresh();
+                if (RasterLightingScene.active()) RasterLightingScene.requestRefresh();
                 if (RendererSettings.renderProfile() == RendererSettings.RenderProfile.MINECRAFT_RGB) ClientGameplayLightPredictor.requestRebuild();
             }
             LOGGER.info(
@@ -175,6 +176,7 @@ public final class TotemLumenClient implements ClientModInitializer {
         net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLevelEvents.AFTER_CLIENT_LEVEL_CHANGE.register((client, level) -> {
             ClientHeldLightField.clear();
             RasterLightingScene.clear();
+            LumiaScene.close();
             RasterLightingRenderer.resetPreparation();
         });
         ClientChunkEvents.CHUNK_LOAD.register((level, chunk) -> {
@@ -196,7 +198,13 @@ public final class TotemLumenClient implements ClientModInitializer {
                 ClientHeldLightField.clear();
                 ClientGameplayLightPredictor.clear();
                 RasterLightingScene.clear();
+                LumiaScene.close();
                 RasterLightingRenderer.resetPreparation();
+                if (client.level != null && (renderProfile == RendererSettings.RenderProfile.LUMIA
+                        || lastRenderProfile == RendererSettings.RenderProfile.LUMIA)) {
+                    client.levelRenderer.invalidateCompiledGeometry(client.level, client.options,
+                            client.gameRenderer.mainCamera(), client.getBlockColors());
+                }
                 if (client.level != null && (renderProfile == RendererSettings.RenderProfile.MINECRAFT_RGB
                         || lastRenderProfile == RendererSettings.RenderProfile.MINECRAFT_RGB)) {
                     ClientGameplayLightPredictor.onProfileChanged(client.level, client.player);
@@ -279,7 +287,7 @@ public final class TotemLumenClient implements ClientModInitializer {
         // method is cancelled entirely, while extraction continues every frame.
         LevelExtractionEvents.END_EXTRACTION.register(context -> {
             var client = net.minecraft.client.Minecraft.getInstance();
-            if (RendererSettings.rendererEnabled()) {
+            if (RendererSettings.rendererEnabled() || RendererSettings.lumiaEnabled()) {
                 ClientHeldLightState.capture(client, client.getDeltaTracker().getGameTimeDeltaPartialTick(true));
             }
             // The old P5 world bootstrap is now a zero-GPU compatibility gate.
@@ -319,6 +327,7 @@ public final class TotemLumenClient implements ClientModInitializer {
 
         ClientLifecycleEvents.CLIENT_STOPPING.register(client -> {
             RasterLightingScene.clear();
+            LumiaScene.close();
             RasterLightingRenderer.reload();
             RasterMaterialCapture.close();
             RendererCompileProgressNotifier.reset();

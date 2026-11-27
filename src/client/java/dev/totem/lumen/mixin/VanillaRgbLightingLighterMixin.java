@@ -2,6 +2,7 @@ package dev.totem.lumen.mixin;
 
 import com.mojang.blaze3d.vertex.QuadInstance;
 import dev.totem.lumen.integration.VanillaRgbLighting;
+import dev.totem.lumen.render.RendererSettings;
 import net.minecraft.client.renderer.block.BlockAndTintGetter;
 import net.minecraft.client.renderer.block.BlockModelLighter;
 import net.minecraft.client.resources.model.geometry.BakedQuad;
@@ -24,7 +25,12 @@ public abstract class VanillaRgbLightingLighterMixin {
             QuadInstance instance,
             CallbackInfo ci
     ) {
-        VanillaRgbLighting.applySurfaceTint(instance, world, state, pos, quad.direction());
+        if (RendererSettings.lumiaEnabled()) {
+            // Mojang applies biome/material tint after the lighter returns.
+            instance.setColor(0xFFFFFFFF);
+        } else {
+            VanillaRgbLighting.applySurfaceTint(instance, world, state, pos, quad.direction());
+        }
     }
 
     @Inject(method = "prepareQuadFlat", at = @At("TAIL"))
@@ -37,6 +43,11 @@ public abstract class VanillaRgbLightingLighterMixin {
             QuadInstance instance,
             CallbackInfo ci
     ) {
-        VanillaRgbLighting.applySurfaceTint(instance, world, state, pos, quad.direction());
+        if (RendererSettings.lumiaEnabled()) {
+            // Mojang applies biome/material tint after the lighter returns.
+            instance.setColor(0xFFFFFFFF);
+        } else {
+            VanillaRgbLighting.applySurfaceTint(instance, world, state, pos, quad.direction());
+        }
     }
 }

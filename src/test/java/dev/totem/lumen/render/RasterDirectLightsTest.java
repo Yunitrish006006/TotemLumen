@@ -111,7 +111,7 @@ class RasterDirectLightsTest {
         assertTrue(shader.contains("if (v.a > 0.75) return 0.0;"));
         assertTrue(shader.contains("visibility(surface + normal * 0.08, positions[i])"));
         String scene = Files.readString(Path.of("src/client/java/dev/totem/lumen/integration/RasterLightingScene.java"));
-        assertTrue(scene.contains("new RasterLightingVolume.Section(pixels, RasterMaterialCapture.lightingPreviewRequested())"));
+        assertTrue(scene.contains("new RasterLightingVolume.Section(pixels, RendererSettings.lumiaEnabled() || RasterMaterialCapture.lightingPreviewRequested())"));
         String metrics = Files.readString(Path.of("src/client/java/dev/totem/lumen/integration/RgbFrameMetrics.java"));
         assertTrue(metrics.contains("rasterMaterialLighting={}"));
         assertTrue(metrics.contains("DIRECT_RGB_POINT_SHADOWS"));

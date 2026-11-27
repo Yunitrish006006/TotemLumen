@@ -42,7 +42,7 @@ class RasterLightingVolumeTest {
 
     @Test void profileNeverEnablesFullRendererAndKeepsOldNamesStable() throws Exception {
         String settings = source("render/RendererSettings.java");
-        assertTrue(settings.contains("MINECRAFT_PURE,\n        MINECRAFT_RGB,\n        TOTEM_LUMEN,\n        RASTER_RAY;"));
+        assertTrue(settings.contains("MINECRAFT_PURE,\n        MINECRAFT_RGB,\n        TOTEM_LUMEN,\n        RASTER_RAY,\n        LUMIA;"));
         assertTrue(settings.contains("return renderProfile == RenderProfile.TOTEM_LUMEN;"));
         assertTrue(settings.contains("return renderProfile == RenderProfile.RASTER_RAY;"));
         String renderer = source("integration/RasterLightingRenderer.java");
