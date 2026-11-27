@@ -13,7 +13,7 @@ const properties = Object.fromEntries(readFileSync('gradle.properties', 'utf8')
   .map((line) => line.split(/=(.*)/s).slice(0, 2).map((part) => part.trim())));
 const version = properties.mod_version;
 const minecraft = properties.minecraft_version;
-if (!/^0\.1\.0(?:-alpha\.\d+)?$/.test(version) || minecraft !== '26.3') {
+if (!/^(?:0\.1\.0(?:-alpha\.\d+)?|0\.1\.1-beta\.[1-9]\d*)$/.test(version) || minecraft !== '26.3') {
   throw new Error('Unexpected release version or Minecraft version');
 }
 
@@ -32,7 +32,7 @@ if (!zipEntries.includes('dev/totem/lumen/integration/ClientHeldLightField.class
     || !zipEntries.includes(mod.icon)) {
   throw new Error('Release JAR is missing packaged shader assets, license, or icon');
 }
-const versionType = version.includes('-alpha.') ? 'alpha' : 'release';
+const versionType = version.split('-')[1]?.split('.')[0] ?? 'release';
 const notes = versionType === 'alpha' ? `RELEASE_ALPHA${version.split('.').at(-1)}` : `RELEASE_${version}`;
 const changelog = readFileSync(`docs/${notes}.md`, 'utf8');
 if (!changelog.includes(version)) {
