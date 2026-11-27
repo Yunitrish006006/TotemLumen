@@ -23,7 +23,6 @@ import org.joml.Matrix4f;
 import org.joml.Vector3f;
 import org.joml.Vector4f;
 
-import java.util.Arrays;
 import java.util.List;
 
 /** Read-only scene bindings shared by native geometry draws. Upload once before the world passes. */
@@ -34,7 +33,8 @@ public final class LumiaScene {
             .withUniform("LumiaVoxels", UniformType.COMBINED_IMAGE_SAMPLER)
             .withUniform("LumiaLights", UniformType.COMBINED_IMAGE_SAMPLER).build();
     private static final int PALETTE_START = RasterDirectLights.TEXELS;
-    private static final RasterLightingVolume.Section[] uploaded = new RasterLightingVolume.Section[RasterLightingVolume.SLOTS];
+    private static final int MAPPING_START = PALETTE_START + 64;
+    private static final LumiaVoxelAtlas atlas = new LumiaVoxelAtlas();
     private static GpuDevice device;
     private static GpuTexture voxels, lights;
     private static GpuTextureView voxelView, lightView;
@@ -43,7 +43,6 @@ public final class LumiaScene {
     private static RasterLightingVolume lastVolume;
     private static List<RasterDirectLights.Light> lastLights;
     private static int lastX, lastY, lastZ;
-    private static long epoch = -1;
     private static boolean failed, logged;
 
     private LumiaScene() {}
@@ -78,26 +77,15 @@ public final class LumiaScene {
                 allocate(gpu);
             }
             var encoder = gpu.createCommandEncoder();
-            if (epoch != volume.epoch) {
-                encoder.clearColorTexture(voxels, new Vector4f());
-                Arrays.fill(uploaded, null);
-                epoch = volume.epoch;
-            }
-            int count = 0;
-            boolean stale = false;
-            for (int slot = 0; slot < uploaded.length; slot++) {
-                var section = volume.section(slot);
-                if (uploaded[slot] == section) continue;
-                if (count == RasterLightingWindow.UPLOADS_PER_FRAME) {
-                    // A freshly cleared/rebased slot is unknown and can still shade from the sky.
-                    // An old populated slot must never provide visibility after invalidation.
-                    stale |= uploaded[slot] != null;
-                    continue;
-                }
-                for (int i = 0; i < 4096; i++) tile.setPixelABGR(i & 15, i >>> 4, section == null ? 0 : section.voxel(i));
+            boolean mappingChanged = atlas.update(volume, (slot, section) -> {
+                for (int i = 0; i < 4096; i++) tile.setPixelABGR(i & 15, i >>> 4, section.voxel(i));
                 encoder.writeToTexture(voxels, tile, 0, 0, RasterLightingVolume.tileX(slot), RasterLightingVolume.tileY(slot));
-                uploaded[slot] = section;
-                count++;
+            });
+            boolean metadataChanged = mappingChanged || lastVolume == null;
+            if (metadataChanged) {
+                for (int slot = 0; slot < RasterLightingVolume.SLOTS; slot++) {
+                    lightPixels.setPixelABGR(MAPPING_START + slot, 0, 0xff000000 | atlas.entry(slot));
+                }
             }
             Vector3f offset = new Vector3f((float)(camera.pos.x - volume.x), (float)(camera.pos.y - volume.y),
                     (float)(camera.pos.z - volume.z));
@@ -109,14 +97,14 @@ public final class LumiaScene {
                         lightPixels.setPixelABGR(i * 2, 0, i < selected.size() ? selected.get(i).positionTexel() : 0);
                         lightPixels.setPixelABGR(i * 2 + 1, 0, i < selected.size() ? selected.get(i).abgr() : 0);
                     }
-                    encoder.writeToTexture(lights, lightPixels, 0, 0, 0, 0);
+                    metadataChanged = true;
                 }
                 lastLights = selected;
                 lastVolume = volume;
                 lastX = x; lastY = y; lastZ = z;
             }
+            if (metadataChanged) encoder.writeToTexture(lights, lightPixels, 0, 0, 0, 0);
             encoder.submit();
-            if (stale) return;
 
             var frame = client.gameRenderer.gameRenderState().levelRenderState;
             var skyState = frame.skyRenderState;
@@ -191,14 +179,14 @@ public final class LumiaScene {
     private static void allocate(GpuDevice gpu) {
         device = gpu;
         int flags = GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_COPY_DST;
-        voxels = gpu.createTexture("Lumia occlusion and emission", flags | GpuTexture.USAGE_RENDER_ATTACHMENT,
+        voxels = gpu.createTexture("Lumia occlusion and emission", flags,
                 GpuFormat.RGBA8_UNORM, RasterLightingVolume.ATLAS_WIDTH, RasterLightingVolume.ATLAS_HEIGHT, 1, 1);
         voxelView = gpu.createTextureView(voxels);
         tile = new NativeImage(16, 256, false);
         lights = gpu.createTexture("Lumia emitters and reflection colours", flags,
-                GpuFormat.RGBA8_UNORM, PALETTE_START + 64, 1, 1, 1);
+                GpuFormat.RGBA8_UNORM, MAPPING_START + RasterLightingVolume.SLOTS, 1, 1, 1);
         lightView = gpu.createTextureView(lights);
-        lightPixels = new NativeImage(PALETTE_START + 64, 1, false);
+        lightPixels = new NativeImage(MAPPING_START + RasterLightingVolume.SLOTS, 1, false);
         for (int i = 0; i < 64; i++) {
             var color = MapColor.byId(i);
             lightPixels.setPixel(PALETTE_START + i, 0, 0xff000000 | (color == null || color == MapColor.NONE ? 0x777777 : color.col));
@@ -219,8 +207,7 @@ public final class LumiaScene {
         device = null;
         lastVolume = null;
         lastLights = null;
-        Arrays.fill(uploaded, null);
-        epoch = -1;
+        atlas.clear();
         logged = failed = false;
     }
 }

@@ -15,12 +15,18 @@ layout(std140) uniform LumiaMovingActors {
 uniform sampler2D LumiaVoxels;
 uniform sampler2D LumiaLights;
 
-vec4 lumiaVoxel(ivec3 p) {
-    if (any(lessThan(p, ivec3(0))) || any(greaterThanEqual(p, ivec3(96)))) return vec4(0);
-    ivec3 section = p / 16, local = p % 16;
+// The CPU publishes a tile entry only once that immutable section is resident.
+int lumiaTile(ivec3 section) {
+    if (any(lessThan(section, ivec3(0))) || any(greaterThanEqual(section, ivec3(6)))) return -1;
     int slot = (section.y * 6 + section.z) * 6 + section.x;
-    return texelFetch(LumiaVoxels, ivec2((slot % 16) * 16 + local.x,
-            (slot / 16) * 256 + local.y * 16 + local.z), 0);
+    return int(round(texelFetch(LumiaLights, ivec2(128 + slot, 0), 0).r * 255.0)) - 1;
+}
+
+vec4 lumiaVoxel(ivec3 p, int tile) {
+    if (tile < 0) return vec4(0);
+    ivec3 local = p & ivec3(15);
+    return texelFetch(LumiaVoxels, ivec2((tile % 16) * 16 + local.x,
+            (tile / 16) * 256 + local.y * 16 + local.z), 0);
 }
 
 int lumiaContainingActors(vec3 point, float padding) {
@@ -57,8 +63,15 @@ vec4 lumiaTrace(vec3 origin, vec3 direction, float limit, int skipActors, out ve
     vec3 delta = 1.0 / max(abs(direction), vec3(0.00001));
     vec3 next = abs(vec3(cell) + step(vec3(0), direction) - origin) * delta;
     face = -direction;
+    ivec3 section = cell >> 4;
+    int tile = lumiaTile(section);
     for (int i = 0; i < 64; ++i) {
-        vec4 v = lumiaVoxel(cell);
+        ivec3 nextSection = cell >> 4;
+        if (any(notEqual(nextSection, section))) {
+            section = nextSection;
+            tile = lumiaTile(section);
+        }
+        vec4 v = lumiaVoxel(cell, tile);
         if (v.a < 0.25) break;
         if (v.a >= 0.75) return v;
         float t = min(next.x, min(next.y, next.z));
@@ -139,7 +152,8 @@ vec3 lumiaShade(vec3 base, vec3 cameraRelative, vec3 normal, vec2 lightUv01, flo
         float attenuation = 1.0 - d / radius;
         diffuse += emission * (2.2 * attenuation * attenuation * cosine);
     }
-    vec3 selfEmission = lumiaVoxel(ivec3(floor(pos - n * .03))).rgb;
+    ivec3 surfaceCell = ivec3(floor(pos - n * .03));
+    vec3 selfEmission = lumiaVoxel(surfaceCell, lumiaTile(surfaceCell >> 4)).rgb;
     vec3 color = base * (diffuse + selfEmission);
     if (reflectivity > 0.0) {
         vec3 incident = cameraRelative * inversesqrt(max(dot(cameraRelative, cameraRelative), 1e-8));
