@@ -181,7 +181,7 @@ public final class RendererSettings {
     private static final List<RenderProfile> STABLE_PROFILES = List.of(RenderProfile.MINECRAFT_PURE, RenderProfile.MINECRAFT_RGB);
     private static final List<RenderProfile> ALL_PROFILES = List.of(RenderProfile.values());
     private static volatile boolean betaRendering;
-    private static RenderProfile renderProfile = RenderProfile.MINECRAFT_RGB;
+    private static volatile RenderProfile renderProfile = RenderProfile.MINECRAFT_RGB;
     private static GiQuality giQuality = GiQuality.BALANCED;
     private static Quality shadowQuality = Quality.BALANCED;
     private static int rayDistance = 64;
@@ -281,7 +281,7 @@ public final class RendererSettings {
         return REVISION.get();
     }
 
-    public static synchronized RenderProfile renderProfile() {
+    public static RenderProfile renderProfile() {
         return renderProfile;
     }
 

@@ -47,6 +47,7 @@ public final class RasterMaterialCapture {
 
     /** RGB takes precedence over raw preview; neither flag can enable capture by itself. */
     public static boolean lightingPreviewRequested() { return ENABLED && RGB_PREVIEW; }
+    public static boolean unavailable() { return failed; }
     public static boolean rawPreviewRequested() { return ENABLED && PREVIEW && !RGB_PREVIEW; }
 
     /** Borrowed for this frame only. Never consume a prior frame after a skipped/failed capture. */

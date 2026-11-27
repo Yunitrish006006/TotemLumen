@@ -175,6 +175,7 @@ public final class TotemLumenClient implements ClientModInitializer {
         net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLevelEvents.AFTER_CLIENT_LEVEL_CHANGE.register((client, level) -> {
             ClientHeldLightField.clear();
             RasterLightingScene.clear();
+            RasterLightingRenderer.resetPreparation();
         });
         ClientChunkEvents.CHUNK_LOAD.register((level, chunk) -> {
             RasterLightingScene.onChunkChanged(level, chunk.getPos().x(), chunk.getPos().z());
@@ -195,6 +196,7 @@ public final class TotemLumenClient implements ClientModInitializer {
                 ClientHeldLightField.clear();
                 ClientGameplayLightPredictor.clear();
                 RasterLightingScene.clear();
+                RasterLightingRenderer.resetPreparation();
                 if (client.level != null && (renderProfile == RendererSettings.RenderProfile.MINECRAFT_RGB
                         || lastRenderProfile == RendererSettings.RenderProfile.MINECRAFT_RGB)) {
                     ClientGameplayLightPredictor.onProfileChanged(client.level, client.player);
@@ -304,14 +306,20 @@ public final class TotemLumenClient implements ClientModInitializer {
         // World presentation is no longer a HUD overlay. LevelRendererTakeoverMixin presents the
         // latest completed Totem frame into the main world target and skips vanilla level drawing.
         // HUD elements remain a separate later phase, so F1 affects only the HUD.
+        net.fabricmc.fabric.api.resource.v1.ResourceLoader.get(net.minecraft.server.packs.PackType.CLIENT_RESOURCES)
+                .registerReloadListener(Identifier.fromNamespaceAndPath(MOD_ID, "raster_pipelines"),
+                        (net.minecraft.server.packs.resources.ResourceManagerReloadListener) manager -> RasterLightingRenderer.reload());
         HudElementRegistry.addLast(
                 Identifier.fromNamespaceAndPath(MOD_ID, "compile_progress"),
-                (graphics, deltaTracker) -> RendererCompileProgressNotifier.drawHud(graphics)
+                (graphics, deltaTracker) -> {
+                    RendererCompileProgressNotifier.drawHud(graphics);
+                    dev.totem.lumen.render.RasterPreparationHud.draw(graphics);
+                }
         );
 
         ClientLifecycleEvents.CLIENT_STOPPING.register(client -> {
             RasterLightingScene.clear();
-            RasterLightingRenderer.close();
+            RasterLightingRenderer.reload();
             RasterMaterialCapture.close();
             RendererCompileProgressNotifier.reset();
             ClientGameplayLightPredictor.clear();

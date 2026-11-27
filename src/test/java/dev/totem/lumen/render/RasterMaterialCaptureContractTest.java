@@ -61,7 +61,9 @@ class RasterMaterialCaptureContractTest {
         assertTrue(capture.contains("!capturedThisFrame || device != gpu"));
         assertTrue(capture.contains("encoder.submit(); capturedThisFrame = true;"));
         assertTrue(capture.contains("private static void retireTargets() {\n        capturedThisFrame = false;"));
-        assertTrue(renderer.contains("if (materialPreview && material == null) return;"));
+        int missingMaterial = renderer.indexOf("if (materialPreview && material == null) {");
+        assertTrue(missingMaterial >= 0);
+        assertTrue(renderer.substring(missingMaterial, renderer.indexOf('}', missingMaterial)).contains("return;"));
         assertTrue(renderer.contains("if (!materialPreview) encoder.copyTextureToTexture"));
         assertTrue(renderer.contains("materialPreview ? material.color() : sceneView"));
         assertEquals(2, renderer.split("materialPreview \\? material.depth\\(\\) : target.getDepthTextureView\\(\\)", -1).length - 1);

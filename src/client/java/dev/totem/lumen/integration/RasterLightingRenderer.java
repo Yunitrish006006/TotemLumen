@@ -12,6 +12,8 @@ import dev.totem.lumen.render.RasterDirectLights;
 import dev.totem.lumen.render.RasterLightingVolume;
 import dev.totem.lumen.render.RasterLightingWindow;
 import dev.totem.lumen.render.RendererSettings;
+import dev.totem.lumen.render.RasterPreparationHud;
+import dev.totem.lumen.render.RasterPreparationHud.Stage;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.BindGroupLayouts;
 import net.minecraft.client.renderer.RenderPipelines;
@@ -28,6 +30,8 @@ public final class RasterLightingRenderer {
             "DepthSampler", "VoxelSampler", "LightSampler");
     private static final RenderPipeline COMPOSITE = pipeline("raster_ray_composite",
             RenderPipelines.DEBUG_FILLED_BOX.getColorTargetStates().getFirst().format(), "DepthSampler", "LightingSampler", "SceneSampler");
+    private static final RasterPipelineJob lightJob = new RasterPipelineJob(LIGHTING);
+    private static final RasterPipelineJob compositeJob = new RasterPipelineJob(COMPOSITE);
     private static GpuDevice device;
     private static GpuTexture atlas, sceneCopy, lighting;
     private static GpuTextureView atlasView, sceneView, lightingView;
@@ -61,6 +65,24 @@ public final class RasterLightingRenderer {
     public static boolean ready() { return ready && !failed && RendererSettings.rasterLightingEnabled(); }
     public static boolean unavailable() { return failed; }
 
+    public static void resetPreparation() {
+        failed = false;
+        RasterPreparationHud.reset();
+    }
+
+    public static void reload() {
+        for (var job : java.util.List.of(lightJob, compositeJob)) {
+            try {
+                job.close();
+            } catch (RuntimeException error) {
+                TotemLumenClient.LOGGER.warn("Retiring Raster Ray pipeline", error);
+            }
+        }
+        close();
+        device = null;
+        resetPreparation();
+    }
+
     public static void tickLifecycle(Minecraft client) {
         if (!RendererSettings.rasterLightingEnabled() || client.level == null) close();
     }
@@ -74,7 +96,12 @@ public final class RasterLightingRenderer {
         if (camera == null || !camera.initialized || volume == null) { ready = false; return; }
         var target = Minecraft.getInstance().gameRenderer.mainRenderTarget();
         if (target == null || target.getColorTexture() == null || target.getDepthTextureView() == null) { ready = false; return; }
-        if (!BackendProbe.detect().vulkan()) { ready = false; return; }
+        if (!BackendProbe.detect().vulkan()) {
+            RasterPreparationHud.fail(Stage.BACKEND);
+            failed = true;
+            return;
+        }
+        Stage operation = Stage.MATERIAL;
         try {
             var gpu = RenderSystem.getDevice();
             var color = target.getColorTexture();
@@ -82,12 +109,25 @@ public final class RasterLightingRenderer {
             boolean materialPreview = RasterMaterialCapture.lightingPreviewRequested();
             var material = RasterMaterialCapture.lightingFrame(gpu, w, h);
             // Explicit preview fails closed to the untouched native frame, never stale albedo.
-            if (materialPreview && material == null) return;
+            if (materialPreview && material == null) {
+                if (RasterMaterialCapture.unavailable()) RasterPreparationHud.fail(Stage.MATERIAL);
+                else RasterPreparationHud.stage(Stage.MATERIAL);
+                return;
+            }
+            if (device != null && device != gpu) reload();
+            device = gpu;
+            operation = Stage.LIGHTING;
+            var lightPipeline = lightJob.poll(gpu);
+            if (lightPipeline == null) { RasterPreparationHud.stage(operation); return; }
+            operation = Stage.COMPOSITE;
+            var compositePipeline = compositeJob.poll(gpu);
+            if (compositePipeline == null) { RasterPreparationHud.stage(operation); return; }
+            operation = Stage.SECTIONS;
             int lw = RendererSettings.internalResolution().targetWidth(w, h);
             int lh = Math.max(1, Math.round(lw * h / (float) w));
-            if (device != gpu || sceneCopy == null || sceneCopy.getWidth(0) != w || sceneCopy.getHeight(0) != h
+            if (sceneCopy == null || sceneCopy.getWidth(0) != w || sceneCopy.getHeight(0) != h
                     || sceneCopy.getFormat() != color.getFormat() || lighting.getWidth(0) != lw || lighting.getHeight(0) != lh) {
-                close(); device = gpu;
+                close();
                 atlas = gpu.createTexture("Raster ray voxel atlas", GpuTexture.USAGE_COPY_DST | GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_RENDER_ATTACHMENT,
                         GpuFormat.RGBA8_UNORM, RasterLightingVolume.ATLAS_WIDTH, RasterLightingVolume.ATLAS_HEIGHT, 1, 1);
                 atlasView = gpu.createTextureView(atlas);
@@ -99,29 +139,34 @@ public final class RasterLightingRenderer {
                 lightingView = gpu.createTextureView(lighting);
                 tile = new NativeImage(16, 256, false);
             }
-            var lightPipeline = RenderSystem.getCompiledPipeline(LIGHTING);
-            var compositePipeline = RenderSystem.getCompiledPipeline(COMPOSITE);
             var encoder = gpu.createCommandEncoder();
             if (epoch != volume.epoch) {
                 java.util.Arrays.fill(uploaded, null); epoch = volume.epoch;
                 // Zero means unknown, never an occluder. Do not sample uninitialized GPU memory.
                 encoder.clearColorTexture(atlas, new Vector4f());
             }
-            boolean complete = true;
+            int prepared = 0;
             boolean pendingUploads = false;
             int uploadsThisFrame = 0;
             for (int slot = 0; slot < uploaded.length; slot++) {
                 var section = volume.section(slot);
-                if (section == null) complete = false;
-                if (section == uploaded[slot]) continue;
+                if (section == uploaded[slot]) {
+                    if (section != null) prepared++;
+                    continue;
+                }
                 if (uploadsThisFrame >= RasterLightingWindow.UPLOADS_PER_FRAME) { pendingUploads = true; continue; }
                 for (int i = 0; i < 4096; i++) tile.setPixelABGR(i & 15, i >>> 4, section == null ? 0 : section.voxel(i));
                 encoder.writeToTexture(atlas, tile, 0, 0, RasterLightingVolume.tileX(slot), RasterLightingVolume.tileY(slot));
+                if (section != null) prepared++;
                 uploaded[slot] = section; uploadBytes += 16384; uploadsThisFrame++;
             }
             // A rebased/invalidated atlas must not shade with old slot contents while budgeted
             // uploads catch up. Submit copies only; native world rendering remains the fallback.
+            boolean complete = prepared == uploaded.length;
+            RasterPreparationHud.sections(prepared, uploaded.length);
             if (pendingUploads) { encoder.submit(); ready = false; return; }
+            operation = Stage.FRAME;
+            if (complete) RasterPreparationHud.stage(operation);
             if (materialPreview) {
                 boolean created = directLights == null;
                 if (created) {
@@ -174,6 +219,7 @@ public final class RasterLightingRenderer {
                 pass.draw(3, 1, 0, 0);
             }
             encoder.submit(); frames++; ready = complete;
+            if (complete) RasterPreparationHud.presented();
             if (complete && !logged) {
                 logged = true;
                 if (materialPreview) TotemLumenClient.LOGGER.info("RASTER_MATERIAL RGB lighting preview ACTIVE: directLights={}/32, shadowRays<=4, same-frame material/depth; opaque/cutout only, NOT production lighting", selectedLights.size());
@@ -182,6 +228,7 @@ public final class RasterLightingRenderer {
                         RasterLightingVolume.RAY_DISTANCE, RendererSettings.giQuality().samples(), RasterLightingVolume.ATLAS_WIDTH * RasterLightingVolume.ATLAS_HEIGHT * 4);
             }
         } catch (RuntimeException failure) {
+            RasterPreparationHud.fail(operation);
             failed = true; ready = false;
             TotemLumenClient.LOGGER.error("Raster ray experiment disabled; retaining Minecraft rendering", failure);
             close();
