@@ -34,6 +34,7 @@ public abstract class LevelRendererTakeoverMixin {
             boolean shouldRenderWeather,
             CallbackInfo ci
     ) {
+        dev.totem.lumen.integration.LumiaScene.beginFrame(cameraState);
         RasterMaterialCapture.beginFrame();
         if (HybridTerrainPolicy.ENABLED || !P5StableLookupRenderer.readyForWorldTakeover()) {
             return;

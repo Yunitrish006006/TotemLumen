@@ -1,6 +1,7 @@
 package dev.totem.lumen.mixin;
 
 import dev.totem.lumen.integration.ItemStackRenderStateGlowAccess;
+import dev.totem.lumen.integration.LumiaActors;
 import net.minecraft.client.renderer.item.ItemStackRenderState;
 import net.minecraft.util.LightCoordsUtil;
 import org.spongepowered.asm.mixin.Mixin;
@@ -42,6 +43,10 @@ public abstract class ItemStackRenderStateGlowMixin implements ItemStackRenderSt
             index = 2
     )
     private int totemLumen$fullBrightEmissiveItem(int light) {
-        return totemLumen$emissiveItem ? LightCoordsUtil.FULL_BRIGHT : light;
+        if (!totemLumen$emissiveItem) return light;
+        // Native sampling clamps coordinates above the lightmap. Lumia can distinguish an
+        // emitting item from an ordinary item standing under full sky and block light.
+        return LumiaActors.active() ? LightCoordsUtil.FULL_BRIGHT | LumiaActors.EMISSION_FLAG
+                : LightCoordsUtil.FULL_BRIGHT;
     }
 }

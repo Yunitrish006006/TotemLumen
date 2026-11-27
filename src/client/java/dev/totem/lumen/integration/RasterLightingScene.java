@@ -22,29 +22,34 @@ public final class RasterLightingScene {
     private static volatile boolean refreshRequested;
 
     private RasterLightingScene() { }
+    public static boolean active() {
+        return RendererSettings.lumiaEnabled() || RendererSettings.rasterLightingEnabled();
+    }
+
     public static RasterLightingVolume snapshot() { return snapshot; }
     public static void requestRefresh() { refreshRequested = true; }
 
     public static void clear() {
-        if (level != null) TotemLumenClient.LOGGER.info("Raster ray scene stopped: extractedSections={}", extracted);
+        if (level != null) TotemLumenClient.LOGGER.info("Local lighting scene stopped: extractedSections={}", extracted);
         level = null; window = null; snapshot = null; extracted = 0;
     }
 
     public static void onBlockChanged(ClientLevel changedLevel, net.minecraft.core.BlockPos pos) {
-        if (!RendererSettings.rasterLightingEnabled() || level != changedLevel || window == null) return;
+        if (!active() || level != changedLevel || window == null) return;
         if (window.invalidate(pos.getX() >> 4, pos.getY() >> 4, pos.getZ() >> 4)) snapshot = window.snapshot();
     }
 
     /** On unload, discard stale occluders immediately; reload is captured under the normal budget. */
     public static void onChunkChanged(ClientLevel changedLevel, int sx, int sz) {
-        if (!RendererSettings.rasterLightingEnabled() || level != changedLevel || window == null) return;
+        if (!active() || level != changedLevel || window == null) return;
         for (int sy = 0; sy < RasterLightingVolume.SECTIONS; sy++)
             window.invalidate(sx, window.sectionY(sy * RasterLightingVolume.SECTIONS * RasterLightingVolume.SECTIONS), sz);
         snapshot = window.snapshot();
     }
 
     public static void tick(Minecraft client) {
-        if (!RendererSettings.rasterLightingEnabled() || RasterLightingRenderer.unavailable() || client.level == null || client.player == null) {
+        boolean unavailable = RendererSettings.lumiaEnabled() ? LumiaScene.failed() : RasterLightingRenderer.unavailable();
+        if (!active() || unavailable || client.level == null || client.player == null) {
             if (level != null) clear();
             return;
         }
@@ -62,7 +67,7 @@ public final class RasterLightingScene {
             window = new RasterLightingWindow(nx, ny, nz, ++epoch, level == client.level ? window : null);
             level = client.level;
             snapshot = window.snapshot(); // Rebase only same-world overlapping immutable data.
-            TotemLumenClient.LOGGER.info("Raster ray window moved: retainedSections={}, capacity={}",
+            TotemLumenClient.LOGGER.info("Local lighting window moved: retainedSections={}, capacity={}",
                     window.retainedSections(), RasterLightingVolume.SLOTS);
         }
         long started = System.nanoTime();
@@ -76,24 +81,32 @@ public final class RasterLightingScene {
                     Arrays.fill(pixels, RasterLightingVolume.AIR);
                 } else {
                     var section = chunk.getSections()[sectionIndex];
+                    boolean lumia = RendererSettings.lumiaEnabled();
+                    var pos = new net.minecraft.core.BlockPos.MutableBlockPos();
                     HashMap<BlockState, Integer> resolved = new HashMap<>();
                     for (int ly = 0; ly < 16; ly++) for (int lz = 0; lz < 16; lz++) for (int lx = 0; lx < 16; lx++) {
                         BlockState state = section.getBlockState(lx, ly, lz);
-                        pixels[RasterLightingVolume.index(lx, ly, lz)] = resolved.computeIfAbsent(state, RasterLightingScene::pack);
+                        int packed = resolved.computeIfAbsent(state, RasterLightingScene::pack);
+                        if (lumia && (packed >>> 24) == 255) {
+                            pos.set(window.sectionX(slot) * 16 + lx, window.sectionY(slot) * 16 + ly, window.sectionZ(slot) * 16 + lz);
+                            // Lumia stores map-colour ID in solid alpha for secondary reflection hits.
+                            packed = (packed & 0xffffff) | ((192 + state.getMapColor(level, pos).id) << 24);
+                        }
+                        pixels[RasterLightingVolume.index(lx, ly, lz)] = packed;
                     }
                 }
             }
             RasterLightingVolume.Section old = window.section(slot);
             boolean changed = old == null;
             if (!changed) for (int i = 0; i < 4096; i++) if (old.voxel(i) != pixels[i]) { changed = true; break; }
-            window.put(slot, changed ? new RasterLightingVolume.Section(pixels, RasterMaterialCapture.lightingPreviewRequested()) : old);
+            window.put(slot, changed ? new RasterLightingVolume.Section(pixels, RendererSettings.lumiaEnabled() || RasterMaterialCapture.lightingPreviewRequested()) : old);
             extracted++;
             if (System.nanoTime() - started >= 2_000_000L) break;
         }
         snapshot = window.snapshot();
         if (extracted == 2 || extracted % 1200 == 0) {
-            TotemLumenClient.LOGGER.info("Raster ray extraction: sectionsPerTick=2, total={}, cpuMs={}, rayDistance={}",
-                    extracted, (System.nanoTime() - started) / 1_000_000.0, RasterLightingVolume.RAY_DISTANCE);
+            TotemLumenClient.LOGGER.info("Local lighting extraction: sectionsPerTick=2, total={}, cpuMs={}",
+                    extracted, (System.nanoTime() - started) / 1_000_000.0);
         }
     }
 

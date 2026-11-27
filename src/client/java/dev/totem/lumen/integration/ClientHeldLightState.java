@@ -58,12 +58,13 @@ public final class ClientHeldLightState {
             return captured;
         }
         boolean rgb = RendererSettings.renderProfile() == RendererSettings.RenderProfile.MINECRAFT_RGB;
+        boolean lumia = RendererSettings.lumiaEnabled();
         List<Light> result = new ArrayList<>();
         // Older modded servers still own their equipment list. An empty snapshot can mean disabled.
         Boolean policy = enabled;
         boolean vanilla = payload == null && client.getConnection() != null
                 && !ClientPlayNetworking.canSend(ServerLightingViewPackets.PageRequest.TYPE);
-        if (rgb && (Boolean.TRUE.equals(policy) || (policy == null && vanilla))) {
+        if ((rgb || lumia) && (Boolean.TRUE.equals(policy) || (policy == null && vanilla))) {
             var viewer = client.player;
             for (LivingEntity entity : client.level.getEntitiesOfClass(LivingEntity.class,
                     viewer.getBoundingBox().inflate(48), e -> e.distanceToSqr(viewer) <= 48 * 48)) {
@@ -75,7 +76,7 @@ public final class ClientHeldLightState {
                     if (packed != 0) addLight(result, entity, hand, packed, partialTick);
                 }
             }
-        } else if ((!rgb || policy == null) && payload != null
+        } else if ((!rgb && !lumia || policy == null) && payload != null
                 && payload.dimension().equals(client.level.dimension().identifier())) {
             for (HeldLightsPayload.Source source : payload.sources()) {
                 Entity entity = client.level.getEntity(source.entityId());

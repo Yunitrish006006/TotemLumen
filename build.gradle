@@ -356,3 +356,12 @@ tasks.register('generateVanillaEmitterPalette', JavaExec) {
     mainClass = 'dev.totem.lumen.gameplay.light.VanillaEmitterPaletteGenerator'
     args file('src/main/resources/totem-lumen/vanilla-emitter-colors.properties')
 }
+
+tasks.register('verifyLumiaPipelines', JavaExec) {
+    group = 'verification'
+    description = 'Compiles and links Lumia shader variants against Minecraft pipeline layouts.'
+    dependsOn tasks.named('researchClasses')
+    classpath = sourceSets.research.runtimeClasspath
+    mainClass = 'dev.totem.lumen.integration.LumiaPipelineVerifier'
+}
+tasks.named('check') { dependsOn tasks.named('verifyLumiaPipelines') }

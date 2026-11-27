@@ -142,10 +142,10 @@ class RasterLightingWindowTest {
                 "src/client/java/dev/totem/lumen/integration/RasterLightingScene.java"));
         assertTrue(scene.contains("ClientRgbVisualLightSource.packedFor(state)"));
         assertFalse(scene.contains("ClientGameplayLightPredictor"));
-        assertTrue(scene.contains("!RendererSettings.rasterLightingEnabled()"));
+        assertTrue(scene.contains("RendererSettings.lumiaEnabled() || RendererSettings.rasterLightingEnabled()"));
         String client = java.nio.file.Files.readString(java.nio.file.Path.of(
                 "src/client/java/dev/totem/lumen/TotemLumenClient.java"));
-        assertTrue(client.contains("if (RendererSettings.rasterLightingEnabled()) RasterLightingScene.requestRefresh()"));
+        assertTrue(client.contains("if (RasterLightingScene.active()) RasterLightingScene.requestRefresh()"));
     }
 
     @Test void plannedCoverageCoversViewCornersWithinFixedLevelBudget() {

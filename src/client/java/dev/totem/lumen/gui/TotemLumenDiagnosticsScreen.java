@@ -1,5 +1,7 @@
 package dev.totem.lumen.gui;
 
+import dev.totem.lumen.integration.LumiaScene;
+import dev.totem.lumen.render.RendererSettings;
 import dev.totem.lumen.render.RendererBootstrap;
 import dev.totem.lumen.render.RendererCompileProgressNotifier;
 import dev.totem.lumen.render.RendererState;
@@ -30,6 +32,13 @@ public final class TotemLumenDiagnosticsScreen extends Screen {
         int contentWidth = Math.min(CONTENT_WIDTH, Math.max(220, this.width - 32));
         int left = (this.width - contentWidth) / 2;
         int halfWidth = (contentWidth - 6) / 2;
+
+        this.addRenderableWidget(
+                Button.builder(Component.translatable("gui.done"), ignored -> this.onClose())
+                        .bounds(left, this.height - 28, contentWidth, 20)
+                        .build()
+        );
+        if (RendererSettings.lumiaEnabled()) return;
 
         this.renderViewButton = this.addRenderableWidget(
                 Button.builder(renderViewLabel(), ignored -> {
@@ -70,11 +79,6 @@ public final class TotemLumenDiagnosticsScreen extends Screen {
                 }).bounds(left, 174, contentWidth, 20).build()
         );
 
-        this.addRenderableWidget(
-                Button.builder(Component.translatable("gui.done"), ignored -> this.onClose())
-                        .bounds(left, this.height - 28, contentWidth, 20)
-                        .build()
-        );
     }
 
     @Override
@@ -90,6 +94,13 @@ public final class TotemLumenDiagnosticsScreen extends Screen {
         int left = (this.width - contentWidth) / 2;
 
         graphics.centeredText(this.font, this.title, this.width / 2, 18, 0xFFFFFFFF);
+
+        if (RendererSettings.lumiaEnabled()) {
+            String stage = LumiaScene.failed() ? "failed" : LumiaScene.ready() ? "ready" : "waiting";
+            drawStatusLine(graphics, left, 48, Component.translatable("screen.totem-lumen.render_profile.lumia"),
+                    Component.translatable("screen.totem-lumen.stage." + stage));
+            return;
+        }
 
         drawStatusLine(
                 graphics,

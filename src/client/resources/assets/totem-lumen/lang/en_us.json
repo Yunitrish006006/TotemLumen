@@ -114,6 +114,7 @@
   "screen.totem-lumen.render_profile.minecraft_rgb": "Minecraft + RGB Lighting",
   "screen.totem-lumen.beta_rendering": "Use Beta Rendering Methods: %s",
   "screen.totem-lumen.render_profile.totem": "Totem Lumen (Beta)",
+  "screen.totem-lumen.render_profile.lumia": "Lumia (Beta)",
   "screen.totem-lumen.render_profile.raster_ray": "Raster Ray (Beta, 24 blocks)",
   "message.totem-lumen.config.reloaded": "Totem Lumen server lighting settings reloaded.",
   "message.totem-lumen.config.unchanged": "Totem Lumen server lighting settings are unchanged.",

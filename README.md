@@ -17,6 +17,12 @@ The server gameplay subsystem never initializes or depends on Vulkan. A dedicate
 - Player runtime dependencies should remain limited to Fabric Loader, Fabric API, and Totem Lumen.
 - Shader binaries and other runtime assets must ship inside the mod; players should not need the Vulkan SDK, MoltenVK, Xcode, RenderDoc, or shader compilers.
 
+## Lumia (Beta)
+
+In Video Settings, enable **Use Beta Rendering Methods**, then choose **Lumia** under **Quality & Performance → Render profile**. Minecraft rasterizes world geometry at its native view distance. Lumia shades the supported surfaces during those draws, using original textures and tints, directional sunlight, nearby RGB emitters, secondary shadow rays and reflections. The HUD and inventory use the regular Minecraft UI.
+
+Lumia runs on Minecraft’s Vulkan backend. Secondary rays use a rolling 96 × 96 × 96 block volume. Reflections approximate block colours from the map palette and sample the sky when a ray misses. Far terrain therefore retains its silhouette while nearby surfaces have more lighting detail. The Beta targets native Vulkan on Windows and Vulkan over Metal on Apple Silicon.
+
 ## Current milestone
 
 The current development baseline is **Alpha 61** for Minecraft 26.3. Minecraft RGB gameplay-light propagation, reload persistence and sky/torch presentation have received focused local checks; the broader Totem renderer and dedicated-server parity matrices remain active. See [Alpha 61 release notes](docs/RELEASE_ALPHA61.md) for the tested scope and remaining limits.

@@ -18,7 +18,8 @@ public final class RendererSettings {
         MINECRAFT_PURE,
         MINECRAFT_RGB,
         TOTEM_LUMEN,
-        RASTER_RAY;
+        RASTER_RAY,
+        LUMIA;
 
         public RenderProfile next() {
             var profiles = availableProfiles();
@@ -295,6 +296,10 @@ public final class RendererSettings {
 
     public static synchronized boolean rasterLightingEnabled() {
         return renderProfile == RenderProfile.RASTER_RAY;
+    }
+
+    public static boolean lumiaEnabled() {
+        return renderProfile == RenderProfile.LUMIA;
     }
 
     /** Legacy compatibility for callers that still think in terms of an enable toggle. */
