@@ -20,7 +20,11 @@ LumiaGlass lumiaGlassMaterial(int bits, float textureAlpha, vec3 incident, vec3 
     float internalCosine = sqrt(max(0.0001, 1.0 - (1.0 - cosine * cosine) / (glass.ior * glass.ior)));
     glass.thickness = (pane ? 0.125 : 1.0) / internalCosine;
     float r = (glass.ior - 1.0) / (glass.ior + 1.0);
+#ifdef LUMIA_NO_REFLECTIONS
+    glass.fresnel = 0.0;
+#else
     glass.fresnel = r > 0.0 ? r * r + (1.0 - r * r) * pow(1.0 - cosine, 5.0) : 0.0;
+#endif
     glass.transmission = pow(max(optical.rgb * (1.0 - optical.a), vec3(0.0001)), vec3(glass.thickness));
     // Vanilla stained faces use 102/255 alpha for the unmarked, uniformly dyed
     // interior. The palette already accounts for that dye in transmission.
@@ -125,7 +129,11 @@ vec3 lumiaGlassColor(LumiaGlass glass, vec3 markingColor, vec3 position, vec3 no
     } else {
         refracted = lumiaTransmittedColor(shifted, uv, start.z, size);
     }
+#ifdef LUMIA_NO_REFLECTIONS
+    vec3 reflected = vec3(0.0);
+#else
     vec3 reflected = lumiaGlassReflection(position, normal, reflect(incident, normal), start, uv, orientation, margin, fog);
+#endif
     vec3 transmittedWeight = glass.transmission * (1.0 - glass.fresnel) * (1.0 - glass.markings);
     // The native blend/OIT resolve supplies the straight-through part. Avoid
     // compositing an opaque background copy over the other translucent surfaces.

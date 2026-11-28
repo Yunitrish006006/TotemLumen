@@ -172,6 +172,7 @@ vec3 lumiaVisibleLight(vec3 origin, vec3 direction, int skipActors) {
     return blocker >= .75 ? vec3(0.0) : transmission;
 }
 
+#ifndef LUMIA_LOW_DAYLIGHT
 vec3 lumiaSunlight(vec3 origin, vec3 normal, vec3 sun, int skipActors) {
     // The sun follows the XY plane. Z and its perpendicular in the orbit plane span its disc.
     const vec2 disc[3] = vec2[3](vec2(.79,.19), vec2(-.56,.59), vec2(-.23,-.78));
@@ -245,6 +246,8 @@ vec3 lumiaFilteredDaylight(vec3 origin, vec3 n, vec3 sun, int skipActors, bool d
     return value;
 }
 
+#endif
+
 vec3 lumiaShade(vec3 base, vec3 cameraRelative, vec3 normal, vec2 lightUv01, float reflectivity, float metal) {
     vec3 n = normal * inversesqrt(max(dot(normal, normal), 1e-8));
     vec3 pos = cameraRelative + LumiaCameraInVolume;
@@ -258,13 +261,24 @@ vec3 lumiaShade(vec3 base, vec3 cameraRelative, vec3 normal, vec2 lightUv01, flo
     // A hand or limb can protrude from the simplified body. Skip nearby own proxies.
     skipActors = lumiaContainingActors(pos, .3);
     #endif
+#ifdef LUMIA_LOW_DAYLIGHT
+    // One visibility ray per source; avoid instantiating the filtered daylight
+    // probe loops in the native Vulkan/Metal pipeline on the Low preset.
+    float cosine = max(dot(n, sun), 0.0);
+    vec3 directSun = vec3(0.0);
+    if (cosine * LumiaSky.a > 0.0)
+        directSun = lumiaVisibleLight(origin, sun, skipActors) * (cosine * LumiaSky.a);
+    vec3 skyAccess = lumiaVisibleLight(origin, vec3(0,1,0), skipActors);
+#else
     vec3 directSun = vec3(0.0);
     if (LumiaSky.a > 0.0 && dot(n, sun) > -.055)
         directSun = lumiaFilteredDaylight(origin, n, sun, skipActors, true);
     vec3 skyAccess = lumiaFilteredDaylight(origin, n, sun, skipActors, false);
+#endif
     vec3 diffuse = vec3(.055) + LumiaSky.rgb * (.07 + .35 * skyAccess)
             * (.72 + .28 * n.y) + vec3(1.0, .93, .80) * directSun;
 
+#ifndef LUMIA_NO_LOCAL_LIGHTS
     int heldCount = int(LumiaDirections[0].w);
     for (int i = 0; i < 34; ++i) {
         vec3 lightPos, emission;
@@ -300,11 +314,13 @@ vec3 lumiaShade(vec3 base, vec3 cameraRelative, vec3 normal, vec2 lightUv01, flo
         float attenuation = 1.0 - d / radius;
         diffuse += transmission * emission * (2.2 * attenuation * attenuation * cosine);
     }
+#endif
     ivec3 surfaceCell = ivec3(floor(pos - n * .03));
     vec4 surfaceVoxel = lumiaVoxel(surfaceCell, lumiaTile(surfaceCell >> 4));
     int surfaceTag = int(round(surfaceVoxel.a * 255.0));
     vec3 selfEmission = surfaceTag >= 80 && surfaceTag <= 96 ? vec3(0) : surfaceVoxel.rgb;
     vec3 color = base * (diffuse + selfEmission);
+#ifndef LUMIA_NO_REFLECTIONS
     if (reflectivity > 0.0 || metal > 0.0) {
         vec3 incident = cameraRelative * inversesqrt(max(dot(cameraRelative, cameraRelative), 1e-8));
         vec3 ray = reflect(incident, n);
@@ -320,6 +336,7 @@ vec3 lumiaShade(vec3 base, vec3 cameraRelative, vec3 normal, vec2 lightUv01, flo
         }
         color = mix(color, reflected, clamp(weight, 0.0, 1.0));
     }
+#endif
     return color;
 }
 

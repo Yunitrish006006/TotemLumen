@@ -5,6 +5,7 @@ import dev.totem.lumen.mixin.LumiaCloudDrawMixin;
 import dev.totem.lumen.mixin.LumiaWeatherDrawMixin;
 import net.minecraft.client.renderer.CloudRenderer;
 import net.minecraft.client.renderer.GameRenderer;
+import net.minecraft.client.renderer.ShaderManager;
 import net.minecraft.client.renderer.LevelRenderer;
 import net.minecraft.client.renderer.WeatherEffectRenderer;
 import net.minecraft.client.renderer.blockentity.AbstractSignRenderer;
@@ -33,13 +34,15 @@ final class LumiaMixinVerifier {
         try (var config = new InputStreamReader(LumiaMixinVerifier.class.getResourceAsStream(
                 "/totem-lumen.client.mixins.json"), StandardCharsets.UTF_8)) {
             var mixins = JsonParser.parseReader(config).getAsJsonObject().getAsJsonArray("client");
-            for (String name : new String[]{"LumiaTerrainMixin", "LumiaGlassBackgroundMixin", "LumiaWorldDrawMixin",
+            for (String name : new String[]{"LumiaTerrainMixin", "LumiaShaderReloadMixin", "LumiaGlassBackgroundMixin", "LumiaWorldDrawMixin",
                     "LumiaActorDrawMixin", "LumiaParticleDrawMixin", "LumiaCloudDrawMixin", "LumiaWeatherDrawMixin", "LumiaSignGlowMixin"}) {
                 if (!mixins.contains(new com.google.gson.JsonPrimitive(name))) {
                     throw new AssertionError("Missing client mixin " + name);
                 }
             }
         }
+        call(method(ShaderManager.class, "lambda$reload$1"), "net/minecraft/client/renderer/RenderPipelines",
+                "optionalPipelines", "()Ljava/util/List;");
         GameRenderer.class.getDeclaredMethod("renderLevel");
         var actor = method(PreparedRenderType.class, "draw");
         var particle = method(QuadParticleFeatureRenderer.class, "drawLayers");
