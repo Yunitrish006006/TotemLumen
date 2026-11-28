@@ -72,8 +72,9 @@ vec3 lumiaGlassFilter(vec4 voxel, int tag, vec3 localStart, vec3 ray, float exte
 
 // Intersect ellipsoids inscribed in the current visible entities' bounds. Shorten the
 // voxel ray to the nearest proxy so a wall in front of the proxy still wins.
-vec4 lumiaTrace(vec3 origin, vec3 direction, float limit, int skipActors, out vec3 face, out int actorHit, out vec3 transmission) {
+vec4 lumiaTrace(vec3 origin, vec3 direction, float limit, int skipActors, out vec3 face, out int actorHit, out vec3 transmission, out float travel) {
     transmission = vec3(1);
+    travel = limit;
     int nearest = -1;
     for (int i = 0; i < int(LumiaActorCount.x); ++i) {
         if ((skipActors & (1 << i)) != 0) continue;
@@ -106,7 +107,10 @@ vec4 lumiaTrace(vec3 origin, vec3 direction, float limit, int skipActors, out ve
         }
         vec4 v = lumiaVoxel(cell, tile);
         if (v.a < 0.25) break;
-        if (v.a >= 0.75) return v;
+        if (v.a >= 0.75) {
+            travel = entered;
+            return v;
+        }
         float t = min(next.x, min(next.y, next.z));
         int tag = int(round(v.a * 255.0));
         if ((tag >= 80 && tag <= 96) || (tag >= 129 && tag <= 162)) {
@@ -122,12 +126,18 @@ vec4 lumiaTrace(vec3 origin, vec3 direction, float limit, int skipActors, out ve
     }
     if (nearest >= 0) {
         actorHit = nearest;
+        travel = limit;
         vec3 gradient = (origin + limit * direction - LumiaCenters[nearest].xyz)
                 * LumiaInvRadii[nearest].xyz * LumiaInvRadii[nearest].xyz;
         face = gradient * inversesqrt(max(dot(gradient, gradient), 1e-10));
         return vec4(0, 0, 0, 1);
     }
     return vec4(0);
+}
+
+vec4 lumiaTrace(vec3 origin, vec3 direction, float limit, int skipActors, out vec3 face, out int actorHit, out vec3 transmission) {
+    float travel;
+    return lumiaTrace(origin, direction, limit, skipActors, face, actorHit, transmission, travel);
 }
 
 vec3 lumiaSkyRay(vec3 direction) {
@@ -164,18 +174,17 @@ vec3 lumiaVisibleLight(vec3 origin, vec3 direction, int skipActors) {
 
 vec3 lumiaSunlight(vec3 origin, vec3 normal, vec3 sun, int skipActors) {
     // The sun follows the XY plane. Z and its perpendicular in the orbit plane span its disc.
-    const vec2 disc[6] = vec2[6](vec2(.18,.21), vec2(-.51,.56), vec2(-.76,-.22),
-            vec2(-.10,-.83), vec2(.73,-.38), vec2(.46,.68));
+    const vec2 disc[3] = vec2[3](vec2(.79,.19), vec2(-.56,.59), vec2(-.23,-.78));
     const float angularRadius = .055;
     if (LumiaSky.a <= 0.0 || dot(normal, sun) <= -angularRadius) return vec3(0.0);
     vec3 light = vec3(0.0);
-    for (int i = 0; i < 6; ++i) {
+    for (int i = 0; i < 3; ++i) {
         vec3 ray = normalize(sun + angularRadius * (disc[i].x * vec3(sun.y, -sun.x, 0.0)
                 + disc[i].y * vec3(0.0, 0.0, 1.0)));
         float cosine = max(dot(normal, ray), 0.0);
         if (cosine > 0.0 && ray.y > 0.0) light += cosine * lumiaVisibleLight(origin, ray, skipActors);
     }
-    return light * (LumiaSky.a / 6.0);
+    return light * (LumiaSky.a / 3.0);
 }
 
 vec3 lumiaSkyAccess(vec3 origin, vec3 normal, int skipActors) {
@@ -195,6 +204,47 @@ vec3 lumiaSkyAccess(vec3 origin, vec3 normal, int skipActors) {
     return access / max(total, .0001);
 }
 
+// Reconstruct irradiance alone on a world-anchored surface grid. Neighbouring
+// fragments share probe positions; this removes the individual ray silhouettes
+// without filtering atlas texels, reflections or local RGB lighting.
+vec3 lumiaFilteredDaylight(vec3 origin, vec3 n, vec3 sun, int skipActors, bool direct) {
+    float spacing = direct ? .25 : 4.0;
+    vec3 axis = abs(n);
+    vec3 planeAxis = axis.y >= max(axis.x, axis.z) ? vec3(0,1,0)
+                   : axis.x >= axis.z ? vec3(1,0,0) : vec3(0,0,1);
+    vec3 u = planeAxis.x > .5 ? vec3(0,1,0) : vec3(1,0,0);
+    vec3 v = abs(cross(planeAxis, u));
+    float normalComponent = dot(n, planeAxis);
+    if (abs(normalComponent) < .0001) return vec3(0.0);
+    vec2 grid = vec2(dot(origin, u), dot(origin, v)) / spacing;
+    vec2 f = fract(grid);
+    vec2 weights = f * f * (3.0 - 2.0 * f);
+    vec3 value = vec3(0.0);
+    for (int i = 0; i < 4; ++i) {
+        vec2 corner = vec2(i & 1, i >> 1);
+        vec2 delta = (corner - f) * spacing;
+        vec3 offset = u * delta.x + v * delta.y;
+        offset -= planeAxis * (dot(n, offset) / normalComponent);
+        // Keep a probe on the receiver's side of walls, even when its lattice
+        // corner is just outside a closed room. Horizontal probes ignore actors.
+        float distance = length(offset);
+        if (distance > .001) {
+            vec3 face, transmission;
+            int actor;
+            float travel;
+            lumiaTrace(origin, offset / distance, distance, -1, face, actor, transmission, travel);
+            if (travel < distance) offset *= max(travel - .001, 0.0) / distance;
+        }
+        vec3 probe = origin + offset;
+        // A tiny fixed offset gives lattice points on voxel seams a consistent side.
+        probe += vec3(.0007, .0009, .0011);
+        vec2 w = mix(1.0 - weights, weights, corner);
+        value += w.x * w.y * (direct ? lumiaSunlight(probe, n, sun, skipActors)
+                                     : lumiaSkyAccess(probe, n, skipActors));
+    }
+    return value;
+}
+
 vec3 lumiaShade(vec3 base, vec3 cameraRelative, vec3 normal, vec2 lightUv01, float reflectivity, float metal) {
     vec3 n = normal * inversesqrt(max(dot(normal, normal), 1e-8));
     vec3 pos = cameraRelative + LumiaCameraInVolume;
@@ -208,8 +258,10 @@ vec3 lumiaShade(vec3 base, vec3 cameraRelative, vec3 normal, vec2 lightUv01, flo
     // A hand or limb can protrude from the simplified body. Skip nearby own proxies.
     skipActors = lumiaContainingActors(pos, .3);
     #endif
-    vec3 directSun = lumiaSunlight(origin, n, sun, skipActors);
-    vec3 skyAccess = lumiaSkyAccess(origin, n, skipActors);
+    vec3 directSun = vec3(0.0);
+    if (LumiaSky.a > 0.0 && dot(n, sun) > -.055)
+        directSun = lumiaFilteredDaylight(origin, n, sun, skipActors, true);
+    vec3 skyAccess = lumiaFilteredDaylight(origin, n, sun, skipActors, false);
     vec3 diffuse = vec3(.055) + LumiaSky.rgb * (.07 + .35 * skyAccess)
             * (.72 + .28 * n.y) + vec3(1.0, .93, .80) * directSun;
 
