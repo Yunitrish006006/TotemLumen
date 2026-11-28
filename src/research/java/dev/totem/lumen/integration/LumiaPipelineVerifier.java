@@ -13,9 +13,9 @@ import com.mojang.renderpearl.api.pipeline.ShaderType;
 import com.mojang.renderpearl.backend.api.BackendRenderPipeline;
 import com.mojang.renderpearl.backend.api.GpuDeviceBackend;
 import com.mojang.renderpearl.frontend.shaders.PipelineBuilder;
+import dev.totem.lumen.render.RendererSettings;
 import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.resources.Identifier;
-import net.minecraft.client.renderer.chunk.ChunkSectionLayer;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -37,12 +37,31 @@ public final class LumiaPipelineVerifier {
         candidates.addAll(RenderPipelines.optionalPipelines());
         Set<String> shaderFamilies = new LinkedHashSet<>();
         var failed = new ArrayList<String>();
+        int defaults = LumiaPipelines.qualityFlags(RendererSettings.Quality.BALANCED,
+                RendererSettings.LocalLightQuality.FULL, true);
+        int low = LumiaPipelines.qualityFlags(RendererSettings.Quality.LOW,
+                RendererSettings.LocalLightQuality.OFF, false);
+        Set<String> lowDefines = Set.of("LUMIA_LOW_DAYLIGHT", "LUMIA_NO_LOCAL_LIGHTS", "LUMIA_NO_REFLECTIONS");
         int compiled = 0;
         try (var assets = new Assets(); var builder = new PipelineBuilder(frontendOnlyDevice())) {
             for (var nativePipeline : candidates) {
                 var variants = new LinkedHashSet<RenderPipeline>();
-                variants.add(variant(nativePipeline));
-                variants.add(LumiaPipelines.nativeGlassFallback(nativePipeline));
+                var standard = LumiaPipelines.drawVariant(nativePipeline, defaults);
+                var reduced = LumiaPipelines.drawVariant(nativePipeline, low);
+                var fallback = LumiaPipelines.nativeGlassFallback(nativePipeline);
+                if (standard != nativePipeline) {
+                    if (standard.getLocation().equals(reduced.getLocation())
+                            || !reduced.getShaderDefines().flags().containsAll(lowDefines)
+                            || !java.util.Collections.disjoint(standard.getShaderDefines().flags(), lowDefines)
+                            || standard != LumiaPipelines.drawVariant(nativePipeline, defaults)) {
+                        throw new AssertionError("Incorrect Lumia quality variant for " + nativePipeline.getLocation());
+                    }
+                }
+                if (!java.util.Collections.disjoint(fallback.getShaderDefines().flags(), lowDefines))
+                    throw new AssertionError("Quality flags leaked into native fallback " + fallback.getLocation());
+                variants.add(standard);
+                variants.add(reduced);
+                variants.add(fallback);
                 variants.remove(nativePipeline);
                 for (var pipeline : variants) {
                     var pending = builder.compilePipeline(pipeline, assets, Runnable::run).join();
@@ -62,18 +81,6 @@ public final class LumiaPipelineVerifier {
             throw new AssertionError("Missing Lumia shader family in " + shaderFamilies);
         }
         System.out.println("Linked " + compiled + " Lumia pipeline variants across " + shaderFamilies);
-    }
-
-    private static RenderPipeline variant(RenderPipeline source) {
-        for (var layer : ChunkSectionLayer.values()) {
-            if (source == layer.pipeline(false) || source == layer.pipeline(true)) {
-                return LumiaPipelines.terrainVariant(source, layer.translucent());
-            }
-        }
-        // The native OIT stage overrides the translucent layer's regular pipeline.
-        var terrain = LumiaPipelines.terrainVariant(source, true);
-        if (terrain != source) return terrain;
-        return LumiaActors.variant(source);
     }
 
     // GPU allocation starts after the frontend has verified vertex formats, stage interfaces,

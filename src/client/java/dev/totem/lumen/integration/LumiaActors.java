@@ -44,12 +44,16 @@ public final class LumiaActors {
     }
 
     public static RenderPipeline variant(RenderPipeline source) {
+        return variant(source, LumiaPipelines.currentQualityFlags());
+    }
+
+    static RenderPipeline variant(RenderPipeline source, int quality) {
         var shader = source.getShaders().get(ShaderType.VERTEX);
         var replacement = SHADERS.get(shader);
         var flags = source.getShaderDefines().flags();
         if (replacement == null || !shader.equals(source.getShaders().get(ShaderType.FRAGMENT))
                 || flags.contains("IS_GUI") || flags.contains("IS_SEE_THROUGH")
                 || flags.contains("EMISSIVE") || flags.contains("OIT_ALPHA_ONLY")) return source;
-        return LumiaPipelines.variant(source, replacement, false);
+        return LumiaPipelines.variant(source, replacement, false, quality);
     }
 }

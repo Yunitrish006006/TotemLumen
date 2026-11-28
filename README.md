@@ -21,7 +21,7 @@ The server gameplay subsystem never initializes or depends on Vulkan. A dedicate
 
 In Video Settings, enable **Use Beta Rendering Methods**, then choose **Lumia** under **Quality & Performance → Render profile**. Minecraft rasterizes world geometry at its native view distance. Lumia shades the supported surfaces during those draws, using original textures and tints, directional sunlight, nearby RGB emitters, secondary shadow rays and reflections. The HUD and inventory use the regular Minecraft UI.
 
-Sun shadows soften with distance from the casting surface. Skylight enters from above and from side openings under overhangs.
+Balanced and High shadow quality soften sun shadows with distance and interpolate skylight under overhangs. Low uses a single sample for each and gives shadows a sharper edge.
 
 Clear and stained glass use the original model and texture. Oblique views increase reflection, and a full glass block displaces the background more than a thin pane. Glass samples the opaque scene captured earlier in the frame. Off-screen reflections use the voxel scene and sky. Nearby coloured glass also filters sunlight and local RGB lights.
 

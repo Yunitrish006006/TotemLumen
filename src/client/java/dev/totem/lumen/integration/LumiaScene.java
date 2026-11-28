@@ -138,7 +138,7 @@ public final class LumiaScene {
                 held.setColumn(i * 2 + 1, new Vector4f(light.red(), light.green(), light.blue(), 0));
             }
             sun.w = handCount;
-            actors = actorBounds(frame.entityRenderStates, volume);
+            actors = actorBounds(RendererSettings.entityRayTracingEnabled() ? frame.entityRenderStates : List.of(), volume);
             environment = RenderSystem.getDynamicUniforms().writeTransform(held,
                     sky, offset, new Matrix4f().zero().setColumn(0, sun));
             if (!logged) {
