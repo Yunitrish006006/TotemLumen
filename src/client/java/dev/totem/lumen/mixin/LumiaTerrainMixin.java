@@ -2,6 +2,7 @@ package dev.totem.lumen.mixin;
 
 import com.mojang.renderpearl.api.commands.RenderPass;
 import com.mojang.renderpearl.api.pipeline.RenderPipeline;
+import dev.totem.lumen.integration.LumiaGlassBackground;
 import dev.totem.lumen.integration.LumiaPipelines;
 import dev.totem.lumen.integration.LumiaScene;
 import dev.totem.lumen.render.RendererSettings;
@@ -17,17 +18,28 @@ abstract class LumiaTerrainMixin {
     @ModifyArgs(method = "renderLayers", at = @At(value = "INVOKE",
             target = "Lnet/minecraft/client/renderer/chunk/ChunkSectionsToRender;render(Lnet/minecraft/client/renderer/chunk/ChunkSectionLayer;Lcom/mojang/renderpearl/api/commands/RenderPass;Lcom/mojang/renderpearl/api/buffers/GpuBuffer;Lcom/mojang/renderpearl/api/pipeline/IndexType;Lcom/mojang/renderpearl/api/pipeline/RenderPipeline;Lcom/mojang/renderpearl/api/pipeline/RenderPipeline;)V"))
     private void totemLumen$shadeTerrain(Args args) {
-        if (!RendererSettings.lumiaEnabled() || !LumiaScene.ready()) return;
+        if (!RendererSettings.lumiaEnabled()) return;
         ChunkSectionLayer layer = args.get(0);
+        boolean shadedReady = LumiaScene.ready()
+                && (!layer.translucent() || LumiaGlassBackground.ready());
+        if (!shadedReady && !layer.translucent()) return;
         RenderPipeline separate = args.get(4);
         RenderPipeline multi = args.get(5);
         if (separate == null) separate = layer.pipeline(false);
         if (multi == null) multi = layer.pipeline(true);
+        if (!shadedReady) {
+            args.set(4, LumiaPipelines.nativeGlassFallback(separate));
+            args.set(5, LumiaPipelines.nativeGlassFallback(multi));
+            return;
+        }
         var shaded = LumiaPipelines.terrainVariant(separate, layer.translucent());
         if (shaded == separate) return;
         args.set(4, shaded);
         args.set(5, LumiaPipelines.terrainVariant(multi, layer.translucent()));
         RenderPass pass = args.get(1);
         LumiaScene.bind(pass);
+        if (layer.translucent() && !shaded.getShaderDefines().flags().contains("OIT_ALPHA_ONLY")) {
+            LumiaGlassBackground.bind(pass);
+        }
     }
 }

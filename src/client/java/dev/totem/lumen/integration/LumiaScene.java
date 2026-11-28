@@ -34,6 +34,9 @@ public final class LumiaScene {
             .withUniform("LumiaLights", UniformType.COMBINED_IMAGE_SAMPLER).build();
     private static final int PALETTE_START = RasterDirectLights.TEXELS;
     private static final int MAPPING_START = PALETTE_START + 64;
+    private static final int GLASS_START = MAPPING_START + RasterLightingVolume.SLOTS;
+    private static final int METADATA_WIDTH = GLASS_START + LumiaGlassMaterials.TABLE_TEXELS;
+    private static long glassRevision = -1;
     private static final LumiaVoxelAtlas atlas = new LumiaVoxelAtlas();
     private static GpuDevice device;
     private static GpuTexture voxels, lights;
@@ -86,6 +89,13 @@ public final class LumiaScene {
                 for (int slot = 0; slot < RasterLightingVolume.SLOTS; slot++) {
                     lightPixels.setPixelABGR(MAPPING_START + slot, 0, 0xff000000 | atlas.entry(slot));
                 }
+            }
+            BlockMaterialRuleRegistry.ensureLoaded(client.getResourceManager());
+            long revision = BlockMaterialRuleRegistry.revision();
+            if (glassRevision != revision) {
+                LumiaGlassMaterials.writePalette(lightPixels, GLASS_START);
+                glassRevision = revision;
+                metadataChanged = true;
             }
             Vector3f offset = new Vector3f((float)(camera.pos.x - volume.x), (float)(camera.pos.y - volume.y),
                     (float)(camera.pos.z - volume.z));
@@ -184,9 +194,9 @@ public final class LumiaScene {
         voxelView = gpu.createTextureView(voxels);
         tile = new NativeImage(16, 256, false);
         lights = gpu.createTexture("Lumia emitters and reflection colours", flags,
-                GpuFormat.RGBA8_UNORM, MAPPING_START + RasterLightingVolume.SLOTS, 1, 1, 1);
+                GpuFormat.RGBA8_UNORM, METADATA_WIDTH, 1, 1, 1);
         lightView = gpu.createTextureView(lights);
-        lightPixels = new NativeImage(MAPPING_START + RasterLightingVolume.SLOTS, 1, false);
+        lightPixels = new NativeImage(METADATA_WIDTH, 1, false);
         for (int i = 0; i < 64; i++) {
             var color = MapColor.byId(i);
             lightPixels.setPixel(PALETTE_START + i, 0, 0xff000000 | (color == null || color == MapColor.NONE ? 0x777777 : color.col));
@@ -194,6 +204,8 @@ public final class LumiaScene {
     }
 
     public static void close() {
+        LumiaGlassBackground.close();
+        glassRevision = -1;
         environment = actors = null;
         if (voxelView != null) voxelView.close();
         if (lightView != null) lightView.close();

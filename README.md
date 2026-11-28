@@ -21,6 +21,8 @@ The server gameplay subsystem never initializes or depends on Vulkan. A dedicate
 
 In Video Settings, enable **Use Beta Rendering Methods**, then choose **Lumia** under **Quality & Performance → Render profile**. Minecraft rasterizes world geometry at its native view distance. Lumia shades the supported surfaces during those draws, using original textures and tints, directional sunlight, nearby RGB emitters, secondary shadow rays and reflections. The HUD and inventory use the regular Minecraft UI.
 
+Clear and stained glass use the original model and texture. Oblique views increase reflection, and a full glass block displaces the background more than a thin pane. Glass samples the opaque scene captured earlier in the frame. Off-screen reflections use the voxel scene and sky. Nearby coloured glass also filters sunlight and local RGB lights.
+
 Lumia runs on Minecraft’s Vulkan backend. Secondary rays use a rolling 96 × 96 × 96 block volume. Reflections approximate block colours from the map palette and sample the sky when a ray misses. Far terrain therefore retains its silhouette while nearby surfaces have more lighting detail. The Beta targets native Vulkan on Windows and Vulkan over Metal on Apple Silicon.
 
 ## Current milestone

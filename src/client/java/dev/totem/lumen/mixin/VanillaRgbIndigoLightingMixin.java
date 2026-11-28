@@ -1,11 +1,13 @@
 package dev.totem.lumen.mixin;
 
 import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
+import dev.totem.lumen.integration.LumiaGlassMaterials;
 import dev.totem.lumen.integration.LumiaPipelines;
 import dev.totem.lumen.integration.VanillaRgbLighting;
 import dev.totem.lumen.render.RendererSettings;
 import net.fabricmc.fabric.api.client.renderer.v1.mesh.MutableQuadView;
 import net.minecraft.client.renderer.block.BlockAndTintGetter;
+import net.minecraft.client.renderer.chunk.RenderSectionRegion;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.level.CardinalLighting;
@@ -50,6 +52,9 @@ public abstract class VanillaRgbIndigoLightingMixin {
             require = 1
     )
     private void totemLumen$applyRgb(MutableQuadView quad, CallbackInfoReturnable<Boolean> cir) {
+        if (RendererSettings.lumiaEnabled() && level instanceof RenderSectionRegion) {
+            LumiaGlassMaterials.tagTerrain(quad, blockState);
+        }
         Direction face = quad.cullFace() != null ? quad.cullFace() : quad.nominalFace();
         VanillaRgbLighting.applySurfaceTint(quad, level, blockState, pos, face);
     }

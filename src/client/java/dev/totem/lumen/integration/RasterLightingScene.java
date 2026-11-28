@@ -116,6 +116,7 @@ public final class RasterLightingScene {
         boolean solid = state.canOcclude() && !MaterialFlags.has(material.flags(), MaterialFlags.TRANSLUCENT);
         // Reuse the RGB profile's source rules (including gameplay-strength override and
         // visual +1 adjustment). This helper is stateless; it does not run RGB propagation.
-        return RasterLightingVolume.packRgbSource(solid, ClientRgbVisualLightSource.packedFor(state));
+        int packed = RasterLightingVolume.packRgbSource(solid, ClientRgbVisualLightSource.packedFor(state));
+        return RendererSettings.lumiaEnabled() ? LumiaGlassMaterials.voxel(state, packed) : packed;
     }
 }

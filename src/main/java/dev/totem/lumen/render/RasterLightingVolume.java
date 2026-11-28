@@ -40,7 +40,9 @@ public final class RasterLightingVolume {
             emitters = new int[collectEmitters ? 8 : 0];
             java.util.Arrays.fill(emitters, -1);
             if (collectEmitters) for (int i = 0; i < 4096; i++) {
-                if ((this.abgr[i] & 0xffffff) == 0 || (this.abgr[i] >>> 24) == 0) continue;
+                int tag = this.abgr[i] >>> 24;
+                // Lumia uses the colour bytes of non-emitting pane cells for their connection mask.
+                if ((this.abgr[i] & 0xffffff) == 0 || tag == 0 || (tag >= 80 && tag <= 96)) continue;
                 int x = i & 15, y = i >>> 8, z = (i >>> 4) & 15;
                 int octant = (x >>> 3) | ((z >>> 3) << 1) | ((y >>> 3) << 2);
                 int old = emitters[octant];

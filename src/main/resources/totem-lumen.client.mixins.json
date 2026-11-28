@@ -35,6 +35,7 @@
     "RgbEmitterMeshInputMixin",
     "NetherChunkLightQueueMixin",
     "LumiaTerrainMixin",
+    "LumiaGlassBackgroundMixin",
     "RasterMaterialCaptureMixin",
     "RasterMaterialLayersInvoker",
     "SceneExtractionBridgeBlockEntityMixin",
