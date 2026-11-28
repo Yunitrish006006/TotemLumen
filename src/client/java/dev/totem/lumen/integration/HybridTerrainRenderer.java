@@ -40,6 +40,10 @@ public final class HybridTerrainRenderer {
 
     private HybridTerrainRenderer() { }
 
+    public static RenderPipeline presentationPipeline() {
+        return PIPELINE;
+    }
+
     public static void render(CameraRenderState camera, GpuTextureView output, FrameSnapshot frame,
                               float[][] basis, int width, int height, int rayDistance) {
         Minecraft client = Minecraft.getInstance();

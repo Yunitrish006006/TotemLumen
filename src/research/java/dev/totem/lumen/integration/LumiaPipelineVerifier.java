@@ -32,6 +32,8 @@ public final class LumiaPipelineVerifier {
     private LumiaPipelineVerifier() {}
 
     public static void main(String[] args) throws Exception {
+        // Exercise the superset including the opt-in opaque material draw paths in this verifier JVM.
+        System.setProperty("totem.lumen.rasterMaterialCapture", "true");
         LumiaMixinVerifier.verify();
         LumiaPreparationVerifier.verify();
         var candidates = new LinkedHashSet<>(RenderPipelines.requiredPipelines());
@@ -45,6 +47,15 @@ public final class LumiaPipelineVerifier {
         Set<String> lowDefines = Set.of("LUMIA_LOW_DAYLIGHT", "LUMIA_NO_LOCAL_LIGHTS", "LUMIA_NO_REFLECTIONS");
         int compiled = 0;
         try (var assets = new Assets(); var builder = new PipelineBuilder(frontendOnlyDevice())) {
+            var rasterVariants = RasterLightingRenderer.preparationVariants();
+            if (rasterVariants.size() <= 2) throw new AssertionError("Missing Raster material variants");
+            for (var pipeline : rasterVariants) {
+                var pending = builder.compilePipeline(pipeline, assets, Runnable::run).join();
+                if (pending == CompiledRenderPipeline.Pending.NULL)
+                    throw new AssertionError("Unable to link " + pipeline.getLocation());
+                pending.finishCompile();
+            }
+            System.out.println("Linked " + rasterVariants.size() + " Raster Ray pipeline variants");
             for (var nativePipeline : candidates) {
                 var variants = new LinkedHashSet<RenderPipeline>();
                 var standard = LumiaPipelines.drawVariant(nativePipeline, defaults);

@@ -3,6 +3,8 @@ package dev.totem.lumen.mixin;
 import com.mojang.blaze3d.pipeline.PipelineCache;
 import com.mojang.blaze3d.systems.RenderSystem;
 import dev.totem.lumen.integration.LumiaPreparation;
+import dev.totem.lumen.integration.RasterLightingRenderer;
+import dev.totem.lumen.render.RendererBootstrap;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -14,10 +16,14 @@ abstract class LumiaPipelineCacheLifecycleMixin {
     @Inject(method = "setCurrentPipelineCache", at = @At("HEAD"))
     private static void totemLumen$replaceCache(PipelineCache next, CallbackInfoReturnable<PipelineCache> ci) {
         LumiaPreparation.replaceCache(next);
+        RasterLightingRenderer.replaceCache(next);
+        RendererBootstrap.replacePresentationCache(next);
     }
 
     @Inject(method = "shutdownRenderer", at = @At("HEAD"))
     private static void totemLumen$releaseCompiler(CallbackInfo ci) {
         LumiaPreparation.replaceCache(null);
+        RasterLightingRenderer.replaceCache(null);
+        RendererBootstrap.replacePresentationCache(null);
     }
 }

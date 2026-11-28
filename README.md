@@ -17,15 +17,19 @@ The server gameplay subsystem never initializes or depends on Vulkan. A dedicate
 - Player runtime dependencies should remain limited to Fabric Loader, Fabric API, and Totem Lumen.
 - Shader binaries and other runtime assets must ship inside the mod; players should not need the Vulkan SDK, MoltenVK, Xcode, RenderDoc, or shader compilers.
 
+## Render profile preparation
+
+In Video Settings, turn on **Use Beta Rendering Methods** to prepare Totem Lumen, Raster Ray and Lumia in the background. Each profile has its own status under **Quality & Performance → Render profile**. You can keep playing and switch among the ready profiles while another one compiles. Minecraft Vanilla and Minecraft + RGB Lighting are available immediately. If a saved beta profile is still preparing when you launch the game, Minecraft Vanilla displays the world until that profile is ready.
+
 ## Lumia (Beta)
 
-In Video Settings, enable **Use Beta Rendering Methods** to prepare Lumia in the background. You can keep playing with your current profile and select **Lumia** under **Quality & Performance → Render profile** once it is ready. If Lumia was saved as your preference, Minecraft Pure renders the world during preparation and Lumia resumes automatically. Minecraft rasterizes world geometry at its native view distance. Lumia shades the supported surfaces during those draws, using original textures and tints, directional sunlight, nearby RGB emitters, secondary shadow rays and reflections. The HUD and inventory use the regular Minecraft UI.
+Minecraft rasterizes world geometry at its native view distance. Lumia shades the supported surfaces during those draws, using original textures and tints, directional sunlight, nearby RGB emitters, secondary shadow rays and reflections. The HUD and inventory use the regular Minecraft UI.
 
 Balanced and High shadow quality soften sun shadows with distance and interpolate skylight under overhangs. Low uses a single sample for each and gives shadows a sharper edge.
 
 Clear and stained glass use the original model and texture. Oblique views increase reflection, and a full glass block displaces the background more than a thin pane. Glass samples the opaque scene captured earlier in the frame. Off-screen reflections use the voxel scene and sky. Nearby coloured glass also filters sunlight and local RGB lights.
 
-Metallic terrain reflects nearby voxel geometry and the sky. Iron, gold and fresh copper show stronger reflections than raw or oxidized metal. The original atlas texel colours tint the reflection, keeping seams and grain visible. Block material rules can adjust metallic response, roughness and reflection strength.
+With **World reflections** enabled, metallic terrain reflects nearby voxel geometry and the sky. Iron, gold and fresh copper show stronger reflections than raw or oxidized metal. The original atlas texel colours tint the reflection, keeping seams and grain visible. Block material rules can adjust metallic response, roughness and reflection strength.
 
 Lumia runs on Minecraft’s Vulkan backend. Secondary rays use a rolling 96 × 96 × 96 block volume. Reflections approximate block colours from the map palette and sample the sky when a ray misses. Far terrain therefore retains its silhouette while nearby surfaces have more lighting detail. The Beta targets native Vulkan on Windows and Vulkan over Metal on Apple Silicon.
 

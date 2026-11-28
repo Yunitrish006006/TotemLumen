@@ -15,6 +15,7 @@ import org.joml.Vector4f;
 
 import java.util.IdentityHashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.Optional;
 import java.util.OptionalDouble;
 
@@ -109,6 +110,19 @@ public final class RasterMaterialCapture {
             TotemLumenClient.LOGGER.error("Raster material capture disabled; native rendering unchanged", failure);
             retireTargets();
         } finally { clearPending(); }
+    }
+
+    static void addPreparationVariants(Set<RenderPipeline> variants) {
+        if (!ENABLED) return;
+        for (var layer : ChunkSectionLayerGroup.OPAQUE.layers()) {
+            variants.add(pipeline(layer.pipeline(false)));
+            variants.add(pipeline(layer.pipeline(true)));
+        }
+    }
+
+    static void reload() {
+        close();
+        failed = false;
     }
 
     static RenderPipeline pipeline(RenderPipeline source) {

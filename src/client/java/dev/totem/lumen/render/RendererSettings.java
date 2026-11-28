@@ -2,6 +2,7 @@ package dev.totem.lumen.render;
 
 import dev.totem.lumen.TotemLumenClient;
 import dev.totem.lumen.integration.LumiaPreparation;
+import dev.totem.lumen.integration.RasterLightingRenderer;
 import net.fabricmc.loader.api.FabricLoader;
 
 import java.io.IOException;
@@ -182,10 +183,8 @@ public final class RendererSettings {
 
     private static final List<RenderProfile> STABLE_PROFILES = List.of(RenderProfile.MINECRAFT_PURE, RenderProfile.MINECRAFT_RGB);
     private static final List<RenderProfile> ALL_PROFILES = List.of(RenderProfile.values());
-    private static final List<RenderProfile> PROFILES_WITHOUT_LUMIA =
-            ALL_PROFILES.stream().filter(profile -> profile != RenderProfile.LUMIA).toList();
     private static volatile boolean betaRendering;
-    // Persist the player's preference even when Lumia is temporarily unavailable.
+    // Persist the player's preference while its pipelines are being prepared.
     private static volatile RenderProfile renderProfile = RenderProfile.MINECRAFT_RGB;
     private static GiQuality giQuality = GiQuality.BALANCED;
     private static Quality shadowQuality = Quality.BALANCED;
@@ -286,24 +285,25 @@ public final class RendererSettings {
         return REVISION.get();
     }
 
+    public static RenderProfile preferredRenderProfile() {
+        return renderProfile;
+    }
+
     public static RenderProfile renderProfile() {
         RenderProfile preferred = renderProfile;
-        if (preferred == RenderProfile.LUMIA && LumiaPreparation.status() != LumiaPreparation.Status.READY) {
+        if (!ProfilePreparation.ready(preferred)) {
             return RenderProfile.MINECRAFT_PURE;
         }
         return preferred;
     }
 
     public static synchronized boolean rendererEnabled() {
-        // MINECRAFT_RGB deliberately stays on Minecraft's normal world renderer. Its RGB light
-        // field is presented by the independent vanilla overlay path, so it must never start or
-        // wait for Totem Lumen's monolithic Vulkan pipeline. Only the dedicated Totem profile
-        // owns the Vulkan renderer lifecycle.
-        return renderProfile == RenderProfile.TOTEM_LUMEN;
+        // Only the prepared, active Totem profile takes over world rendering.
+        return renderProfile() == RenderProfile.TOTEM_LUMEN;
     }
 
     public static synchronized boolean rasterLightingEnabled() {
-        return renderProfile == RenderProfile.RASTER_RAY;
+        return renderProfile() == RenderProfile.RASTER_RAY;
     }
 
     public static boolean lumiaEnabled() {
@@ -325,6 +325,7 @@ public final class RendererSettings {
     public static synchronized void toggleBetaRendering() {
         betaRendering = !betaRendering;
         LumiaPreparation.invalidate();
+        RasterLightingRenderer.invalidatePreparation();
         ensureAvailableProfile();
         changed();
     }
@@ -335,7 +336,7 @@ public final class RendererSettings {
 
     private static List<RenderProfile> selectableProfiles() {
         if (!betaRendering) return STABLE_PROFILES;
-        return LumiaPreparation.status() == LumiaPreparation.Status.READY ? ALL_PROFILES : PROFILES_WITHOUT_LUMIA;
+        return ALL_PROFILES.stream().filter(ProfilePreparation::ready).toList();
     }
 
     private static void ensureAvailableProfile() {
@@ -356,7 +357,7 @@ public final class RendererSettings {
     public static synchronized RenderProfile setRenderProfile(int index) {
         var profiles = availableProfiles();
         RenderProfile requested = profiles.get(Math.clamp(index, 0, profiles.size() - 1));
-        if (requested == RenderProfile.LUMIA && LumiaPreparation.status() != LumiaPreparation.Status.READY) {
+        if (!ProfilePreparation.ready(requested)) {
             return renderProfile();
         }
         renderProfile = requested;

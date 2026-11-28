@@ -201,6 +201,8 @@ public final class VulkanComputeProgram implements AutoCloseable {
         synchronized (MAIN_GI_PIPELINE_LOCK) {
             PreparedPipeline prepared = mainGiPreparedPipeline;
             mainGiPreparedPipeline = null;
+            mainGiPipelinePrewarmFailure = null;
+            mainGiPipelinePrewarmStarted = false;
             if (prepared != null) prepared.close();
         }
     }

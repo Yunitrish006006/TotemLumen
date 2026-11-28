@@ -3,6 +3,7 @@ package dev.totem.lumen.vulkan;
 import com.mojang.renderpearl.backend.vulkan.VulkanDevice;
 import dev.totem.lumen.TotemLumenClient;
 import dev.totem.lumen.render.RendererSettings;
+import dev.totem.lumen.render.ProfilePreparation;
 import dev.totem.lumen.vulkan.resource.VulkanOwnedBuffer;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.vulkan.VK10;
@@ -38,7 +39,7 @@ public final class P16MultipassReflection {
                     && preparedDevice.vkDevice() == device.vkDevice()) {
                 return;
             }
-            if (prewarmStarted
+            if ((prewarmStarted || prewarmFailure != null)
                     && preparedDevice != null
                     && preparedDevice.vkDevice() == device.vkDevice()) {
                 return;
@@ -253,6 +254,12 @@ public final class P16MultipassReflection {
         }
     }
 
+
+    public static ProfilePreparation.Status preparationStatus() {
+        if (prewarmFailure != null) return ProfilePreparation.Status.FAILED;
+        if (preparedPipeline != null) return ProfilePreparation.Status.READY;
+        return prewarmStarted ? ProfilePreparation.Status.PREPARING : ProfilePreparation.Status.IDLE;
+    }
 
     public static boolean ready() {
         return activeProgram != null;

@@ -1,16 +1,25 @@
 package dev.totem.lumen.render;
 
+import com.mojang.blaze3d.pipeline.PipelineCache;
 import dev.totem.lumen.TotemLumenClient;
+import dev.totem.lumen.integration.CachedPipelinePreparation;
+import dev.totem.lumen.integration.HybridTerrainRenderer;
 import dev.totem.lumen.platform.PlatformProfile;
+import dev.totem.lumen.render.ProfilePreparation.Status;
 import dev.totem.lumen.vulkan.MinecraftVulkanBridge;
 import dev.totem.lumen.vulkan.P12FullBasePipeline;
+import dev.totem.lumen.vulkan.P16MultipassReflection;
 import dev.totem.lumen.vulkan.VulkanBackendInfo;
 import dev.totem.lumen.vulkan.VulkanCapabilities;
 import dev.totem.lumen.vulkan.VulkanCapabilityProbe;
 import dev.totem.lumen.vulkan.VulkanComputeProgram;
+import net.minecraft.client.renderer.RenderPipelines;
+
+import java.util.List;
 
 public final class RendererBootstrap {
-    private static RendererState state = RendererState.NEW;
+    private static final CachedPipelinePreparation presentation = new CachedPipelinePreparation("Totem Lumen presentation");
+    private static volatile RendererState state = RendererState.NEW;
     private static PlatformProfile platformProfile;
     private static VulkanBackendInfo vulkanBackendInfo;
     private static VulkanCapabilities vulkanCapabilities;
@@ -24,14 +33,9 @@ public final class RendererBootstrap {
             return;
         }
 
-        if (!RendererSettings.rendererEnabled()) {
-            TotemLumenClient.LOGGER.info(
-                    "Renderer profile {} uses Minecraft's native world renderer; Totem Vulkan bootstrap is not started",
-                    RendererSettings.renderProfile()
-            );
-            return;
-        }
+        if (!RendererSettings.betaRendering()) return;
 
+        VulkanComputeProgram.prewarmMainGiShader();
         platformProfile = PlatformProfile.detect();
         TotemLumenClient.LOGGER.info("Platform: {}", platformProfile.displayName());
 
@@ -45,10 +49,24 @@ public final class RendererBootstrap {
         TotemLumenClient.LOGGER.info("Renderer state: WAITING_FOR_DEVICE");
     }
 
+    public static void replacePresentationCache(PipelineCache next) {
+        presentation.replaceCache(next);
+    }
+
     public static void tick() {
-        if (!RendererSettings.rendererEnabled()) {
-            return;
+        boolean enabled = RendererSettings.betaRendering();
+        try {
+            presentation.tick(enabled && state == RendererState.READY_FOR_SCENE_EXTRACTION,
+                    ignored -> List.of(HybridTerrainPolicy.ENABLED
+                            ? HybridTerrainRenderer.presentationPipeline() : RenderPipelines.TRACY_BLIT));
+            if (enabled) advanceBootstrap();
+        } catch (RuntimeException | LinkageError failure) {
+            state = RendererState.PIPELINE_FAILED;
+            TotemLumenClient.LOGGER.error("Vulkan renderer preparation failed", failure);
         }
+    }
+
+    private static void advanceBootstrap() {
         if (state == RendererState.NEW) {
             initialize();
         }
@@ -56,6 +74,7 @@ public final class RendererBootstrap {
             case WAITING_FOR_DEVICE -> detectGraphicsBackend();
             case WAITING_FOR_VULKAN_INTEROP -> tryInitializeVulkanInterop();
             case WAITING_FOR_PIPELINE -> pollPipelinePrewarm();
+            case READY_FOR_SCENE_EXTRACTION -> advanceFullPipelinePrewarm();
             default -> {
             }
         }
@@ -185,21 +204,53 @@ public final class RendererBootstrap {
             return;
         }
 
-        var device = MinecraftVulkanBridge.currentDevice();
-        if (device != null) {
-            // Start the expensive production renderer while the player may still be in menus.
-            // Scene storage is bound later after world resources exist.
-            P12FullBasePipeline.prewarm(device);
-        }
-
         state = RendererState.READY_FOR_SCENE_EXTRACTION;
-        TotemLumenClient.LOGGER.info(
-                "Renderer state: READY_FOR_SCENE_EXTRACTION. Bootstrap is ready and full lighting prewarm has been started."
-        );
+        advanceFullPipelinePrewarm();
+    }
+
+    private static void advanceFullPipelinePrewarm() {
+        // Each tick only reads worker results and starts the next missing pipeline. Scene buffers
+        // and descriptors belong to the selected profile and are bound separately on world entry.
+        switch (P12FullBasePipeline.prewarmStage()) {
+            case IDLE -> P12FullBasePipeline.prewarm(MinecraftVulkanBridge.currentDevice());
+            case READY -> {
+                if (P16MultipassReflection.preparationStatus() == Status.IDLE) {
+                    P16MultipassReflection.prewarm(MinecraftVulkanBridge.currentDevice());
+                }
+            }
+            default -> {}
+        }
+    }
+
+    public static Status preparationStatus() {
+        if (!RendererSettings.betaRendering()) return Status.IDLE;
+        return switch (state) {
+            case NEW -> Status.IDLE;
+            case DISABLED_NON_VULKAN, DISABLED_UNSUPPORTED_VULKAN, PIPELINE_FAILED -> Status.FAILED;
+            case READY_FOR_SCENE_EXTRACTION -> fullPreparationStatus(
+                    P12FullBasePipeline.prewarmStage(), P16MultipassReflection.preparationStatus(), presentation.status());
+            default -> Status.PREPARING;
+        };
+    }
+
+    static Status fullPreparationStatus(P12FullBasePipeline.PrewarmStage base, Status reflection, Status compositor) {
+        if (base == P12FullBasePipeline.PrewarmStage.FAILED || reflection == Status.FAILED || compositor == Status.FAILED)
+            return Status.FAILED;
+        if (base == P12FullBasePipeline.PrewarmStage.READY && reflection == Status.READY && compositor == Status.READY)
+            return Status.READY;
+        return Status.PREPARING;
     }
 
     public static boolean readyForRendering() {
-        return state == RendererState.READY_FOR_SCENE_EXTRACTION;
+        // rendererEnabled() resolves the saved preference through the complete preparation gate.
+        return RendererSettings.rendererEnabled();
+    }
+
+    public static void deviceClosed() {
+        state = RendererState.NEW;
+        vulkanBackendInfo = null;
+        vulkanCapabilities = null;
+        loggedInteropWait = false;
     }
 
     public static RendererState state() {

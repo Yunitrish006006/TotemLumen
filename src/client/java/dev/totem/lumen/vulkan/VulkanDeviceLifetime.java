@@ -38,6 +38,7 @@ public final class VulkanDeviceLifetime {
     public static void beforeDeviceClose(VulkanDevice device) {
         VulkanWorkerLifetime lifetime = lifetime(device);
         int active = lifetime.stopAccepting();
+        dev.totem.lumen.render.RendererBootstrap.deviceClosed();
         // Cancel Java-side binding waits before joining their device leases.
         P12FullBasePipeline.shutdown();
         if (active != 0) {
