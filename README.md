@@ -21,6 +21,8 @@ The server gameplay subsystem never initializes or depends on Vulkan. A dedicate
 
 In Video Settings, enable **Use Beta Rendering Methods**, then choose **Lumia** under **Quality & Performance → Render profile**. Minecraft rasterizes world geometry at its native view distance. Lumia shades the supported surfaces during those draws, using original textures and tints, directional sunlight, nearby RGB emitters, secondary shadow rays and reflections. The HUD and inventory use the regular Minecraft UI.
 
+Sun shadows soften with distance from the casting surface. Skylight enters from above and from side openings under overhangs.
+
 Clear and stained glass use the original model and texture. Oblique views increase reflection, and a full glass block displaces the background more than a thin pane. Glass samples the opaque scene captured earlier in the frame. Off-screen reflections use the voxel scene and sky. Nearby coloured glass also filters sunlight and local RGB lights.
 
 Metallic terrain reflects nearby voxel geometry and the sky. Iron, gold and fresh copper show stronger reflections than raw or oxidized metal. The original atlas texel colours tint the reflection, keeping seams and grain visible. Block material rules can adjust metallic response, roughness and reflection strength.

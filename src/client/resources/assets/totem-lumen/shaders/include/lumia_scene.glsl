@@ -154,6 +154,47 @@ vec3 lumiaReflectedScene(vec3 origin, vec3 ray, int skipActors) {
     return reflected * transmission;
 }
 
+// Use fixed world-space directions so a stationary shadow has the same samples every frame.
+vec3 lumiaVisibleLight(vec3 origin, vec3 direction, int skipActors) {
+    vec3 face, transmission;
+    int actorHit;
+    float blocker = lumiaTrace(origin, direction, 32.0, skipActors, face, actorHit, transmission).a;
+    return blocker >= .75 ? vec3(0.0) : transmission;
+}
+
+vec3 lumiaSunlight(vec3 origin, vec3 normal, vec3 sun, int skipActors) {
+    // The sun follows the XY plane. Z and its perpendicular in the orbit plane span its disc.
+    const vec2 disc[6] = vec2[6](vec2(.18,.21), vec2(-.51,.56), vec2(-.76,-.22),
+            vec2(-.10,-.83), vec2(.73,-.38), vec2(.46,.68));
+    const float angularRadius = .055;
+    if (LumiaSky.a <= 0.0 || dot(normal, sun) <= -angularRadius) return vec3(0.0);
+    vec3 light = vec3(0.0);
+    for (int i = 0; i < 6; ++i) {
+        vec3 ray = normalize(sun + angularRadius * (disc[i].x * vec3(sun.y, -sun.x, 0.0)
+                + disc[i].y * vec3(0.0, 0.0, 1.0)));
+        float cosine = max(dot(normal, ray), 0.0);
+        if (cosine > 0.0 && ray.y > 0.0) light += cosine * lumiaVisibleLight(origin, ray, skipActors);
+    }
+    return light * (LumiaSky.a / 6.0);
+}
+
+vec3 lumiaSkyAccess(vec3 origin, vec3 normal, int skipActors) {
+    // Sample both the zenith and side openings. Normalize the cosine weights so an
+    // unobstructed surface keeps the existing sky intensity at its orientation.
+    const vec3 skyRays[5] = vec3[5](vec3(0,1,0), vec3(.739104,.6,.306147), vec3(-.739104,.6,-.306147),
+            vec3(-.306147,.6,.739104), vec3(.306147,.6,-.739104));
+    vec3 access = vec3(0.0);
+    float total = 0.0;
+    for (int i = 0; i < 5; ++i) {
+        float weight = max(dot(normal, skyRays[i]), 0.0);
+        if (weight > 0.0) {
+            access += weight * lumiaVisibleLight(origin, skyRays[i], skipActors);
+            total += weight;
+        }
+    }
+    return access / max(total, .0001);
+}
+
 vec3 lumiaShade(vec3 base, vec3 cameraRelative, vec3 normal, vec2 lightUv01, float reflectivity, float metal) {
     vec3 n = normal * inversesqrt(max(dot(normal, normal), 1e-8));
     vec3 pos = cameraRelative + LumiaCameraInVolume;
@@ -167,14 +208,9 @@ vec3 lumiaShade(vec3 base, vec3 cameraRelative, vec3 normal, vec2 lightUv01, flo
     // A hand or limb can protrude from the simplified body. Skip nearby own proxies.
     skipActors = lumiaContainingActors(pos, .3);
     #endif
-    float ndl = max(dot(n, sun), 0.0);
-    vec3 directSun = vec3(0);
-    if (ndl > 0.0 && LumiaSky.a > 0.0) {
-        float blocker = lumiaTrace(origin, sun, 32.0, skipActors, hitNormal, actorHit, transmission).a;
-        directSun = (1.0 - step(.75, blocker)) * ndl * LumiaSky.a * transmission;
-    }
-    float overhead = lumiaTrace(origin, vec3(0, 1, 0), 32.0, skipActors, hitNormal, actorHit, transmission).a;
-    vec3 diffuse = vec3(.055) + LumiaSky.rgb * mix(.42, .07, step(.75, overhead))
+    vec3 directSun = lumiaSunlight(origin, n, sun, skipActors);
+    vec3 skyAccess = lumiaSkyAccess(origin, n, skipActors);
+    vec3 diffuse = vec3(.055) + LumiaSky.rgb * (.07 + .35 * skyAccess)
             * (.72 + .28 * n.y) + vec3(1.0, .93, .80) * directSun;
 
     int heldCount = int(LumiaDirections[0].w);
