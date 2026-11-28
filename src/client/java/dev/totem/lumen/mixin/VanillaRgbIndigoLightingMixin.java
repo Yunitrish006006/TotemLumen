@@ -1,7 +1,7 @@
 package dev.totem.lumen.mixin;
 
 import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
-import dev.totem.lumen.integration.LumiaGlassMaterials;
+import dev.totem.lumen.integration.LumiaTerrainMaterials;
 import dev.totem.lumen.integration.LumiaPipelines;
 import dev.totem.lumen.integration.VanillaRgbLighting;
 import dev.totem.lumen.render.RendererSettings;
@@ -53,7 +53,7 @@ public abstract class VanillaRgbIndigoLightingMixin {
     )
     private void totemLumen$applyRgb(MutableQuadView quad, CallbackInfoReturnable<Boolean> cir) {
         if (RendererSettings.lumiaEnabled() && level instanceof RenderSectionRegion) {
-            LumiaGlassMaterials.tagTerrain(quad, blockState);
+            LumiaTerrainMaterials.tagTerrain(quad, blockState);
         }
         Direction face = quad.cullFace() != null ? quad.cullFace() : quad.nominalFace();
         VanillaRgbLighting.applySurfaceTint(quad, level, blockState, pos, face);

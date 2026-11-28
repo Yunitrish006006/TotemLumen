@@ -23,6 +23,8 @@ In Video Settings, enable **Use Beta Rendering Methods**, then choose **Lumia** 
 
 Clear and stained glass use the original model and texture. Oblique views increase reflection, and a full glass block displaces the background more than a thin pane. Glass samples the opaque scene captured earlier in the frame. Off-screen reflections use the voxel scene and sky. Nearby coloured glass also filters sunlight and local RGB lights.
 
+Metallic terrain reflects nearby voxel geometry and the sky. Iron, gold and fresh copper show stronger reflections than raw or oxidized metal. The original atlas texel colours tint the reflection, keeping seams and grain visible. Block material rules can adjust metallic response, roughness and reflection strength.
+
 Lumia runs on Minecraft’s Vulkan backend. Secondary rays use a rolling 96 × 96 × 96 block volume. Reflections approximate block colours from the map palette and sample the sky when a ray misses. Far terrain therefore retains its silhouette while nearby surfaces have more lighting detail. The Beta targets native Vulkan on Windows and Vulkan over Metal on Apple Silicon.
 
 ## Current milestone

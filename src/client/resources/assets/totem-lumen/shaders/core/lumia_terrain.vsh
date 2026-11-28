@@ -18,8 +18,8 @@ layout(location = 4) in ivec3 ChunkPosition;
 layout(location = 5) in float ChunkVisibility;
 #endif
 
-#ifdef LUMIA_TRANSLUCENT
-layout(location = 7) flat out int glassMaterial;
+#ifndef LUMIA_NATIVE_LIGHT
+layout(location = 7) flat out int terrainMaterial;
 #endif
 #ifdef LUMIA_NATIVE_LIGHT
 #include <minecraft:sample_lightmap.glsl>
@@ -46,9 +46,7 @@ void main() {
     #else
     vertexColor = Color;
     surfacePosition = pos;
-    #ifdef LUMIA_TRANSLUCENT
-    glassMaterial = UV2.x >> 8;
-    #endif
+    terrainMaterial = UV2.x >> 8;
     surfaceLight = clamp(vec2(UV2.x & 255, UV2.y) / 240.0, 0.0, 1.0);
     #endif
     texCoord0 = UV0;

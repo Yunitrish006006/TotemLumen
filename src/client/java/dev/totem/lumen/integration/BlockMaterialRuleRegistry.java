@@ -115,6 +115,7 @@ public final class BlockMaterialRuleRegistry {
     public static synchronized void invalidate() {
         rules = List.of();
         loaded = false;
+        LumiaTerrainMaterials.invalidate();
         revision++;
     }
 
