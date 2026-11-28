@@ -204,8 +204,8 @@ public final class TotemLumenClient implements ClientModInitializer {
                 RasterLightingRenderer.resetPreparation();
                 if (client.level != null && (renderProfile == RendererSettings.RenderProfile.LUMIA
                         || lastRenderProfile == RendererSettings.RenderProfile.LUMIA)) {
-                    client.levelRenderer.invalidateCompiledGeometry(client.level, client.options,
-                            client.gameRenderer.mainCamera(), client.getBlockColors());
+                    // Reset section tracking before vanilla replaces the view area during extraction.
+                    client.levelExtractor.allChanged();
                 }
                 if (client.level != null && (renderProfile == RendererSettings.RenderProfile.MINECRAFT_RGB
                         || lastRenderProfile == RendererSettings.RenderProfile.MINECRAFT_RGB)) {
