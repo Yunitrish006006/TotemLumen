@@ -33,6 +33,7 @@ public final class LumiaPipelineVerifier {
 
     public static void main(String[] args) throws Exception {
         LumiaMixinVerifier.verify();
+        LumiaPreparationVerifier.verify();
         var candidates = new LinkedHashSet<>(RenderPipelines.requiredPipelines());
         candidates.addAll(RenderPipelines.optionalPipelines());
         Set<String> shaderFamilies = new LinkedHashSet<>();

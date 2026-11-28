@@ -42,6 +42,7 @@ import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
 import net.fabricmc.fabric.api.client.rendering.v1.level.LevelExtractionEvents;
 import net.fabricmc.loader.api.FabricLoader;
+import dev.totem.lumen.integration.LumiaPreparation;
 import dev.totem.lumen.integration.LumiaScene;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.network.chat.Component;
@@ -192,6 +193,7 @@ public final class TotemLumenClient implements ClientModInitializer {
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             dev.totem.lumen.vulkan.VulkanDeferredDestruction.drain();
+            LumiaPreparation.tick();
             RendererBootstrap.tick();
             RendererSettings.RenderProfile renderProfile = RendererSettings.renderProfile();
             if (renderProfile != lastRenderProfile) {

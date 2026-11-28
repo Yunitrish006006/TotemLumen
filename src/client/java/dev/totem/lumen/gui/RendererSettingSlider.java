@@ -8,12 +8,11 @@ import net.minecraft.client.gui.components.AbstractSliderButton;
 import net.minecraft.network.chat.Component;
 
 /** Discrete slider used for renderer settings with more than one selectable value. */
-final class RendererSettingSlider extends AbstractSliderButton {
+class RendererSettingSlider extends AbstractSliderButton {
     private final int maximumIndex;
     private final IntSupplier currentIndex;
     private final IntConsumer applyIndex;
     private final Function<Integer, Component> label;
-    private final Runnable afterRelease;
 
     RendererSettingSlider(
             int x,
@@ -25,27 +24,11 @@ final class RendererSettingSlider extends AbstractSliderButton {
             IntConsumer applyIndex,
             Function<Integer, Component> label
     ) {
-        this(x, y, width, height, maximumIndex, currentIndex, applyIndex, label, () -> {
-        });
-    }
-
-    RendererSettingSlider(
-            int x,
-            int y,
-            int width,
-            int height,
-            int maximumIndex,
-            IntSupplier currentIndex,
-            IntConsumer applyIndex,
-            Function<Integer, Component> label,
-            Runnable afterRelease
-    ) {
         super(x, y, width, height, label.apply(currentIndex.getAsInt()), normalized(currentIndex.getAsInt(), maximumIndex));
         this.maximumIndex = maximumIndex;
         this.currentIndex = currentIndex;
         this.applyIndex = applyIndex;
         this.label = label;
-        this.afterRelease = afterRelease;
     }
 
     @Override
@@ -57,14 +40,12 @@ final class RendererSettingSlider extends AbstractSliderButton {
     protected void applyValue() {
         int selected = selectedIndex();
         applyIndex.accept(selected);
-        value = normalized(currentIndex.getAsInt(), maximumIndex);
-        updateMessage();
+        refreshValue();
     }
 
-    @Override
-    public void onRelease(net.minecraft.client.input.MouseButtonEvent event) {
-        super.onRelease(event);
-        afterRelease.run();
+    protected final void refreshValue() {
+        value = normalized(currentIndex.getAsInt(), maximumIndex);
+        updateMessage();
     }
 
     private int selectedIndex() {

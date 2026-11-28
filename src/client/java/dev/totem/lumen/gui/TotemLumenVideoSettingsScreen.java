@@ -15,7 +15,6 @@ public final class TotemLumenVideoSettingsScreen extends Screen {
     private static final int ROW_GAP = 22;
 
     private final Screen parent;
-    private RendererSettingSlider renderProfileSlider;
     private RendererSettingSlider giQualitySlider;
     private RendererSettingSlider shadowQualitySlider;
     private RendererSettingSlider rayDistanceSlider;
@@ -40,12 +39,7 @@ public final class TotemLumenVideoSettingsScreen extends Screen {
         int left = (this.width - contentWidth) / 2;
         int halfWidth = (contentWidth - 6) / 2;
 
-        this.renderProfileSlider = addSettingSlider(
-                left, 44, contentWidth, RendererSettings.availableProfiles().size() - 1,
-                () -> RendererSettings.availableProfiles().indexOf(RendererSettings.renderProfile()),
-                RendererSettings::setRenderProfile,
-                index -> renderProfileLabel(RendererSettings.availableProfiles().get(index))
-        );
+        this.addRenderableWidget(new RenderProfileSlider(left, 44, contentWidth, () -> {}));
 
         int rowY = 70;
         this.giQualitySlider = addSettingSlider(
@@ -173,7 +167,8 @@ public final class TotemLumenVideoSettingsScreen extends Screen {
         graphics.centeredText(this.font, this.title, this.width / 2, 12, 0xFFFFFFFF);
         graphics.centeredText(
                 this.font,
-                Component.translatable("screen.totem-lumen.subtitle"),
+                RendererSettings.betaRendering() ? RenderProfileSlider.preparationMessage()
+                        : Component.translatable("screen.totem-lumen.subtitle"),
                 this.width / 2,
                 26,
                 0xFFAAAAAA
@@ -186,10 +181,6 @@ public final class TotemLumenVideoSettingsScreen extends Screen {
     }
 
     private void refreshSettingsButtons() {
-        if (renderProfileSlider != null) {
-            renderProfileSlider.setMessage(renderProfileLabel());
-            renderProfileSlider.active = true;
-        }
         if (reflectionsEnabledButton != null) reflectionsEnabledButton.setMessage(reflectionsEnabledLabel());
         if (waterReflectionsButton != null) waterReflectionsButton.setMessage(waterReflectionsLabel());
         if (entityRayTracingButton != null) entityRayTracingButton.setMessage(entityRayTracingLabel());

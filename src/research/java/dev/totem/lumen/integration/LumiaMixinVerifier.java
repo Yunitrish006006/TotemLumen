@@ -1,6 +1,9 @@
 package dev.totem.lumen.integration;
 
 import com.google.gson.JsonParser;
+import com.mojang.blaze3d.pipeline.PipelineCache;
+import com.mojang.blaze3d.systems.RenderSystem;
+import com.mojang.renderpearl.api.pipeline.ShaderSource;
 import dev.totem.lumen.mixin.LumiaCloudDrawMixin;
 import dev.totem.lumen.mixin.LumiaWeatherDrawMixin;
 import net.minecraft.client.renderer.CloudRenderer;
@@ -34,15 +37,26 @@ final class LumiaMixinVerifier {
         try (var config = new InputStreamReader(LumiaMixinVerifier.class.getResourceAsStream(
                 "/totem-lumen.client.mixins.json"), StandardCharsets.UTF_8)) {
             var mixins = JsonParser.parseReader(config).getAsJsonObject().getAsJsonArray("client");
-            for (String name : new String[]{"LumiaTerrainMixin", "LumiaShaderReloadMixin", "LumiaGlassBackgroundMixin", "LumiaWorldDrawMixin",
+            for (String name : new String[]{"LumiaTerrainMixin", "LumiaPipelineCacheLifecycleMixin", "LumiaPipelineCacheAccessor", "LumiaGlassBackgroundMixin", "LumiaWorldDrawMixin",
                     "LumiaActorDrawMixin", "LumiaParticleDrawMixin", "LumiaCloudDrawMixin", "LumiaWeatherDrawMixin", "LumiaSignGlowMixin"}) {
                 if (!mixins.contains(new com.google.gson.JsonPrimitive(name))) {
                     throw new AssertionError("Missing client mixin " + name);
                 }
             }
         }
-        call(method(ShaderManager.class, "lambda$reload$1"), "net/minecraft/client/renderer/RenderPipelines",
-                "optionalPipelines", "()Ljava/util/List;");
+        String cache = "Lcom/mojang/blaze3d/pipeline/PipelineCache;";
+        var apply = method(ShaderManager.class, "apply");
+        int replace = call(apply, "com/mojang/blaze3d/systems/RenderSystem", "setCurrentPipelineCache", "(" + cache + ")" + cache);
+        boolean closesOldCache = false;
+        for (var instruction : apply.instructions) {
+            if (instruction instanceof MethodInsnNode call && call.owner.equals("com/mojang/blaze3d/pipeline/PipelineCache")
+                    && call.name.equals("close") && apply.instructions.indexOf(call) > replace) closesOldCache = true;
+        }
+        if (!closesOldCache) throw new AssertionError("Shader reload no longer retires the old pipeline cache after replacement");
+        call(method(RenderSystem.class, "shutdownRenderer"), "com/mojang/blaze3d/pipeline/PipelineCache", "close", "()V");
+        if (PipelineCache.class.getDeclaredField("shaderSource").getType() != ShaderSource.class
+                || PipelineCache.class.getDeclaredField("cache").getType() != java.util.Map.class)
+            throw new AssertionError("Native pipeline cache accessor contract changed");
         GameRenderer.class.getDeclaredMethod("renderLevel");
         var actor = method(PreparedRenderType.class, "draw");
         var particle = method(QuadParticleFeatureRenderer.class, "drawLayers");
