@@ -132,15 +132,6 @@ public final class TotemLumenClient implements ClientModInitializer {
             RendererCompileProgressNotifier.reset();
         });
 
-        // Only the full Totem profile owns the monolithic Vulkan shader. MINECRAFT_RGB keeps
-        // Minecraft's normal world renderer and uses its independent RGB overlay path.
-        if (RendererSettings.rendererEnabled()) {
-            // GLSL -> SPIR-V starts before the Vulkan device exists. Once RendererBootstrap sees
-            // the device it separately starts driver/MoltenVK pipeline compilation on another
-            // worker.
-            VulkanComputeProgram.prewarmMainGiShader();
-        }
-
         KeyMapping.Category lightingCategory = KeyMapping.Category.register(
                 Identifier.fromNamespaceAndPath(MOD_ID, "lighting")
         );
@@ -194,6 +185,7 @@ public final class TotemLumenClient implements ClientModInitializer {
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             dev.totem.lumen.vulkan.VulkanDeferredDestruction.drain();
             LumiaPreparation.tick();
+            RasterLightingRenderer.tickPreparation();
             RendererBootstrap.tick();
             RendererSettings.RenderProfile renderProfile = RendererSettings.renderProfile();
             if (renderProfile != lastRenderProfile) {
@@ -210,11 +202,6 @@ public final class TotemLumenClient implements ClientModInitializer {
                 if (client.level != null && (renderProfile == RendererSettings.RenderProfile.MINECRAFT_RGB
                         || lastRenderProfile == RendererSettings.RenderProfile.MINECRAFT_RGB)) {
                     ClientGameplayLightPredictor.onProfileChanged(client.level, client.player);
-                }
-                if (RendererSettings.rendererEnabled()) {
-                    // Allow switching from the independent Minecraft profiles into Totem
-                    // without requiring a second client initialization callback.
-                    VulkanComputeProgram.prewarmMainGiShader();
                 }
                 lastRenderProfile = renderProfile;
             }

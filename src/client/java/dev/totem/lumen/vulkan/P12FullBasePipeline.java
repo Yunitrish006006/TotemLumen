@@ -72,7 +72,7 @@ public final class P12FullBasePipeline {
                 LOCK.notifyAll();
             }
 
-            if (preparedPipeline != null || prewarmStarted) {
+            if (preparedPipeline != null || prewarmStarted || prewarmFailure != null) {
                 closePreparedAsync(stalePrepared, "TotemLumen-P12FullOldPreparedCleanup");
                 return;
             }
@@ -94,7 +94,10 @@ public final class P12FullBasePipeline {
         long startedAt = System.nanoTime();
         try {
             String source = buildRuntimeSource();
-            prewarmStage = PrewarmStage.SPIRV_AND_DRIVER;
+            synchronized (LOCK) {
+                if (workerGeneration != generation) return;
+                prewarmStage = PrewarmStage.SPIRV_AND_DRIVER;
+            }
             TotemLumenClient.LOGGER.info(
                     "Full lighting pipeline prewarm START: shader={}, sourceChars={}",
                     SHADER_NAME,
@@ -125,13 +128,6 @@ public final class P12FullBasePipeline {
                     elapsedMs
             );
 
-            // Shutdown must also invalidate this continuation, not only scene binding workers.
-            synchronized (LOCK) {
-                if (workerGeneration == generation && preparedDevice == device
-                        && dev.totem.lumen.render.RendererSettings.rendererEnabled()) {
-                    P16MultipassReflection.prewarm(device);
-                }
-            }
         } catch (Throwable buildFailure) {
             synchronized (LOCK) {
                 if (workerGeneration == generation) {
@@ -375,6 +371,7 @@ public final class P12FullBasePipeline {
             failure = null;
             prewarmFailure = null;
             prewarmStarted = false;
+            prewarmStage = PrewarmStage.IDLE;
             firstDispatchLogged = false;
             LOCK.notifyAll();
         }

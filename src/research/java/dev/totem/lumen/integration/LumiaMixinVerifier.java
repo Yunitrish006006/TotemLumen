@@ -3,6 +3,7 @@ package dev.totem.lumen.integration;
 import com.google.gson.JsonParser;
 import com.mojang.blaze3d.pipeline.PipelineCache;
 import com.mojang.blaze3d.systems.RenderSystem;
+import com.mojang.renderpearl.api.device.GpuDevice;
 import com.mojang.renderpearl.api.pipeline.ShaderSource;
 import dev.totem.lumen.mixin.LumiaCloudDrawMixin;
 import dev.totem.lumen.mixin.LumiaWeatherDrawMixin;
@@ -54,7 +55,8 @@ final class LumiaMixinVerifier {
         }
         if (!closesOldCache) throw new AssertionError("Shader reload no longer retires the old pipeline cache after replacement");
         call(method(RenderSystem.class, "shutdownRenderer"), "com/mojang/blaze3d/pipeline/PipelineCache", "close", "()V");
-        if (PipelineCache.class.getDeclaredField("shaderSource").getType() != ShaderSource.class
+        if (PipelineCache.class.getDeclaredField("device").getType() != GpuDevice.class
+                || PipelineCache.class.getDeclaredField("shaderSource").getType() != ShaderSource.class
                 || PipelineCache.class.getDeclaredField("cache").getType() != java.util.Map.class)
             throw new AssertionError("Native pipeline cache accessor contract changed");
         GameRenderer.class.getDeclaredMethod("renderLevel");

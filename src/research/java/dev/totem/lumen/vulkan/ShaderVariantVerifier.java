@@ -6,6 +6,7 @@ package dev.totem.lumen.vulkan;
 public final class ShaderVariantVerifier {
     public static void main(String[] args) {
         if (args.length != 1) throw new IllegalArgumentException("Expected variant under test");
+        dev.totem.lumen.render.FullPreparationVerifier.verify();
         String variant = args[0];
         String full = P12FullBasePipeline.buildSourceForVerification();
         String reflection = P16MultipassReflection.buildSourceForVerification();

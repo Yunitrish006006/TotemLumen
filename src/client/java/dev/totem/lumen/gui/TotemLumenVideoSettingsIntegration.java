@@ -64,17 +64,20 @@ public final class TotemLumenVideoSettingsIntegration {
 
         if (showPreparation) {
             list.addBig(profileSlider);
-            list.addSmall(new StringWidget(150, 20, RenderProfileSlider.preparationMessage(), client.font) {
-                @Override
-                public Component getMessage() {
-                    return RenderProfileSlider.preparationMessage();
-                }
-            }, diagnosticsButton);
+            list.addSmall(profileStatusWidget(client, RendererSettings.RenderProfile.TOTEM_LUMEN),
+                    profileStatusWidget(client, RendererSettings.RenderProfile.RASTER_RAY));
+            list.addSmall(profileStatusWidget(client, RendererSettings.RenderProfile.LUMIA), diagnosticsButton);
         } else {
             list.addSmall(profileSlider, diagnosticsButton);
         }
 
-        if (RendererSettings.rasterLightingEnabled()) {
+        if (RendererSettings.preferredRenderProfile() == RendererSettings.RenderProfile.LUMIA) {
+            list.addBig(settingButton(TotemLumenVideoSettingsScreen::reflectionsEnabledLabel,
+                    RendererSettings::toggleReflectionsEnabled));
+            return;
+        }
+
+        if (RendererSettings.preferredRenderProfile() == RendererSettings.RenderProfile.RASTER_RAY) {
             list.addSmall(settingSlider(RendererSettings.GiQuality.values().length - 1,
                     () -> RendererSettings.giQuality().ordinal(), RendererSettings::setGiQuality,
                     index -> TotemLumenVideoSettingsScreen.giQualityLabel(RendererSettings.GiQuality.values()[index])),
@@ -84,7 +87,7 @@ public final class TotemLumenVideoSettingsIntegration {
             return; // Keep vanilla quality controls; do not expose unsupported RT features.
         }
 
-        if (!RendererSettings.rendererEnabled()) {
+        if (RendererSettings.preferredRenderProfile() != RendererSettings.RenderProfile.TOTEM_LUMEN) {
             return;
         }
 
@@ -116,7 +119,7 @@ public final class TotemLumenVideoSettingsIntegration {
         );
         list.addSmall(rayDistanceSlider, internalResolutionSlider);
 
-        AbstractWidget[] reflectionControls = new AbstractWidget[3];
+        AbstractWidget[] reflectionControls = new AbstractWidget[2];
         Button reflectionsEnabledButton = settingButton(
                 TotemLumenVideoSettingsScreen::reflectionsEnabledLabel,
                 RendererSettings::toggleReflectionsEnabled,
@@ -166,9 +169,8 @@ public final class TotemLumenVideoSettingsIntegration {
         );
         list.addSmall(temporalQualitySlider, denoiseQualitySlider);
 
-        reflectionControls[0] = reflectionsEnabledButton;
-        reflectionControls[1] = reflectionBouncesSlider;
-        reflectionControls[2] = reflectionDistanceSlider;
+        reflectionControls[0] = reflectionBouncesSlider;
+        reflectionControls[1] = reflectionDistanceSlider;
 
         refreshReflectionControls(reflectionControls);
     }
@@ -214,6 +216,15 @@ public final class TotemLumenVideoSettingsIntegration {
 
     private static int reflectionDistanceIndex(int value) {
         return value <= 16 ? 0 : value <= 32 ? 1 : 2;
+    }
+
+    private static StringWidget profileStatusWidget(Minecraft client, RendererSettings.RenderProfile profile) {
+        return new StringWidget(150, 20, RenderProfileSlider.preparationMessage(profile), client.font) {
+            @Override
+            public Component getMessage() {
+                return RenderProfileSlider.preparationMessage(profile);
+            }
+        };
     }
 
     private static void reopenVideoSettings(

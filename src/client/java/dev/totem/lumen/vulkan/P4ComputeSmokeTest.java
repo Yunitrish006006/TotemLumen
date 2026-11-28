@@ -2,7 +2,6 @@ package dev.totem.lumen.vulkan;
 
 import dev.totem.lumen.TotemLumenClient;
 import dev.totem.lumen.render.RendererBootstrap;
-import dev.totem.lumen.render.RendererState;
 import dev.totem.lumen.vulkan.resource.VulkanOwnedBuffer;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.vulkan.VK10;
@@ -39,7 +38,7 @@ public final class P4ComputeSmokeTest {
     }
 
     public static void runOnceOnRenderThread() {
-        if (attempted || RendererBootstrap.state() != RendererState.READY_FOR_SCENE_EXTRACTION) {
+        if (attempted || !RendererBootstrap.readyForRendering()) {
             return;
         }
 

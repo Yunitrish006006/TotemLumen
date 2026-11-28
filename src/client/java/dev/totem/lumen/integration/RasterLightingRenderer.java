@@ -1,5 +1,6 @@
 package dev.totem.lumen.integration;
 
+import com.mojang.blaze3d.pipeline.PipelineCache;
 import com.mojang.blaze3d.platform.NativeImage;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.renderpearl.api.GpuFormat;
@@ -8,6 +9,7 @@ import com.mojang.renderpearl.api.pipeline.*;
 import com.mojang.renderpearl.api.textures.*;
 import dev.totem.lumen.TotemLumenClient;
 import dev.totem.lumen.render.BackendProbe;
+import dev.totem.lumen.render.ProfilePreparation.Status;
 import dev.totem.lumen.render.RasterDirectLights;
 import dev.totem.lumen.render.RasterLightingVolume;
 import dev.totem.lumen.render.RasterLightingWindow;
@@ -22,6 +24,8 @@ import net.minecraft.resources.Identifier;
 import org.joml.Matrix4f;
 import org.joml.Vector3f;
 import org.joml.Vector4f;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Optional;
 
 /** Independent Vulkan raster-primary experiment. Does not initialize the full Totem pipeline. */
@@ -30,9 +34,8 @@ public final class RasterLightingRenderer {
             "DepthSampler", "VoxelSampler", "LightSampler");
     private static final RenderPipeline COMPOSITE = pipeline("raster_ray_composite",
             RenderPipelines.DEBUG_FILLED_BOX.getColorTargetStates().getFirst().format(), "DepthSampler", "LightingSampler", "SceneSampler");
-    private static final RasterPipelineJob lightJob = new RasterPipelineJob(LIGHTING);
-    private static final RasterPipelineJob compositeJob = new RasterPipelineJob(COMPOSITE);
-    private static GpuDevice device;
+    private static final CachedPipelinePreparation preparation = new CachedPipelinePreparation("Raster Ray");
+    private static GpuDevice targetDevice;
     private static GpuTexture atlas, sceneCopy, lighting;
     private static GpuTextureView atlasView, sceneView, lightingView;
     private static NativeImage tile;
@@ -70,16 +73,33 @@ public final class RasterLightingRenderer {
         RasterPreparationHud.reset();
     }
 
+    public static Status preparationStatus() { return preparation.status(); }
+
+    public static void invalidatePreparation() { preparation.invalidate(); }
+
+    public static void replaceCache(PipelineCache next) { preparation.replaceCache(next); }
+
+    public static void tickPreparation() {
+        tickPreparation(RendererSettings.betaRendering());
+    }
+
+    static void tickPreparation(boolean enabled) {
+        preparation.tick(enabled, sources -> {
+            if (!BackendProbe.detect().vulkan()) throw new IllegalStateException("Raster Ray requires Vulkan");
+            return preparationVariants();
+        });
+    }
+
+    static LinkedHashSet<RenderPipeline> preparationVariants() {
+        var variants = new LinkedHashSet<>(List.of(LIGHTING, COMPOSITE));
+        RasterMaterialCapture.addPreparationVariants(variants);
+        return variants;
+    }
+
     public static void reload() {
-        for (var job : java.util.List.of(lightJob, compositeJob)) {
-            try {
-                job.close();
-            } catch (RuntimeException error) {
-                TotemLumenClient.LOGGER.warn("Retiring Raster Ray pipeline", error);
-            }
-        }
+        preparation.invalidate();
+        RasterMaterialCapture.reload();
         close();
-        device = null;
         resetPreparation();
     }
 
@@ -88,7 +108,7 @@ public final class RasterLightingRenderer {
     }
 
     public static void render(CameraRenderState camera) {
-        if (!RendererSettings.rasterLightingEnabled() || failed) return;
+        if (!RendererSettings.rasterLightingEnabled() || preparationStatus() != Status.READY || failed) return;
         ready = false;
         // Raw capture is already presented; do not shade it as if it were native lit colour.
         if (RasterMaterialCapture.rawPreviewRequested()) return;
@@ -114,20 +134,13 @@ public final class RasterLightingRenderer {
                 else RasterPreparationHud.stage(Stage.MATERIAL);
                 return;
             }
-            if (device != null && device != gpu) reload();
-            device = gpu;
-            operation = Stage.LIGHTING;
-            var lightPipeline = lightJob.poll(gpu);
-            if (lightPipeline == null) { RasterPreparationHud.stage(operation); return; }
-            operation = Stage.COMPOSITE;
-            var compositePipeline = compositeJob.poll(gpu);
-            if (compositePipeline == null) { RasterPreparationHud.stage(operation); return; }
             operation = Stage.SECTIONS;
             int lw = RendererSettings.internalResolution().targetWidth(w, h);
             int lh = Math.max(1, Math.round(lw * h / (float) w));
-            if (sceneCopy == null || sceneCopy.getWidth(0) != w || sceneCopy.getHeight(0) != h
+            if (targetDevice != gpu || sceneCopy == null || sceneCopy.getWidth(0) != w || sceneCopy.getHeight(0) != h
                     || sceneCopy.getFormat() != color.getFormat() || lighting.getWidth(0) != lw || lighting.getHeight(0) != lh) {
                 close();
+                targetDevice = gpu;
                 atlas = gpu.createTexture("Raster ray voxel atlas", GpuTexture.USAGE_COPY_DST | GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_RENDER_ATTACHMENT,
                         GpuFormat.RGBA8_UNORM, RasterLightingVolume.ATLAS_WIDTH, RasterLightingVolume.ATLAS_HEIGHT, 1, 1);
                 atlasView = gpu.createTextureView(atlas);
@@ -203,7 +216,7 @@ public final class RasterLightingRenderer {
             var uniforms = RenderSystem.getDynamicUniforms().writeTransform(inverse, new Vector4f(1), offset, metadata);
             var nearest = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST);
             try (var pass = encoder.createRenderPass(() -> "Raster-primary secondary rays", lightingView, Optional.empty())) {
-                pass.setPipeline(lightPipeline);
+                pass.setPipeline(RenderSystem.getCompiledPipeline(LIGHTING));
                 pass.setUniform("DynamicTransforms", uniforms);
                 pass.setUniform("DepthSampler", materialPreview ? material.depth() : target.getDepthTextureView(), nearest);
                 pass.setUniform("VoxelSampler", atlasView, nearest);
@@ -211,7 +224,7 @@ public final class RasterLightingRenderer {
                 pass.draw(3, 1, 0, 0);
             }
             try (var pass = encoder.createRenderPass(() -> "Raster ray depth-aware composite", target.getColorTextureView(), Optional.empty())) {
-                pass.setPipeline(compositePipeline);
+                pass.setPipeline(RenderSystem.getCompiledPipeline(COMPOSITE));
                 pass.setUniform("DynamicTransforms", uniforms);
                 pass.setUniform("DepthSampler", materialPreview ? material.depth() : target.getDepthTextureView(), nearest);
                 pass.setUniform("LightingSampler", lightingView, nearest);
@@ -237,6 +250,7 @@ public final class RasterLightingRenderer {
 
     public static void close() {
         ready = false;
+        targetDevice = null;
         if (atlas == null && sceneCopy == null && lighting == null) return;
         // RenderPearl owns deferred GPU retirement; never destroy raw Vulkan handles here.
         if (atlasView != null) atlasView.close(); if (atlas != null) atlas.close();

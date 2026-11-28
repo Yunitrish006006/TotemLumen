@@ -72,7 +72,7 @@ public final class TotemLumenVideoSettingsScreen extends Screen {
 
         this.reflectionsEnabledButton = addSettingButton(
                 left, rowY, halfWidth, reflectionsEnabledLabel(),
-                () -> RendererSettings.toggleReflectionsEnabled()
+                RendererSettings::toggleReflectionsEnabled
         );
         this.waterReflectionsButton = addSettingButton(
                 left + halfWidth + 6, rowY, halfWidth, waterReflectionsLabel(),
@@ -116,6 +116,8 @@ public final class TotemLumenVideoSettingsScreen extends Screen {
                 RendererSettings::setDenoiseQuality,
                 index -> denoiseQualityLabel(RendererSettings.DenoiseQuality.values()[index])
         );
+
+        refreshSettingsButtons();
 
         int diagnosticsY = Math.min(rowY + 26, this.height - 52);
         this.addRenderableWidget(
@@ -167,7 +169,7 @@ public final class TotemLumenVideoSettingsScreen extends Screen {
         graphics.centeredText(this.font, this.title, this.width / 2, 12, 0xFFFFFFFF);
         graphics.centeredText(
                 this.font,
-                RendererSettings.betaRendering() ? RenderProfileSlider.preparationMessage()
+                RendererSettings.betaRendering() ? RenderProfileSlider.preparationSummary()
                         : Component.translatable("screen.totem-lumen.subtitle"),
                 this.width / 2,
                 26,
@@ -181,7 +183,9 @@ public final class TotemLumenVideoSettingsScreen extends Screen {
     }
 
     private void refreshSettingsButtons() {
-        if (reflectionsEnabledButton != null) reflectionsEnabledButton.setMessage(reflectionsEnabledLabel());
+        reflectionsEnabledButton.setMessage(reflectionsEnabledLabel());
+        reflectionBouncesSlider.active = RendererSettings.reflectionsEnabled();
+        reflectionDistanceSlider.active = RendererSettings.reflectionsEnabled();
         if (waterReflectionsButton != null) waterReflectionsButton.setMessage(waterReflectionsLabel());
         if (entityRayTracingButton != null) entityRayTracingButton.setMessage(entityRayTracingLabel());
         if (localLightQualityButton != null) localLightQualityButton.setMessage(localLightQualityLabel());

@@ -20,12 +20,14 @@ import net.fabricmc.fabric.api.client.rendering.v1.level.LevelExtractionEvents;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
 
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.Set;
@@ -54,7 +56,7 @@ public final class SceneExtractionBridge {
     private static long clientTicks;
     private static long lastReportedDroppedUpdates;
     private static boolean trackingActive;
-    private static int catchupIndex, catchupRadius, catchupX, catchupZ;
+    private static Iterator<BlockPos.MutableBlockPos> catchupChunks = Collections.emptyIterator();
 
     private SceneExtractionBridge() {
     }
@@ -87,11 +89,9 @@ public final class SceneExtractionBridge {
         // Events are ignored while inactive. On reactivation rebuild from currently loaded chunks,
         // at most eight lookups per tick; never reuse sections from an inactive world generation.
         var level = Minecraft.getInstance().level;
-        int side = 2 * catchupRadius + 1;
-        for (int n = 0; level != null && n < 8 && catchupIndex < side * side; n++) {
-            int index = catchupIndex++;
-            var chunk = level.getChunkSource().getChunk(catchupX + index % side - catchupRadius,
-                    catchupZ + index / side - catchupRadius, ChunkStatus.FULL, false);
+        for (int n = 0; level != null && n < 8 && catchupChunks.hasNext(); n++) {
+            var pos = catchupChunks.next();
+            var chunk = level.getChunkSource().getChunk(pos.getX(), pos.getZ(), ChunkStatus.FULL, false);
             if (chunk != null) onChunkLoaded(level, chunk);
         }
         clientTicks++;
@@ -345,7 +345,7 @@ public final class SceneExtractionBridge {
     private static void onLevelChanged(ClientLevel level) {
         UPDATE_QUEUE.clear();
         SCENE.apply(new SceneUpdate.LevelCleared(UPDATE_QUEUE.nextSequence()));
-        catchupIndex = Integer.MAX_VALUE;
+        catchupChunks = Collections.emptyIterator();
         LATEST_FRAME.set(null);
         synchronized (SNAPSHOT_LOCK) {
             PRIORITY_SECTION_SNAPSHOTS.clear();
@@ -366,10 +366,10 @@ public final class SceneExtractionBridge {
         offer(new SceneUpdate.LevelChanged(UPDATE_QUEUE.nextSequence(), dimensionId));
         var client = Minecraft.getInstance();
         if (client.player != null) {
-            catchupRadius = Math.min(32, Math.max(2, client.options.renderDistance().get() + 1));
-            catchupX = Math.floorDiv(client.player.blockPosition().getX(), 16);
-            catchupZ = Math.floorDiv(client.player.blockPosition().getZ(), 16);
-            catchupIndex = 0;
+            int radius = Math.min(32, Math.max(2, client.options.renderDistance().get() + 1));
+            var center = client.player.chunkPosition();
+            catchupChunks = BlockPos.spiralAround(new BlockPos(center.x(), 0, center.z()), radius,
+                    Direction.EAST, Direction.SOUTH).iterator();
         }
         TotemLumenClient.LOGGER.info("Totem Lumen scene attached to {}", dimensionId);
     }
