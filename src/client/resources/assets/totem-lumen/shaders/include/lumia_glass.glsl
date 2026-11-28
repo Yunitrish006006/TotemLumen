@@ -20,13 +20,17 @@ LumiaGlass lumiaGlassMaterial(int bits, float textureAlpha, vec3 incident, vec3 
     float internalCosine = sqrt(max(0.0001, 1.0 - (1.0 - cosine * cosine) / (glass.ior * glass.ior)));
     glass.thickness = (pane ? 0.125 : 1.0) / internalCosine;
     float r = (glass.ior - 1.0) / (glass.ior + 1.0);
-    glass.fresnel = r * r + (1.0 - r * r) * pow(1.0 - cosine, 5.0);
+    glass.fresnel = r > 0.0 ? r * r + (1.0 - r * r) * pow(1.0 - cosine, 5.0) : 0.0;
     glass.transmission = pow(max(optical.rgb * (1.0 - optical.a), vec3(0.0001)), vec3(glass.thickness));
-    glass.markings = textureAlpha * (dye == 0 ? 0.55 : 0.18);
+    // Vanilla stained faces use 102/255 alpha for the unmarked, uniformly dyed
+    // interior. The palette already accounts for that dye in transmission.
+    glass.markings = dye == 0 ? textureAlpha * 0.55 : max(0.0, textureAlpha - 0.4) * 0.4;
     // Separate the fraction that passes straight through the native blend (including
     // any earlier translucent layers) from the displaced, absorbed and reflected light.
     float straight = min(glass.transmission.r, min(glass.transmission.g, glass.transmission.b));
-    float displaced = clamp((glass.ior - 1.0) * glass.thickness, 0.0, 0.8);
+    float incidentSine = sqrt(max(0.0, 1.0 - cosine * cosine));
+    float lateralShift = glass.thickness * incidentSine * (internalCosine - cosine / glass.ior);
+    float displaced = clamp(lateralShift, 0.0, 0.8);
     glass.alpha = 1.0 - straight * (1.0 - displaced) * (1.0 - glass.fresnel) * (1.0 - glass.markings);
     return glass;
 }
@@ -54,7 +58,7 @@ bool lumiaOnScreen(vec2 uv, vec2 margin) {
 
 // Trace the reflected ray against the opaque depth captured before translucent terrain.
 // Reject crossings over a depth discontinuity and fall back to the voxel/sky ray.
-vec3 lumiaGlassReflection(vec3 position, vec3 normal, vec3 ray, vec3 start, vec2 uv, vec2 orientation, vec2 margin) {
+vec3 lumiaGlassReflection(vec3 position, vec3 normal, vec3 ray, vec3 start, vec2 uv, vec2 orientation, vec2 margin, float fog) {
     float travel = 0.0625;
     float previousGap = -1.0;
     for (int i = 0; i < 15; i++) {
@@ -72,7 +76,8 @@ vec3 lumiaGlassReflection(vec3 position, vec3 normal, vec3 ray, vec3 start, vec2
         previousGap = gap;
         travel = travel * 1.45 + 0.08;
     }
-    return lumiaReflectedScene(position + LumiaCameraInVolume + normal * 0.03, ray, 0);
+    vec3 environment = lumiaReflectedScene(position + LumiaCameraInVolume + normal * 0.03, ray, 0);
+    return mix(environment, FogColor.rgb, fog);
 }
 
 // A linear color lookup can bleed a foreground silhouette even when the nearest
@@ -97,7 +102,7 @@ vec3 lumiaTransmittedColor(vec2 shifted, vec2 uv, float frontDistance, vec2 size
     return color / total;
 }
 
-vec3 lumiaGlassColor(LumiaGlass glass, vec3 markingColor, vec3 position, vec3 normal, vec3 incident, vec2 orientation) {
+vec3 lumiaGlassColor(LumiaGlass glass, vec3 markingColor, vec3 position, vec3 normal, vec3 incident, vec2 orientation, float fog) {
     vec2 size = vec2(textureSize(LumiaOpaqueColor, 0));
     vec2 uv = gl_FragCoord.xy / size;
     vec2 margin = 0.5 / size;
@@ -106,18 +111,30 @@ vec3 lumiaGlassColor(LumiaGlass glass, vec3 markingColor, vec3 position, vec3 no
     // A plane-parallel slab returns to the incident direction on exit. Only its
     // lateral displacement persists into the background; panes use their 2/16 width.
     vec3 projected = lumiaGlassProjection(position + bent * glass.thickness);
-    vec2 shifted = uv + (projected.xy - start.xy) * orientation;
+    vec3 straightExit = lumiaGlassProjection(position + incident * glass.thickness);
+    float backgroundDistance = lumiaOpaqueDistance(uv);
+    vec2 displacement = (projected.xy - straightExit.xy) * orientation;
+    vec2 shifted = uv + displacement * clamp(projected.z / max(backgroundDistance, 0.05), 0.0, 1.0);
     if (projected.z <= 0.05 || !lumiaOnScreen(shifted, margin)
             || lumiaOpaqueDistance(shifted) < start.z || lumiaOpaqueDistance(mix(uv, shifted, 0.5)) < start.z) {
         shifted = uv;
     }
-    vec3 refracted = lumiaTransmittedColor(shifted, uv, start.z, size);
-    vec3 reflected = lumiaGlassReflection(position, normal, reflect(incident, normal), start, uv, orientation, margin);
+    vec3 refracted;
+    if (all(lessThan(abs(shifted - uv) * size, vec2(0.001)))) {
+        refracted = texelFetch(LumiaOpaqueColor, ivec2(gl_FragCoord.xy), 0).rgb;
+    } else {
+        refracted = lumiaTransmittedColor(shifted, uv, start.z, size);
+    }
+    vec3 reflected = lumiaGlassReflection(position, normal, reflect(incident, normal), start, uv, orientation, margin, fog);
     vec3 transmittedWeight = glass.transmission * (1.0 - glass.fresnel) * (1.0 - glass.markings);
     // The native blend/OIT resolve supplies the straight-through part. Avoid
     // compositing an opaque background copy over the other translucent surfaces.
-    vec3 layer = refracted * max(transmittedWeight - (1.0 - glass.alpha), vec3(0.0))
-            + reflected * glass.fresnel * (1.0 - glass.markings) + markingColor * glass.markings;
+    // Captured opaque pixels already include atmospheric fog. Only the surface
+    // markings, the off-screen fallback, and light lost to absorption need its
+    // contribution between the observer and the glass.
+    vec3 absorption = (1.0 - glass.transmission) * (1.0 - glass.fresnel) * (1.0 - glass.markings);
+    vec3 layer = absorption * FogColor.rgb * fog + refracted * max(transmittedWeight - (1.0 - glass.alpha), vec3(0.0))
+            + reflected * glass.fresnel * (1.0 - glass.markings) + mix(markingColor, FogColor.rgb, fog) * glass.markings;
     return layer / max(glass.alpha, 0.0001);
 }
 #endif

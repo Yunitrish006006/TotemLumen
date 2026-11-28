@@ -31,13 +31,14 @@ layout(location = 4) in float chunkVisibility;
 layout(location = 0) out vec4 fragColor;
 #endif
 
-vec4 calculateFinalColor(vec4 color) {
+vec4 calculateFinalColor(vec4 color, bool applyAtmosphere) {
     #ifdef OIT_ACCUMULATE
     color = sampleColorForAccumulation(color);
     vec4 fogColor = vec4(FogColor.rgb * color.a, FogColor.a);
     #else
     vec4 fogColor = FogColor;
     #endif
+    if (!applyAtmosphere) return color;
     return apply_fog(color, sphericalVertexDistance, cylindricalVertexDistance, FogEnvironmentalStart, FogEnvironmentalEnd, FogRenderDistanceStart, FogRenderDistanceEnd, fogColor);
 }
 
@@ -46,8 +47,9 @@ void main() {
     vec3 area = cross(dFdx(surfacePosition), dFdy(surfacePosition));
     vec3 normal = area * inversesqrt(max(dot(area, area), 1e-20));
     if (dot(normal, surfacePosition) > 0.0) normal = -normal;
+    bool glassFace = false;
     #ifdef LUMIA_TRANSLUCENT
-    bool glassFace = (glassMaterial & 1) != 0;
+    glassFace = (glassMaterial & 1) != 0;
     vec3 incident = surfacePosition * inversesqrt(max(dot(surfacePosition, surfacePosition), 1e-12));
     #ifndef OIT_ALPHA_ONLY
     // Use framebuffer derivatives to account for the backend viewport's Y convention.
@@ -58,7 +60,11 @@ void main() {
         LumiaGlass glass = lumiaGlassMaterial(glassMaterial, color.a, incident, normal);
         color.a = glass.alpha;
         #ifndef OIT_ALPHA_ONLY
-        color.rgb = lumiaGlassColor(glass, color.rgb, surfacePosition, normal, incident, orientation);
+        vec3 marking = vec3(0.0);
+        if (glass.markings > 0.0) marking = lumiaShade(color.rgb, surfacePosition, normal, surfaceLight, 0.0);
+        float fog = FogColor.a * total_fog_value(sphericalVertexDistance, cylindricalVertexDistance,
+                FogEnvironmentalStart, FogEnvironmentalEnd, FogRenderDistanceStart, FogRenderDistanceEnd);
+        color.rgb = lumiaGlassColor(glass, marking, surfacePosition, normal, incident, orientation, fog);
         #endif
     }
     #endif
@@ -74,6 +80,6 @@ void main() {
     color.rgb = lumiaShade(color.rgb, surfacePosition, normal, surfaceLight, 0.025);
     #endif
     color = mix(FogColor * vec4(1, 1, 1, color.a), color, chunkVisibility);
-    fragColor = calculateFinalColor(color);
+    fragColor = calculateFinalColor(color, !glassFace);
     #endif
 }
