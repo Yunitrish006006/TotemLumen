@@ -6,6 +6,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.OptionsList;
+import net.minecraft.client.gui.components.StringWidget;
 import net.minecraft.client.gui.screens.options.VideoSettingsScreen;
 import net.minecraft.network.chat.Component;
 
@@ -52,23 +53,26 @@ public final class TotemLumenVideoSettingsIntegration {
     ) {
         Minecraft client = Minecraft.getInstance();
 
-        RendererSettingSlider profileSlider = new RendererSettingSlider(
-                0, 0, 150, 20,
-                RendererSettings.availableProfiles().size() - 1,
-                () -> RendererSettings.availableProfiles().indexOf(RendererSettings.renderProfile()),
-                RendererSettings::setRenderProfile,
-                index -> TotemLumenVideoSettingsScreen.renderProfileLabel(
-                        RendererSettings.availableProfiles().get(index)
-                ),
-                () -> reopenVideoSettings(client, screen)
-        );
+        boolean showPreparation = RendererSettings.betaRendering();
+        var profileSlider = new RenderProfileSlider(0, 0, showPreparation ? 310 : 150,
+                () -> reopenVideoSettings(client, screen));
 
         Button diagnosticsButton = Button.builder(
                 Component.translatable("screen.totem-lumen.diagnostics"),
                 ignored -> client.gui.setScreen(new TotemLumenDiagnosticsScreen(screen))
         ).bounds(0, 0, 150, 20).build();
 
-        list.addSmall(profileSlider, diagnosticsButton);
+        if (showPreparation) {
+            list.addBig(profileSlider);
+            list.addSmall(new StringWidget(150, 20, RenderProfileSlider.preparationMessage(), client.font) {
+                @Override
+                public Component getMessage() {
+                    return RenderProfileSlider.preparationMessage();
+                }
+            }, diagnosticsButton);
+        } else {
+            list.addSmall(profileSlider, diagnosticsButton);
+        }
 
         if (RendererSettings.rasterLightingEnabled()) {
             list.addSmall(settingSlider(RendererSettings.GiQuality.values().length - 1,

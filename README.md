@@ -19,7 +19,7 @@ The server gameplay subsystem never initializes or depends on Vulkan. A dedicate
 
 ## Lumia (Beta)
 
-In Video Settings, enable **Use Beta Rendering Methods**, then choose **Lumia** under **Quality & Performance → Render profile**. Minecraft rasterizes world geometry at its native view distance. Lumia shades the supported surfaces during those draws, using original textures and tints, directional sunlight, nearby RGB emitters, secondary shadow rays and reflections. The HUD and inventory use the regular Minecraft UI.
+In Video Settings, enable **Use Beta Rendering Methods** to prepare Lumia in the background. You can keep playing with your current profile and select **Lumia** under **Quality & Performance → Render profile** once it is ready. If Lumia was saved as your preference, Minecraft Pure renders the world during preparation and Lumia resumes automatically. Minecraft rasterizes world geometry at its native view distance. Lumia shades the supported surfaces during those draws, using original textures and tints, directional sunlight, nearby RGB emitters, secondary shadow rays and reflections. The HUD and inventory use the regular Minecraft UI.
 
 Balanced and High shadow quality soften sun shadows with distance and interpolate skylight under overhangs. Low uses a single sample for each and gives shadows a sharper edge.
 

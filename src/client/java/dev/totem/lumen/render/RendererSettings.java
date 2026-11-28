@@ -1,6 +1,7 @@
 package dev.totem.lumen.render;
 
 import dev.totem.lumen.TotemLumenClient;
+import dev.totem.lumen.integration.LumiaPreparation;
 import net.fabricmc.loader.api.FabricLoader;
 
 import java.io.IOException;
@@ -22,7 +23,7 @@ public final class RendererSettings {
         LUMIA;
 
         public RenderProfile next() {
-            var profiles = availableProfiles();
+            var profiles = selectableProfiles();
             return profiles.get((profiles.indexOf(this) + 1) % profiles.size());
         }
     }
@@ -181,7 +182,10 @@ public final class RendererSettings {
 
     private static final List<RenderProfile> STABLE_PROFILES = List.of(RenderProfile.MINECRAFT_PURE, RenderProfile.MINECRAFT_RGB);
     private static final List<RenderProfile> ALL_PROFILES = List.of(RenderProfile.values());
+    private static final List<RenderProfile> PROFILES_WITHOUT_LUMIA =
+            ALL_PROFILES.stream().filter(profile -> profile != RenderProfile.LUMIA).toList();
     private static volatile boolean betaRendering;
+    // Persist the player's preference even when Lumia is temporarily unavailable.
     private static volatile RenderProfile renderProfile = RenderProfile.MINECRAFT_RGB;
     private static GiQuality giQuality = GiQuality.BALANCED;
     private static Quality shadowQuality = Quality.BALANCED;
@@ -283,7 +287,11 @@ public final class RendererSettings {
     }
 
     public static RenderProfile renderProfile() {
-        return renderProfile;
+        RenderProfile preferred = renderProfile;
+        if (preferred == RenderProfile.LUMIA && LumiaPreparation.status() != LumiaPreparation.Status.READY) {
+            return RenderProfile.MINECRAFT_PURE;
+        }
+        return preferred;
     }
 
     public static synchronized boolean rendererEnabled() {
@@ -299,7 +307,7 @@ public final class RendererSettings {
     }
 
     public static boolean lumiaEnabled() {
-        return renderProfile == RenderProfile.LUMIA;
+        return renderProfile() == RenderProfile.LUMIA;
     }
 
     /** Legacy compatibility for callers that still think in terms of an enable toggle. */
@@ -316,12 +324,18 @@ public final class RendererSettings {
 
     public static synchronized void toggleBetaRendering() {
         betaRendering = !betaRendering;
+        LumiaPreparation.invalidate();
         ensureAvailableProfile();
         changed();
     }
 
     public static List<RenderProfile> availableProfiles() {
         return betaRendering ? ALL_PROFILES : STABLE_PROFILES;
+    }
+
+    private static List<RenderProfile> selectableProfiles() {
+        if (!betaRendering) return STABLE_PROFILES;
+        return LumiaPreparation.status() == LumiaPreparation.Status.READY ? ALL_PROFILES : PROFILES_WITHOUT_LUMIA;
     }
 
     private static void ensureAvailableProfile() {
@@ -333,14 +347,19 @@ public final class RendererSettings {
     }
 
     public static synchronized RenderProfile cycleRenderProfile(int steps) {
-        var profiles = availableProfiles();
-        int current = profiles.indexOf(renderProfile);
-        return setRenderProfile(Math.floorMod(current + steps % profiles.size(), profiles.size()));
+        var profiles = selectableProfiles();
+        int current = profiles.indexOf(renderProfile());
+        RenderProfile next = profiles.get(Math.floorMod(current + steps % profiles.size(), profiles.size()));
+        return setRenderProfile(availableProfiles().indexOf(next));
     }
 
     public static synchronized RenderProfile setRenderProfile(int index) {
         var profiles = availableProfiles();
-        renderProfile = profiles.get(Math.clamp(index, 0, profiles.size() - 1));
+        RenderProfile requested = profiles.get(Math.clamp(index, 0, profiles.size() - 1));
+        if (requested == RenderProfile.LUMIA && LumiaPreparation.status() != LumiaPreparation.Status.READY) {
+            return renderProfile();
+        }
+        renderProfile = requested;
         changed();
         return renderProfile;
     }
@@ -406,13 +425,13 @@ public final class RendererSettings {
     }
 
     public static synchronized Quality cycleShadowQuality() {
-        shadowQuality = shadowQuality.next();
-        changed();
-        return shadowQuality;
+        return setShadowQuality(shadowQuality.next().ordinal());
     }
 
     public static synchronized Quality setShadowQuality(int index) {
-        shadowQuality = Quality.values()[Math.max(0, Math.min(Quality.values().length - 1, index))];
+        Quality next = Quality.values()[Math.clamp(index, 0, Quality.values().length - 1)];
+        if ((next == Quality.LOW) != (shadowQuality == Quality.LOW)) LumiaPreparation.invalidate();
+        shadowQuality = next;
         changed();
         return shadowQuality;
     }
@@ -447,6 +466,7 @@ public final class RendererSettings {
     }
 
     public static synchronized boolean toggleReflectionsEnabled() {
+        LumiaPreparation.invalidate();
         reflectionsEnabled = !reflectionsEnabled;
         changed();
         return reflectionsEnabled;
@@ -465,7 +485,9 @@ public final class RendererSettings {
     }
 
     public static synchronized LocalLightQuality cycleLocalLightQuality() {
-        localLightQuality = localLightQuality.next();
+        LocalLightQuality next = localLightQuality.next();
+        if ((next == LocalLightQuality.OFF) != (localLightQuality == LocalLightQuality.OFF)) LumiaPreparation.invalidate();
+        localLightQuality = next;
         changed();
         return localLightQuality;
     }
@@ -512,6 +534,7 @@ public final class RendererSettings {
 
     public static synchronized int setReflectionBounces(int value) {
         int sanitized = sanitizeBounces(value);
+        if ((sanitized > 0) != reflectionsEnabled) LumiaPreparation.invalidate();
         if (sanitized == 0) {
             reflectionsEnabled = false;
             reflectionBounces = 1;

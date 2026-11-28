@@ -6,9 +6,7 @@ import com.mojang.renderpearl.api.pipeline.PolygonMode;
 import com.mojang.renderpearl.api.pipeline.RenderPipeline;
 import com.mojang.renderpearl.api.pipeline.ShaderType;
 import com.mojang.renderpearl.api.vertex.VertexFormat;
-import dev.totem.lumen.TotemLumenClient;
 import dev.totem.lumen.render.RendererSettings;
-import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.client.renderer.chunk.ChunkSectionLayer;
 import net.minecraft.client.renderer.ShaderDefines;
 import net.minecraft.resources.Identifier;
@@ -54,24 +52,20 @@ public final class LumiaPipelines extends RenderPipeline {
                 && TERRAIN.equals(source.getShaders().get(ShaderType.FRAGMENT));
     }
 
-    /** ShaderManager owns compilation, finalization and replacement of the device pipeline cache. */
-    public static List<RenderPipeline> optionalForReload(List<RenderPipeline> optional) {
-        if (!RendererSettings.lumiaEnabled()) return optional;
-        var sources = new LinkedHashSet<>(RenderPipelines.requiredPipelines());
-        sources.addAll(optional);
-        var combined = new LinkedHashSet<>(optional);
-        int quality = currentQualityFlags();
-        for (var source : sources) {
+    /** Only native pipelines installed by this device's shader reload can be selected for drawing. */
+    static List<RenderPipeline> preparationVariants(Iterable<RenderPipeline> nativePipelines, int quality) {
+        var variants = new LinkedHashSet<RenderPipeline>();
+        for (var source : nativePipelines) {
+            if (source instanceof LumiaPipelines) continue;
             var variant = drawVariant(source, quality);
             if (variant == source) continue;
-            combined.add(variant);
+            variants.add(variant);
             if (variant.getShaderDefines().flags().contains("LUMIA_TRANSLUCENT")) {
                 var fallback = nativeGlassFallback(source);
-                if (fallback != source) combined.add(fallback);
+                if (fallback != source) variants.add(fallback);
             }
         }
-        TotemLumenClient.LOGGER.info("Preparing {} Lumia pipelines during shader reload", combined.size() - optional.size());
-        return List.copyOf(combined);
+        return List.copyOf(variants);
     }
 
     static RenderPipeline drawVariant(RenderPipeline source, int quality) {
