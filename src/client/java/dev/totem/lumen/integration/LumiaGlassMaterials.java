@@ -1,7 +1,6 @@
 package dev.totem.lumen.integration;
 
 import com.mojang.blaze3d.platform.NativeImage;
-import net.fabricmc.fabric.api.client.renderer.v1.mesh.MutableQuadView;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.item.DyeColor;
@@ -9,7 +8,6 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.CrossCollisionBlock;
-import net.minecraft.client.renderer.chunk.ChunkSectionLayer;
 
 import java.util.IdentityHashMap;
 import java.util.Map;
@@ -38,12 +36,8 @@ public final class LumiaGlassMaterials {
         return IDS.getOrDefault(state.getBlock(), -1);
     }
 
-    public static void tagTerrain(MutableQuadView quad, BlockState state) {
-        int material = id(state);
-        if (material < 0) return;
-        int tag = 0x100 | (material >= COLOURS ? 0x200 : 0) | ((material % COLOURS) << 10);
-        quad.chunkLayer(ChunkSectionLayer.TRANSLUCENT);
-        for (int vertex = 0; vertex < 4; vertex++) quad.lightmap(vertex, quad.lightmap(vertex) | tag);
+    static int terrainTag(int material) {
+        return 0x100 | (material >= COLOURS ? 0x200 : 0) | ((material % COLOURS) << 10);
     }
 
     static int voxel(BlockState state, int emission) {

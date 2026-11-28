@@ -15,8 +15,8 @@
 
 #ifdef LUMIA_TRANSLUCENT
 #include <totem-lumen:lumia_glass.glsl>
-layout(location = 7) flat in int glassMaterial;
 #endif
+layout(location = 7) flat in int terrainMaterial;
 uniform sampler2D Sampler0;
 layout(location = 5) in vec3 surfacePosition;
 layout(location = 6) in vec2 surfaceLight;
@@ -49,7 +49,7 @@ void main() {
     if (dot(normal, surfacePosition) > 0.0) normal = -normal;
     bool glassFace = false;
     #ifdef LUMIA_TRANSLUCENT
-    glassFace = (glassMaterial & 1) != 0;
+    glassFace = (terrainMaterial & 1) != 0;
     vec3 incident = surfacePosition * inversesqrt(max(dot(surfacePosition, surfacePosition), 1e-12));
     #ifndef OIT_ALPHA_ONLY
     // Use framebuffer derivatives to account for the backend viewport's Y convention.
@@ -57,7 +57,7 @@ void main() {
     vec2 orientation = sign(vec2(dFdx(projected.x), dFdy(projected.y)));
     #endif
     if (glassFace) {
-        LumiaGlass glass = lumiaGlassMaterial(glassMaterial, color.a, incident, normal);
+        LumiaGlass glass = lumiaGlassMaterial(terrainMaterial, color.a, incident, normal);
         color.a = glass.alpha;
         #ifndef OIT_ALPHA_ONLY
         vec3 marking = vec3(0.0);
@@ -75,10 +75,14 @@ void main() {
     executeAlphaOnlyPhase(gl_FragCoord.z, color.a);
     #else
     #ifdef LUMIA_TRANSLUCENT
-    if (!glassFace) color.rgb = lumiaShade(color.rgb, surfacePosition, normal, surfaceLight, 0.12);
+    const float reflectivity = 0.12;
     #else
-    color.rgb = lumiaShade(color.rgb, surfacePosition, normal, surfaceLight, 0.025);
+    const float reflectivity = 0.025;
     #endif
+    if (!glassFace) {
+        float metal = float((terrainMaterial >> 1) & 63) / 63.0;
+        color.rgb = lumiaShade(color.rgb, surfacePosition, normal, surfaceLight, reflectivity, metal);
+    }
     color = mix(FogColor * vec4(1, 1, 1, color.a), color, chunkVisibility);
     fragColor = calculateFinalColor(color, !glassFace);
     #endif

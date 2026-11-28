@@ -154,7 +154,7 @@ vec3 lumiaReflectedScene(vec3 origin, vec3 ray, int skipActors) {
     return reflected * transmission;
 }
 
-vec3 lumiaShade(vec3 base, vec3 cameraRelative, vec3 normal, vec2 lightUv01, float reflectivity) {
+vec3 lumiaShade(vec3 base, vec3 cameraRelative, vec3 normal, vec2 lightUv01, float reflectivity, float metal) {
     vec3 n = normal * inversesqrt(max(dot(normal, normal), 1e-8));
     vec3 pos = cameraRelative + LumiaCameraInVolume;
     vec3 origin = pos + n * 0.03;
@@ -217,13 +217,25 @@ vec3 lumiaShade(vec3 base, vec3 cameraRelative, vec3 normal, vec2 lightUv01, flo
     int surfaceTag = int(round(surfaceVoxel.a * 255.0));
     vec3 selfEmission = surfaceTag >= 80 && surfaceTag <= 96 ? vec3(0) : surfaceVoxel.rgb;
     vec3 color = base * (diffuse + selfEmission);
-    if (reflectivity > 0.0) {
+    if (reflectivity > 0.0 || metal > 0.0) {
         vec3 incident = cameraRelative * inversesqrt(max(dot(cameraRelative, cameraRelative), 1e-8));
         vec3 ray = reflect(incident, n);
         vec3 reflected = lumiaReflectedScene(origin, ray, skipActors);
         float fresnel = .06 + .94 * pow(1.0 - clamp(dot(-incident, n), 0.0, 1.0), 5.0);
-        color = mix(color, reflected, clamp(reflectivity * fresnel, 0.0, 1.0));
+        float weight = reflectivity * fresnel;
+        if (metal > 0.0) {
+            // Tint the mirror image per texel. Bound its weight so the lit atlas texture
+            // keeps its seams and grain even under a bright sky at grazing incidence.
+            reflected *= mix(vec3(1.0), base, 0.72);
+            weight += metal * mix(0.68, 0.84, fresnel);
+            weight = min(weight, 0.62);
+        }
+        color = mix(color, reflected, clamp(weight, 0.0, 1.0));
     }
     return color;
+}
+
+vec3 lumiaShade(vec3 base, vec3 cameraRelative, vec3 normal, vec2 lightUv01, float reflectivity) {
+    return lumiaShade(base, cameraRelative, normal, lightUv01, reflectivity, 0.0);
 }
 #endif
