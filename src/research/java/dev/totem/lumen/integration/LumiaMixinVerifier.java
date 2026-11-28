@@ -5,6 +5,7 @@ import dev.totem.lumen.mixin.LumiaCloudDrawMixin;
 import dev.totem.lumen.mixin.LumiaWeatherDrawMixin;
 import net.minecraft.client.renderer.CloudRenderer;
 import net.minecraft.client.renderer.GameRenderer;
+import net.minecraft.client.renderer.LevelRenderer;
 import net.minecraft.client.renderer.WeatherEffectRenderer;
 import net.minecraft.client.renderer.blockentity.AbstractSignRenderer;
 import net.minecraft.client.renderer.chunk.ChunkSectionsToRender;
@@ -32,7 +33,7 @@ final class LumiaMixinVerifier {
         try (var config = new InputStreamReader(LumiaMixinVerifier.class.getResourceAsStream(
                 "/totem-lumen.client.mixins.json"), StandardCharsets.UTF_8)) {
             var mixins = JsonParser.parseReader(config).getAsJsonObject().getAsJsonArray("client");
-            for (String name : new String[]{"LumiaTerrainMixin", "LumiaWorldDrawMixin",
+            for (String name : new String[]{"LumiaTerrainMixin", "LumiaGlassBackgroundMixin", "LumiaWorldDrawMixin",
                     "LumiaActorDrawMixin", "LumiaParticleDrawMixin", "LumiaCloudDrawMixin", "LumiaWeatherDrawMixin", "LumiaSignGlowMixin"}) {
                 if (!mixins.contains(new com.google.gson.JsonPrimitive(name))) {
                     throw new AssertionError("Missing client mixin " + name);
@@ -63,11 +64,28 @@ final class LumiaMixinVerifier {
         }
         if (!glow) throw new AssertionError("Missing glowing sign light constant");
 
+        verifyGlassCaptureOrder(pass);
+
         String terrain = "net/minecraft/client/renderer/chunk/ChunkSectionsToRender";
         call(method(ChunkSectionsToRender.class, "renderLayers"), terrain, "render",
                 "(Lnet/minecraft/client/renderer/chunk/ChunkSectionLayer;Lcom/mojang/renderpearl/api/commands/RenderPass;"
                 + "Lcom/mojang/renderpearl/api/buffers/GpuBuffer;Lcom/mojang/renderpearl/api/pipeline/IndexType;"
                 + pipeline + pipeline + ")V");
+    }
+
+    private static void verifyGlassCaptureOrder(String pass) throws Exception {
+        var main = method(LevelRenderer.class, "lambda$addMainPass$0");
+        String level = "net/minecraft/client/renderer/LevelRenderer";
+        String chunks = "Lnet/minecraft/client/renderer/chunk/ChunkSectionsToRender;";
+        String features = "Lnet/minecraft/client/renderer/feature/FeatureRenderDispatcher$PreparedFrame;";
+        int solid = call(main, level, "executeSolid", "(" + chunks + features + pass + ")V");
+        int classic = call(main, level, "executeClassicTransparency", "(" + chunks + features + pass + ")V");
+        int close = call(main, "com/mojang/renderpearl/api/commands/RenderPass", "close", "()V");
+        int oit = call(main, level, "executeOit", "(" + chunks + features + ")V");
+        int outline = call(main, level, "executeOutline", "(" + features + ")V");
+        if (!(solid < classic && classic < close && close < oit && oit < outline)) {
+            throw new AssertionError("Opaque/transparent world pass boundaries changed");
+        }
     }
 
     private static void verifyDrawSelector(Class<?> mixin, MethodNode target) {
@@ -104,10 +122,10 @@ final class LumiaMixinVerifier {
         return methods.getFirst();
     }
 
-    private static void call(MethodNode method, String owner, String name, String descriptor) {
+    private static int call(MethodNode method, String owner, String name, String descriptor) {
         for (var instruction : method.instructions) {
             if (instruction instanceof MethodInsnNode call && call.owner.equals(owner)
-                    && call.name.equals(name) && call.desc.equals(descriptor)) return;
+                    && call.name.equals(name) && call.desc.equals(descriptor)) return method.instructions.indexOf(call);
         }
         throw new AssertionError(method.name + method.desc + " does not call " + owner + "." + name + descriptor);
     }

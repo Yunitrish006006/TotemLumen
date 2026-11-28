@@ -40,16 +40,20 @@ public final class LumiaPipelineVerifier {
         int compiled = 0;
         try (var assets = new Assets(); var builder = new PipelineBuilder(frontendOnlyDevice())) {
             for (var nativePipeline : candidates) {
-                var pipeline = variant(nativePipeline);
-                if (pipeline == nativePipeline) continue;
-                var pending = builder.compilePipeline(pipeline, assets, Runnable::run).join();
-                if (pending == CompiledRenderPipeline.Pending.NULL) {
-                    failed.add(nativePipeline.getLocation() + " " + pipeline.getShaderDefines());
-                    continue;
+                var variants = new LinkedHashSet<RenderPipeline>();
+                variants.add(variant(nativePipeline));
+                variants.add(LumiaPipelines.nativeGlassFallback(nativePipeline));
+                variants.remove(nativePipeline);
+                for (var pipeline : variants) {
+                    var pending = builder.compilePipeline(pipeline, assets, Runnable::run).join();
+                    if (pending == CompiledRenderPipeline.Pending.NULL) {
+                        failed.add(pipeline.getLocation() + " " + pipeline.getShaderDefines());
+                        continue;
+                    }
+                    pending.finishCompile(); // releases the intermediate SPIR-V modules
+                    shaderFamilies.add(pipeline.getShaders().get(ShaderType.FRAGMENT).getPath());
+                    compiled++;
                 }
-                pending.finishCompile(); // releases the intermediate SPIR-V modules
-                shaderFamilies.add(pipeline.getShaders().get(ShaderType.FRAGMENT).getPath());
-                compiled++;
             }
         }
         if (!failed.isEmpty()) throw new AssertionError("Could not link Lumia pipelines " + failed);
